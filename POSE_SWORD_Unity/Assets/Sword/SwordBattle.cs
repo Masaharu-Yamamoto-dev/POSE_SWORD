@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
+using TMPro;
 
 public class SwordBattle : MonoBehaviour
 {
@@ -11,9 +12,10 @@ public class SwordBattle : MonoBehaviour
     public int attack = 10;
 
     [Header("UI設定")]
-    public Slider hpBar;
-    public Text nameText; 
-    public Text hpText;   
+    public Slider hpBar;        // 手前の緑ゲージ
+    public Slider delayHpBar;   // ▼【追加】奥の赤ゲージ
+    public TextMeshProUGUI nameText; // ▼ 【変更】Text から TextMeshProUGUI に変更
+    public TextMeshProUGUI hpText;   // ▼ 【変更】Text から TextMeshProUGUI に変更   
 
     [Header("物理・ダメージ調整")]
     public float bounceForce = 500f;
@@ -21,21 +23,53 @@ public class SwordBattle : MonoBehaviour
     public float maxImpactValue = 40f;
     public float pointyAngleThreshold = 80f;
 
-    [Header("演出（エフェクト）")]
-    public ParticleSystem critEffectPrefab;   
-    public ParticleSystem guardEffectPrefab;  
-    private SpriteRenderer spriteRenderer;    
-    private SwordController controller;       
+[Header("演出（エフェクト）")]
+public ParticleSystem critEffectPrefab;   
+public ParticleSystem guardEffectPrefab;  
+private SpriteRenderer spriteRenderer;    
+private SwordController controller;       
+
+// ▼追加：サウンド用の変数
+[Header("サウンド")]
+public AudioClip normalHitSound; // 通常ヒット音
+public AudioClip critHitSound;   // クリティカル・弱点音
+private AudioSource audioSource; // 音を鳴らすスピーカー    
+public static bool matchEnded = false;
 
     private Rigidbody2D rb;
     private bool isDead = false;
 
     void Start()
-    {
+    {   
+        matchEnded = false;
         rb = GetComponent<Rigidbody2D>();
         controller = GetComponent<SwordController>();
         Transform blade = transform.Find("Blade");
         if (blade != null) spriteRenderer = blade.GetComponent<SpriteRenderer>();
+        // ▼追加：スピーカー（AudioSource）を取得、無ければ自動で追加する
+        audioSource = GetComponent<AudioSource>();
+        if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+
+        maxHp = hp;
+        UpdateUI();
+    }
+
+    // ▼【追加】毎フレーム呼ばれる関数
+    void Update()
+    {
+        // 赤ゲージが存在し、かつ緑ゲージよりも多い場合（ダメージを受けた直後）
+        if (delayHpBar != null && hpBar != null && delayHpBar.value > hpBar.value)
+        {
+            // Lerp（線形補間）を使って、徐々に減速しながら滑らかに追従させる
+            // Time.unscaledDeltaTime を使うことで、ヒットストップで時間が止まっていてもUIは動く！
+            delayHpBar.value = Mathf.Lerp(delayHpBar.value, hpBar.value, 5f * Time.unscaledDeltaTime);
+            
+            // 誤差レベルまで近づいたらピッタリ合わせる
+            if (delayHpBar.value - hpBar.value < 0.5f)
+            {
+                delayHpBar.value = hpBar.value;
+            }
+        }
     }
 
     // ▼追加：SwordGeneratorから正しいタイミングで呼ばれる初期化関数
@@ -55,6 +89,14 @@ public class SwordBattle : MonoBehaviour
             hpBar.maxValue = maxHp;
             hpBar.value = hp;
         }
+
+        // ▼【追加】初期化時（HP満タン時）は赤ゲージも瞬時に合わせる
+        if (delayHpBar != null && hp == maxHp)
+        {
+            delayHpBar.maxValue = maxHp;
+            delayHpBar.value = hp;
+        }
+
         if (nameText != null) nameText.text = swordName;
         if (hpText != null) hpText.text = $"{hp} / {maxHp}";
     }
@@ -89,11 +131,11 @@ public class SwordBattle : MonoBehaviour
                 bool isWeakPoint = false;
                 Vector2 hitPoint = collision.GetContact(0).point;
 
-                if (myCollider is PolygonCollider2D myPoly && IsPointy(hitPoint, myPoly))
-                {
-                    damage *= 2;
-                    isCrit = true;
-                }
+                    if (myCollider is PolygonCollider2D myPoly && IsPointy(hitPoint, myPoly))
+                    {
+                        damage *= 3;
+                        isCrit = true;
+                    }
 
                 // 相手の柄（弱点）判定
                     if (targetCollider.CompareTag("Handle"))
@@ -154,6 +196,29 @@ public class SwordBattle : MonoBehaviour
         if (hp < 0) hp = 0;
         UpdateUI();
 
+        if (hp == 0)
+        {
+            matchEnded = true;
+            // 時間の奪い合いを防ぐため、進行中のヒットストップなどを全て強制キャンセル
+            StopAllCoroutines();
+            
+            // 決着時は確定で派手なクリティカル音を鳴らす
+            if (critHitSound != null) audioSource.PlayOneShot(critHitSound);
+            
+            // ド派手な決着演出コルーチンを開始
+            StartCoroutine(DefeatRoutine());
+            
+            return true; // 相手を倒したことを教える
+        }
+
+        if (isCrit || isWeakPoint)
+        {
+            if (critHitSound != null) audioSource.PlayOneShot(critHitSound);
+        }
+        else
+        {
+            if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+        }
         if (damage >= 20 || isCrit || isWeakPoint)
         {
             StartCoroutine(HitStopRoutine(0.1f));
@@ -175,9 +240,13 @@ public class SwordBattle : MonoBehaviour
 
     IEnumerator HitStopRoutine(float duration)
     {
+        if (matchEnded) yield break;
         Time.timeScale = 0.05f; 
         yield return new WaitForSecondsRealtime(duration); 
-        if (!isDead) Time.timeScale = 1f; 
+        if (!isDead && !matchEnded) 
+        {
+            Time.timeScale = 1f; 
+        }
     }
 
     // ▼変更：ド派手な決着演出

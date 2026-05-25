@@ -5,7 +5,10 @@
 /[Bb]uilds/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
-
+/Assets/TextMesh Pro/Examples & Extras
+/Assets/TextMesh Pro/Resources
+/Assets/TextMesh Pro/Shaders
+/Assets/TextMesh Pro/Sprites
 # Visual Studio / VS Code が自動生成するプロジェクトファイル
 *.csproj
 *.sln

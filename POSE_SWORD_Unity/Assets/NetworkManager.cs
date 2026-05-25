@@ -168,7 +168,7 @@ public class NetworkManager : MonoBehaviour
     public void ResetMatch(string emptyMessage)
     {
         Debug.Log("🔄 Webからの指示でシーンをリセットします！");
-        
+        if (AudioManager.Instance != null) AudioManager.Instance.ResetSoundEffects();
         // 止まっていた時間を元に戻す
         Time.timeScale = 1f; 
         

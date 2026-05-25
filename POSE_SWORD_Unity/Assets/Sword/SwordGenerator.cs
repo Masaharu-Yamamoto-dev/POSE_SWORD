@@ -36,10 +36,45 @@ public class SwordGenerator : MonoBehaviour
             swordRigidbody.centerOfMass = Vector2.zero;
         }
 
+        // =========================================================
+    // JSONから剣を生成する関数の中身（ステータス反映部分）
+    // =========================================================
+    
+    // 1. JSONのデータをパースしたとする (data という変数に入っている想定)
+    // SwordData data = JsonUtility.FromJson<SwordData>(jsonString);
+
         if (swordBattle != null)
         {
-            // ▼ 変更：作成した関数を使って初期化する
-            swordBattle.SetupStatus(data.name, data.hp, data.attack);
+            // --- 📊 パラメータの変換（マッピング） ---
+            
+            // Webから来た 1〜100 の値を安全に制限（1未満や100オーバーのバグを防ぐ）
+            float rawAttack = Mathf.Clamp(data.attack, 1f, 100f);
+            float rawWeight = Mathf.Clamp(data.weight, 1f, 100f);
+
+            // 1〜100の数値を「0.0 〜 1.0 の割合（パーセンテージ）」に直す
+            float attackRatio = (rawAttack - 1f) / 99f;
+            float weightRatio = (rawWeight - 1f) / 99f;
+
+            // ゲームの仕様に合わせた実際の数値に変換（Lerp関数）
+            // 攻撃力：割合に応じて 10 〜 100 の間に変換
+            int actualAttack = Mathf.RoundToInt(Mathf.Lerp(10f, 90f, attackRatio));
+            
+            // 重さ：割合に応じて 5.0 〜 30.0 の間に変換
+            float actualWeight = Mathf.Lerp(7f, 25f, weightRatio);
+
+            // --- ⚔️ ステータスと物理演算への適用 ---
+            
+            // HPはそのまま（100〜1000）、攻撃力は変換した値をセット
+            swordBattle.SetupStatus(data.name, data.hp, actualAttack);
+
+            // 剣のRigidbody2Dを取得して、重さ（mass）を適用
+            Rigidbody2D rb = swordBattle.GetComponent<Rigidbody2D>();
+            if (rb != null)
+            {
+                rb.mass = actualWeight;
+            }
+
+            Debug.Log($"剣の生成完了: {data.name} | 見た目の攻撃力:{rawAttack} → 実攻撃力:{actualAttack} | 見た目の重さ:{rawWeight} → 実質量:{actualWeight}");
         }
 
         if (!string.IsNullOrEmpty(data.imageData))
