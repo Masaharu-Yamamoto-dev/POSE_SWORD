@@ -1,0 +1,31 @@
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/Assets/TextMesh Pro/Examples & Extras
+/Assets/TextMesh Pro/Resources
+/Assets/TextMesh Pro/Shaders
+/Assets/TextMesh Pro/Sprites
+# Visual Studio / VS Code が自動生成するプロジェクトファイル
+*.csproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.VC.db
+
+# 各種コードエディタの隠しフォルダ
+.vs/
+.idea/
+.vscode/
+
+# OSが勝手に作るプレビュー用ファイル
+.DS_Store
+Thumbs.db
