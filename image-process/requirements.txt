@@ -1,0 +1,14 @@
+# 切り抜き
+rembg>=2.0.50
+pillow>=10.0
+numpy>=1.24
+scipy>=1.10
+scikit-image>=0.22
+onnxruntime>=1.16
+
+# 姿勢推定(HP 用)
+mediapipe>=0.10.30
+
+# API サーバ
+fastapi>=0.110
+uvicorn[standard]>=0.29
