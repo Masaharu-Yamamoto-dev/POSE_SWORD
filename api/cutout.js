@@ -8,6 +8,17 @@
  *   API_URL  ... HuggingFace Space の URL（例: https://user-pose-sword-api.hf.space）
  *   API_KEY  ... HuggingFace Space の Secrets に設定した API_KEY と同じ値
  */
+// Vercel の最大実行時間を延長（画像処理は時間がかかるため）
+// BodyParserの上限も引き上げ（base64画像は大きい）
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
+  },
+  maxDuration: 60,
+};
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed" });
