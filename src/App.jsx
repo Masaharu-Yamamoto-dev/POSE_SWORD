@@ -194,13 +194,26 @@ export default function PoseSwordWeb() {
         case "EXCHANGE_SWORD":
           console.log("【受信】相手の剣データを確認しました");
           console.log("  相手の剣:", data.swordData);
-          setEnemySwordData(data.swordData);
+          const enemyData1 = { ...data.swordData };
+          if (enemyData1.imageStr && !enemyData1.imageSrc) {
+            // imageSrc を生成（base64文字列をDataURL形式に）
+            enemyData1.imageSrc = enemyData1.imageStr.startsWith("data:") 
+              ? enemyData1.imageStr 
+              : "data:image/png;base64," + enemyData1.imageStr;
+          }
+          setEnemySwordData(enemyData1);
           break;
 
         case "SYNC_STATE": 
           if (data.swordData) {
             console.log("【受信】SYNC_STATE:", data);
-            setEnemySwordData(data.swordData);
+            const enemyData2 = { ...data.swordData };
+            if (enemyData2.imageStr && !enemyData2.imageSrc) {
+              enemyData2.imageSrc = enemyData2.imageStr.startsWith("data:") 
+                ? enemyData2.imageStr 
+                : "data:image/png;base64," + enemyData2.imageStr;
+            }
+            setEnemySwordData(enemyData2);
           }
           setIsEnemyReady(data.isReady);
           break;
@@ -269,8 +282,11 @@ export default function PoseSwordWeb() {
     
     try {
       const mode = currentRole === "HOST" ? 1 : 0;
+      console.log(`📡 SetHostMode(${mode}) を送信: ${currentRole === "HOST" ? "HOST" : "CLIENT"}`);
       sendMessage('NetworkManager', 'SetHostMode', mode);
+      console.log(`📡 StartBattle を送信...`);
       sendMessage('SceneController', 'StartBattle', JSON.stringify(startJson));
+      console.log(`✅ バトル開始コマンド送信完了`);
     } catch (e) {
       console.warn("※Unity未ロードによるSendMessageスキップ", e);
     }
@@ -307,13 +323,15 @@ export default function PoseSwordWeb() {
       return response.json();
     })
     .then((data) => {
-      const resultImageUrl = "data:image/png;base64," + data.imageData;
+      // 【修正】imageStr は Base64 文字列だけ（Unity用）
+      // UI表示用の URL はコンポーネント内で生成する
       setMySwordData({
         name: role === "HOST" ? "ホストブレード" : "クライアントソード",
         hp: data.params.hp,
         attack: data.params.attack,
         weight: data.params.weight,
-        imageStr: resultImageUrl
+        imageStr: data.imageData,  // ← Base64文字列のみ
+        imageSrc: "data:image/png;base64," + data.imageData  // ← React UI用
       });
       setIsCrafting(false);
       setStep("MATCHING");
@@ -377,7 +395,7 @@ export default function PoseSwordWeb() {
               {mySwordData && (
                 <div style={styles.swordCard}>
                   <h3 style={{ margin: '0 0 10px 0', color: '#333' }}>自分の剣</h3>
-                  <img src={mySwordData.imageStr} alt="My Sword" style={styles.previewImage} />
+                  <img src={mySwordData.imageSrc || mySwordData.imageStr} alt="My Sword" style={styles.previewImage} />
                   <p style={styles.swordName}>{mySwordData.name}</p>
                   <div style={styles.statsBox}>
                     <span>HP: {mySwordData.hp}</span>
@@ -396,7 +414,7 @@ export default function PoseSwordWeb() {
                   <h3 style={{ margin: '0 0 10px 0', color: '#ff4444' }}>相手の剣</h3>
                   {enemySwordData ? (
                     <>
-                      <img src={enemySwordData.imageStr} alt="Enemy Sword" style={styles.previewImage} />
+                      <img src={enemySwordData.imageSrc || enemySwordData.imageStr} alt="Enemy Sword" style={styles.previewImage} />
                       <p style={styles.swordName}>{enemySwordData.name}</p>
                       <div style={styles.statsBox}>
                         <span>HP: {enemySwordData.hp}</span>

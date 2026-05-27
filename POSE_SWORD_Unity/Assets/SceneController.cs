@@ -46,6 +46,13 @@ public class SceneController : MonoBehaviour
             NetworkManager.Instance.hostSword.transform.position = hostPos;
             NetworkManager.Instance.clientSword.transform.position = clientPos;
             Debug.Log($"📍 配置: Host={hostPos}, Client={clientPos}");
+            
+            // 【修正】敵の位置をSwordControllerに教える
+            var hostController = NetworkManager.Instance.hostSword.GetComponent<SwordController>();
+            var clientController = NetworkManager.Instance.clientSword.GetComponent<SwordController>();
+            if (hostController) hostController.enemyTarget = NetworkManager.Instance.clientSword.transform;
+            if (clientController) clientController.enemyTarget = NetworkManager.Instance.hostSword.transform;
+            Debug.Log("✅ 敵の参照を設定しました");
         }
 
         // --- 剣の生成 ---

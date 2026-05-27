@@ -86,28 +86,46 @@ public class SwordGenerator : MonoBehaviour
 
         if (!string.IsNullOrEmpty(data.imageStr))
         {
-            byte[] imageBytes = Convert.FromBase64String(data.imageStr);
-            Texture2D tex = new Texture2D(2, 2);
-            tex.LoadImage(imageBytes); 
-
-            float ppu = tex.height / desiredHeight; // ピクセル密度を自動計算
-
-            Sprite newSprite = Sprite.Create(
-                tex, 
-                new Rect(0, 0, tex.width, tex.height), 
-                new Vector2(0.5f, 0.0f),
-                ppu // ← 計算した密度を指定
-            );
-
-            if (targetSpriteRenderer != null)
+            string base64String = data.imageStr;
+            
+            // 【修正】DataURL形式（data:image/png;base64,xxxxx）の場合は base64部分を抽出
+            if (base64String.Contains(","))
             {
-                targetSpriteRenderer.sprite = newSprite;
+                base64String = base64String.Split(',')[1];
+                Debug.Log("📌 DataURL形式を検出して Base64 に変換しました");
+            }
+            
+            try
+            {
+                byte[] imageBytes = Convert.FromBase64String(base64String);
+                Texture2D tex = new Texture2D(2, 2);
+                tex.LoadImage(imageBytes); 
 
-                if (bladeCollider != null)
+                float ppu = tex.height / desiredHeight; // ピクセル密度を自動計算
+
+                Sprite newSprite = Sprite.Create(
+                    tex, 
+                    new Rect(0, 0, tex.width, tex.height), 
+                    new Vector2(0.5f, 0.0f),
+                    ppu // ← 計算した密度を指定
+                );
+
+                if (targetSpriteRenderer != null)
                 {
-                    Destroy(bladeCollider);
-                    bladeCollider = targetSpriteRenderer.gameObject.AddComponent<PolygonCollider2D>();
+                    targetSpriteRenderer.sprite = newSprite;
+                    Debug.Log($"✅ 剣のスプライトを設定しました: {tex.width}x{tex.height}");
+
+                    if (bladeCollider != null)
+                    {
+                        Destroy(bladeCollider);
+                        bladeCollider = targetSpriteRenderer.gameObject.AddComponent<PolygonCollider2D>();
+                        Debug.Log("✅ PolygonCollider2D を再生成しました");
+                    }
                 }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ 画像の読み込みに失敗: {e.Message}\n Base64文字列: {base64String.Substring(0, Mathf.Min(50, base64String.Length))}...");
             }
         }
     }
