@@ -35,15 +35,13 @@ export default function PoseSwordWeb() {
   const [isReady, setIsReady] = useState(false);
   const [isEnemyReady, setIsEnemyReady] = useState(false);
   const [countdown, setCountdown] = useState(null);
-
-  // 【追加】システム通知用のState（alertの代わり）
   const [systemMessage, setSystemMessage] = useState("");
 
   const { unityProvider, sendMessage, isLoaded } = useUnityContext({
-    loaderUrl: "/Build/PoseSword.loader.js",
-    dataUrl: "/Build/PoseSword.data",
-    frameworkUrl: "/Build/PoseSword.framework.js",
-    codeUrl: "/Build/PoseSword.wasm",
+    loaderUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.0.loader.js",
+    dataUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.0.data",
+    frameworkUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.0.framework.js",
+    codeUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.0.wasm",
   });
 
   const handleGameOverRef = useRef(null);
@@ -57,7 +55,6 @@ export default function PoseSwordWeb() {
       damageTaken: currentRole === "HOST" ? (clientWon ? 100 : 0) : (clientWon ? 0 : 100)
     });
     
-    // 【修正】準備状態のリセットは「ゲームオーバー時（リザルト画面突入時）」に行う
     setIsReady(false);
     setIsEnemyReady(false);
     setCountdown(null);
@@ -116,9 +113,17 @@ export default function PoseSwordWeb() {
     }
   }, [countdown]);
 
-  // 【修正】ロビーに戻る関数（通知メッセージを受け取れるように）
+  // 【追加】通信が繋がった瞬間に、お互いの剣のデータを送り合う（プレビュー用）
+  useEffect(() => {
+    if (connection && mySwordRef.current) {
+      // 少しだけ待ってから送る（接続直後のパケットロス防止）
+      setTimeout(() => {
+        connection.send({ type: "EXCHANGE_SWORD", swordData: mySwordRef.current });
+      }, 500);
+    }
+  }, [connection]);
+
   const resetToLobby = (msg = "") => {
-    // 自分が意図的に切断した場合は、自身のon('close')イベントを無視させる
     if (peerRef.current) {
       peerRef.current.destroy(); 
       peerRef.current = null;
@@ -132,7 +137,7 @@ export default function PoseSwordWeb() {
     setMySwordData(null);
     setEnemySwordData(null);
     setRole(null);
-    setSystemMessage(msg); // 画面に表示するメッセージをセット
+    setSystemMessage(msg);
     setStep("LOBBY");
   };
 
@@ -140,7 +145,7 @@ export default function PoseSwordWeb() {
     if (connRef.current) {
       connRef.current.send({ type: "LEAVE" });
     }
-    resetToLobby(""); // 自分から抜けた場合はエラーメッセージを表示しない
+    resetToLobby(""); 
   };
 
   const handleCreateRoom = () => {
@@ -171,15 +176,19 @@ export default function PoseSwordWeb() {
       const currentRole = roleRef.current;
 
       switch (data.type) {
-        // 【修正】単純なREADYではなく、状態を同期するSYNC_STATEに変更
+        // 【追加】プレビュー用の剣データを受信
+        case "EXCHANGE_SWORD":
+          console.log("【受信】相手の剣データを確認しました");
+          setEnemySwordData(data.swordData);
+          break;
+
         case "SYNC_STATE": 
-          console.log("【受信】相手の準備状態が更新されました:", data.isReady);
           if (data.swordData) setEnemySwordData(data.swordData);
           setIsEnemyReady(data.isReady);
           break;
 
         case "LEAVE":
-          resetToLobby("相手が部屋を退出しました。"); // alertではなく画面メッセージ
+          resetToLobby("相手が部屋を退出しました。"); 
           break;
 
         case "INPUT":
@@ -201,7 +210,6 @@ export default function PoseSwordWeb() {
       }
     });
 
-    // 【修正】通信が切れた時、まだPeerが存在している場合のみエラーを表示
     conn.on('close', () => {
       if (peerRef.current && stepRef.current !== "LOBBY") {
         resetToLobby("通信が切断されました。");
@@ -229,8 +237,7 @@ export default function PoseSwordWeb() {
   const handleReady = () => {
     setIsReady(true);
     if (connection && mySwordRef.current) {
-      // 自分の準備完了状態を相手に同期
-      connection.send({ type: "SYNC_STATE", isReady: true, swordData: mySwordRef.current });
+      connection.send({ type: "SYNC_STATE", isReady: true });
     }
   };
 
@@ -239,16 +246,39 @@ export default function PoseSwordWeb() {
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
     context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    const base64Image = canvas.toDataURL('image/jpeg');
+    
+    const base64Full = canvas.toDataURL('image/jpeg');
+    const base64DataOnly = base64Full.split(',')[1]; 
 
-    setTimeout(() => {
+    // ※ PythonAPIのIPアドレスに書き換えてください（例: 192.168.x.x）
+    const pythonApiUrl = 'http://127.0.0.1:8000/cutout';
+
+    fetch(pythonApiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageData: base64DataOnly }) 
+    })
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTPエラー: ${response.status}`);
+      return response.json();
+    })
+    .then((data) => {
+      const resultImageUrl = "data:image/png;base64," + data.imageData;
       setMySwordData({
         name: role === "HOST" ? "ホストブレード" : "クライアントソード",
-        hp: 100, attack: 20, weight: 10, imageStr: base64Image
+        hp: data.params.hp,
+        attack: data.params.attack,
+        weight: data.params.weight,
+        imageStr: resultImageUrl
       });
       setIsCrafting(false);
       setStep("MATCHING");
-    }, 1500);
+    })
+    .catch((error) => {
+      console.error("PythonAPI通信エラー:", error);
+      alert("AIサーバーとの通信に失敗しました。");
+      setIsCrafting(false);
+    });
   };
 
   const renderScreen = () => {
@@ -257,14 +287,7 @@ export default function PoseSwordWeb() {
         return (
           <div style={styles.container}>
             <h1>POSE SWORD</h1>
-            
-            {/* 【追加】エラーや退出メッセージをここに表示 */}
-            {systemMessage && (
-              <div style={styles.errorMessage}>
-                ⚠️ {systemMessage}
-              </div>
-            )}
-
+            {systemMessage && <div style={styles.errorMessage}>⚠️ {systemMessage}</div>}
             <button style={styles.button} onClick={handleCreateRoom}>部屋を作る (Host)</button>
             <button style={styles.button} onClick={handleJoinRoom}>部屋に入る (Client)</button>
           </div>
@@ -289,36 +312,74 @@ export default function PoseSwordWeb() {
         return (
           <div style={styles.container}>
             <h2>マッチング待機</h2>
-            <p>あなたのID: <strong style={{ color: 'blue' }}>{myPeerId || "取得中..."}</strong></p>
-            {role === "HOST" && !connection && <p>このIDをClientに教えてください...</p>}
-            {role === "CLIENT" && !connection && (
+            
+            {/* 接続前の表示 */}
+            {!connection && (
               <div>
-                <input type="text" value={targetId} onChange={(e) => setTargetId(e.target.value)} placeholder="HostのIDを入力" />
-                <button style={styles.button} onClick={connectToHost}>接続</button>
+                <p>あなたのID: <strong style={{ color: 'blue' }}>{myPeerId || "取得中..."}</strong></p>
+                {role === "HOST" && <p>このIDをClientに教えてください...</p>}
+                {role === "CLIENT" && (
+                  <div>
+                    <input type="text" value={targetId} onChange={(e) => setTargetId(e.target.value)} placeholder="HostのIDを入力" />
+                    <button style={styles.button} onClick={connectToHost}>接続</button>
+                  </div>
+                )}
               </div>
             )}
             
+            {/* 【追加】剣のプレビュー画面（自分と相手） */}
+            <div style={styles.previewContainer}>
+              {/* 自分の剣 */}
+              {mySwordData && (
+                <div style={styles.swordCard}>
+                  <h3 style={{ margin: '0 0 10px 0', color: '#333' }}>自分の剣</h3>
+                  <img src={mySwordData.imageStr} alt="My Sword" style={styles.previewImage} />
+                  <p style={styles.swordName}>{mySwordData.name}</p>
+                  <div style={styles.statsBox}>
+                    <span>HP: {mySwordData.hp}</span>
+                    <span>攻撃: {mySwordData.attack}</span>
+                    <span>重さ: {mySwordData.weight}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* VSマーク */}
+              {connection && <div style={styles.vsText}>VS</div>}
+
+              {/* 相手の剣 */}
+              {connection && (
+                <div style={styles.swordCard}>
+                  <h3 style={{ margin: '0 0 10px 0', color: '#ff4444' }}>相手の剣</h3>
+                  {enemySwordData ? (
+                    <>
+                      <img src={enemySwordData.imageStr} alt="Enemy Sword" style={styles.previewImage} />
+                      <p style={styles.swordName}>{enemySwordData.name}</p>
+                      <div style={styles.statsBox}>
+                        <span>HP: {enemySwordData.hp}</span>
+                        <span>攻撃: {enemySwordData.attack}</span>
+                        <span>重さ: {enemySwordData.weight}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <p>データ受信中...</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 接続後の準備・カウントダウンUI */}
             {connection && (
               <div style={styles.connectedBox}>
-                <h3 style={{ color: 'green' }}>✅ 接続完了！</h3>
-
                 {countdown !== null ? (
-                  <div>
-                    <h2 style={{ fontSize: '48px', color: 'red' }}>
-                      {countdown > 0 ? countdown : "START!"}
-                    </h2>
-                  </div>
+                  <h2 style={{ fontSize: '48px', color: 'red', margin: '0' }}>{countdown > 0 ? countdown : "START!"}</h2>
                 ) : (
                   <div>
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '20px 0' }}>
-                      <div style={styles.readyBox(isReady)}>
-                        自分: {isReady ? "準備OK!" : "準備中..."}
-                      </div>
-                      <div style={styles.readyBox(isEnemyReady)}>
-                        相手: {isEnemyReady ? "準備OK!" : "準備中..."}
-                      </div>
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '10px 0 20px 0' }}>
+                      <div style={styles.readyBox(isReady)}>自分: {isReady ? "準備OK!" : "準備中..."}</div>
+                      <div style={styles.readyBox(isEnemyReady)}>相手: {isEnemyReady ? "準備OK!" : "準備中..."}</div>
                     </div>
-
                     {!isReady ? (
                       <button style={{ ...styles.button, backgroundColor: 'orange', color: 'white' }} onClick={handleReady}>
                         準備OK（バトルへ）
@@ -326,19 +387,14 @@ export default function PoseSwordWeb() {
                     ) : (
                       <p style={{ fontWeight: 'bold' }}>相手の準備を待っています...</p>
                     )}
-
-                    <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white', marginTop: '30px' }} onClick={handleLeave}>
-                      退出する
-                    </button>
                   </div>
                 )}
               </div>
             )}
-            {!connection && (
-              <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white', marginTop: '30px' }} onClick={() => resetToLobby("")}>
-                キャンセル
-              </button>
-            )}
+            
+            <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white', marginTop: '20px' }} onClick={connection ? handleLeave : () => resetToLobby("")}>
+              {connection ? "退出する" : "キャンセル"}
+            </button>
           </div>
         );
 
@@ -350,28 +406,19 @@ export default function PoseSwordWeb() {
               <Unity unityProvider={unityProvider} style={{ width: '100%', height: '100%' }} />
             </div>
             {!isLoaded && <p style={{color: '#ff4444', fontWeight: 'bold'}}>※Unity未ロード（ダミー画面）</p>}
-
             <div style={styles.debugPanel}>
               <h3>🛠 Unity連携デバッグパネル</h3>
-              
               <button style={styles.button} onClick={() => {
                 if (role === "HOST") {
-                  window.ReactApp.receiveFromUnity("SYNC", JSON.stringify({
-                    hostSword: { hp: 50 }, clientSword: { hp: 100 }
-                  }));
+                  window.ReactApp.receiveFromUnity("SYNC", JSON.stringify({ hostSword: { hp: 50 }, clientSword: { hp: 100 } }));
                 } else {
                   window.ReactApp.receiveFromUnity("INPUT", JSON.stringify({ action: "JUMP" }));
                 }
               }}>
                 {role === "HOST" ? "【Host】UnityがSYNCを送るフリ" : "【Client】UnityがINPUTを送るフリ"}
               </button>
-
               <button style={{...styles.button, backgroundColor: '#333', color: '#fff'}} onClick={() => {
-                if (role === "HOST") {
-                  window.ReactApp.receiveFromUnity("SYNC", JSON.stringify({
-                    hostSword: { hp: 0 }, clientSword: { hp: 100 }
-                  }));
-                }
+                if (role === "HOST") window.ReactApp.receiveFromUnity("SYNC", JSON.stringify({ hostSword: { hp: 0 }, clientSword: { hp: 100 } }));
               }}>
                 強制決着テスト（Host専用）
               </button>
@@ -386,23 +433,17 @@ export default function PoseSwordWeb() {
             <h3>勝者: {matchResult.winnerName}</h3>
             <p>与えたダメージ: {matchResult.damageDealt}</p>
             <p>受けたダメージ: {matchResult.damageTaken}</p>
-            
             <div style={{ marginTop: '30px' }}>
               <button style={{ ...styles.button, backgroundColor: 'orange', color: 'white' }} onClick={() => {
                 try { sendMessage('GameManager', 'ResetMatch', ''); } catch(e) {}
                 setStep("MATCHING");
-                
-                // 【追加】自分が「もう一度遊ぶ」を押して未準備になったことを相手に同期
                 if (connRef.current && mySwordRef.current) {
-                  connRef.current.send({ type: "SYNC_STATE", isReady: false, swordData: mySwordRef.current });
+                  connRef.current.send({ type: "SYNC_STATE", isReady: false });
                 }
               }}>
                 もう一度遊ぶ（待機画面へ）
               </button>
-
-              <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white' }} onClick={handleLeave}>
-                退出する
-              </button>
+              <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white' }} onClick={handleLeave}>退出する</button>
             </div>
           </div>
         );
@@ -410,31 +451,26 @@ export default function PoseSwordWeb() {
     }
   };
 
-  return <div style={{ fontFamily: 'sans-serif', textAlign: 'center' }}>{renderScreen()}</div>;
+  return <div style={{ fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#f5f5f5', minHeight: '100vh' }}>{renderScreen()}</div>;
 }
 
 const styles = {
-  container: { padding: '50px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
-  button: { padding: '10px 20px', margin: '10px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px' },
-  connectedBox: { marginTop: '30px', padding: '20px', backgroundColor: '#f0fff0', borderRadius: '8px' },
+  container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  button: { padding: '10px 20px', margin: '10px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px', fontWeight: 'bold', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' },
+  connectedBox: { marginTop: '10px', padding: '10px 20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
   video: { width: '400px', borderRadius: '8px', backgroundColor: '#000', marginBottom: '20px' },
   unityContainer: { width: '800px', height: '450px', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555' },
   debugPanel: { marginTop: '20px', padding: '15px', border: '2px dashed gray', borderRadius: '8px', backgroundColor: '#f9f9f9', textAlign: 'center' },
   readyBox: (isReady) => ({
-    padding: '10px 20px',
-    border: `2px solid ${isReady ? 'green' : 'gray'}`,
-    backgroundColor: isReady ? '#e0ffe0' : '#f0f0f0',
-    borderRadius: '8px',
-    fontWeight: 'bold',
-    minWidth: '100px'
+    padding: '10px 20px', border: `2px solid ${isReady ? '#4CAF50' : '#9e9e9e'}`, backgroundColor: isReady ? '#e8f5e9' : '#f5f5f5', borderRadius: '8px', fontWeight: 'bold', minWidth: '100px'
   }),
-  errorMessage: { // 追加されたエラーメッセージ用のスタイル
-    padding: '15px 25px', 
-    backgroundColor: '#ffdddd', 
-    color: '#cc0000', 
-    borderRadius: '8px', 
-    marginBottom: '20px', 
-    fontWeight: 'bold',
-    border: '1px solid #cc0000'
-  }
+  errorMessage: { padding: '15px 25px', backgroundColor: '#ffdddd', color: '#cc0000', borderRadius: '8px', marginBottom: '20px', fontWeight: 'bold', border: '1px solid #cc0000' },
+  
+  // 【追加】プレビュー表示用のスタイル
+  previewContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', margin: '20px 0', width: '100%', maxWidth: '800px' },
+  swordCard: { flex: 1, backgroundColor: '#fff', borderRadius: '12px', padding: '15px', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', border: '2px solid #e0e0e0' },
+  previewImage: { width: '100%', height: '200px', objectFit: 'contain', backgroundColor: '#f0f0f0', borderRadius: '8px', marginBottom: '10px' },
+  swordName: { fontSize: '20px', fontWeight: 'bold', margin: '5px 0' },
+  statsBox: { display: 'flex', justifyContent: 'center', gap: '10px', fontSize: '14px', fontWeight: 'bold', color: '#555', backgroundColor: '#f9f9f9', padding: '5px 10px', borderRadius: '5px', width: '100%' },
+  vsText: { fontSize: '36px', fontWeight: '900', fontStyle: 'italic', color: '#ff9800', textShadow: '2px 2px 0px #000' }
 };
