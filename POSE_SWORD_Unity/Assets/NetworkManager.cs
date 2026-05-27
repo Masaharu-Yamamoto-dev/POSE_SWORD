@@ -29,8 +29,7 @@ public class NetworkManager : MonoBehaviour
     public static NetworkManager Instance;
 
     [DllImport("__Internal")]
-    private static extern void SendToWeb(string type, string jsonString);
-
+private static extern void SendToReact(string type, string jsonString);
     [Header("ネットワーク設定")]
     public bool isHost = true;         // Web側から試合開始時に指定される
     public GameObject hostSword;       // 左側：PlayerSword
@@ -83,7 +82,7 @@ public class NetworkManager : MonoBehaviour
     public void SendData(string type, string jsonString)
     {
         #if UNITY_WEBGL && !UNITY_EDITOR
-            SendToWeb(type, jsonString);
+            SendToReact(type, jsonString);
         #endif
     }
 
@@ -176,5 +175,36 @@ public class NetworkManager : MonoBehaviour
         UnityEngine.SceneManagement.SceneManager.LoadScene(
             UnityEngine.SceneManagement.SceneManager.GetActiveScene().name
         );
+    }
+    // ========================================================
+    // ▼ 【追加】WebのJS側から試合開始時に呼ばれる関数
+    // ========================================================
+    public void StartBattle(string jsonString)
+    {
+        Debug.Log("🌐 Webから対戦用・両者の剣データを受信しました！");
+
+        // 1. 親の構造体(BattleInitData)としてパース
+        BattleInitData initData = JsonUtility.FromJson<BattleInitData>(jsonString);
+
+        // 2. 左右の剣にある SwordGenerator を取得して、それぞれ個別に剣を組み立てさせる
+        if (hostSword != null)
+        {
+            var gen = hostSword.GetComponent<SwordGenerator>();
+            if (gen != null) gen.GenerateSwordFromJson(JsonUtility.ToJson(initData.hostSword));
+        }
+
+        if (clientSword != null)
+        {
+            var gen = clientSword.GetComponent<SwordGenerator>();
+            if (gen != null) gen.GenerateSwordFromJson(JsonUtility.ToJson(initData.clientSword));
+            
+            // クライアント側（右の敵）の見た目を左向きに反転させる処理
+            Vector3 scale = clientSword.transform.localScale;
+            scale.x = -Mathf.Abs(scale.x);
+            clientSword.transform.localScale = scale;
+        }
+        
+        // 3. 準備ができたので待機シーンからバトル本番へ（もしシーンを分けている場合）
+        // UnityEngine.SceneManagement.SceneManager.LoadScene("BattleScene");
     }
 }
