@@ -352,8 +352,9 @@ export default function PoseSwordWeb() {
     const base64Full = canvas.toDataURL('image/jpeg');
     const base64DataOnly = base64Full.split(',')[1]; 
 
-    // ※ PythonAPIのIPアドレスに書き換えてください（例: 192.168.x.x）
-    const pythonApiUrl = 'http://127.0.0.1:8000/cutout';
+    // Vercel のサーバーサイド関数を経由する（APIキーはサーバー側で付与）
+    // ローカル開発時は vite.config.js のプロキシ設定で 8000 番ポートに転送される
+    const pythonApiUrl = '/api/cutout';
 
     fetch(pythonApiUrl, {
       method: 'POST',

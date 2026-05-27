@@ -1,3 +1,13 @@
+---
+title: POSE SWORD API
+emoji: ⚔️
+colorFrom: blue
+colorTo: red
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # POSE_SWORD — 人物切り抜き + ステータス生成
 
 JSON で受け取った base64 画像から人物を AI（rembg）で自動検出して背景透過 PNG に切り抜き、
