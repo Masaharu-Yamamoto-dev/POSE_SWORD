@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // ローカル開発時: /api/cutout → http://127.0.0.1:8000/cutout に転送
+      // ローカル開発用: /api/cutout → ローカルの Python サーバーに転送
+      // Vercel 本番環境では api/cutout.js が代わりに動く（このプロキシは使われない）
       '/api/cutout': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
