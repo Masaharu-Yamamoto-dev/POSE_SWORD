@@ -107,7 +107,14 @@ private static extern void SendToReact(string type, string jsonString);
                 hostSword = GetSyncData(hostSword),
                 clientSword = GetSyncData(clientSword)
             };
-            SendData("SYNC", JsonUtility.ToJson(sync));
+            string syncJson = JsonUtility.ToJson(sync);
+            SendData("SYNC", syncJson);
+            
+            // 【デバッグ】毎100フレームおきに同期ログを出力
+            if (Time.frameCount % 100 == 0)
+            {
+                Debug.Log($"📡 SYNC送信: Host HP={sync.hostSword.hp}, Client HP={sync.clientSword.hp}");
+            }
         }
     }
 
@@ -131,10 +138,13 @@ private static extern void SendToReact(string type, string jsonString);
     public void ReceiveInput(string jsonString)
     {
         if (!isHost) return; 
+        Debug.Log($"🎮 ReceiveInput: {jsonString}");
+        
         if (clientSword != null)
         {
             // 受信した瞬間に、Clientの剣をジャンプさせる！
             clientSword.GetComponent<SwordController>().NetworkJump();
+            Debug.Log("✅ クライアント側の剣がジャンプしました！");
         }
     }
 
@@ -142,10 +152,13 @@ private static extern void SendToReact(string type, string jsonString);
     public void SyncTransform(string jsonString)
     {
         if (isHost) return; 
+        Debug.Log($"🔄 SyncTransform受信: {jsonString}");
 
         SyncMessage sync = JsonUtility.FromJson<SyncMessage>(jsonString);
         ApplySyncToGameObject(hostSword, sync.hostSword);
         ApplySyncToGameObject(clientSword, sync.clientSword);
+        
+        Debug.Log($"✅ 同期完了: Host HP={sync.hostSword.hp}, Client HP={sync.clientSword.hp}");
     }
 
     void ApplySyncToGameObject(GameObject obj, SwordSyncData data)
@@ -177,34 +190,6 @@ private static extern void SendToReact(string type, string jsonString);
         );
     }
     // ========================================================
-    // ▼ 【追加】WebのJS側から試合開始時に呼ばれる関数
+    // ▼ WebのJS側から試合開始時には SceneController.StartBattle が呼ばれる
     // ========================================================
-    public void StartBattle(string jsonString)
-    {
-        Debug.Log("🌐 Webから対戦用・両者の剣データを受信しました！");
-
-        // 1. 親の構造体(BattleInitData)としてパース
-        BattleInitData initData = JsonUtility.FromJson<BattleInitData>(jsonString);
-
-        // 2. 左右の剣にある SwordGenerator を取得して、それぞれ個別に剣を組み立てさせる
-        if (hostSword != null)
-        {
-            var gen = hostSword.GetComponent<SwordGenerator>();
-            if (gen != null) gen.GenerateSwordFromJson(JsonUtility.ToJson(initData.hostSword));
-        }
-
-        if (clientSword != null)
-        {
-            var gen = clientSword.GetComponent<SwordGenerator>();
-            if (gen != null) gen.GenerateSwordFromJson(JsonUtility.ToJson(initData.clientSword));
-            
-            // クライアント側（右の敵）の見た目を左向きに反転させる処理
-            Vector3 scale = clientSword.transform.localScale;
-            scale.x = -Mathf.Abs(scale.x);
-            clientSword.transform.localScale = scale;
-        }
-        
-        // 3. 準備ができたので待機シーンからバトル本番へ（もしシーンを分けている場合）
-        // UnityEngine.SceneManagement.SceneManager.LoadScene("BattleScene");
-    }
 }

@@ -38,10 +38,10 @@ export default function PoseSwordWeb() {
   const [systemMessage, setSystemMessage] = useState("");
 
   const { unityProvider, sendMessage, isLoaded } = useUnityContext({
-    loaderUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.0.loader.js",
-    dataUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.0.data",
-    frameworkUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.0.framework.js",
-    codeUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.0.wasm",
+    loaderUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.1.loader.js",
+    dataUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.1.data",
+    frameworkUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.1.framework.js",
+    codeUrl: "../POSE_SWORD_Unity/Builds/ver1.0/Build/ver1.1.wasm",
   });
 
   const handleGameOverRef = useRef(null);
@@ -66,17 +66,25 @@ export default function PoseSwordWeb() {
   useEffect(() => {
     window.ReactApp = {
       receiveFromUnity: (type, jsonString) => {
+        console.log(`🎮 [Unity→Web] タイプ: ${type}, JSON: ${jsonString.substring(0, 100)}...`);
         const data = JSON.parse(jsonString);
         const currentRole = roleRef.current;
         const currentConn = connRef.current;
 
         if (type === "SYNC" && currentRole === "HOST") {
-          if (currentConn) currentConn.send({ type: "SYNC", ...data });
+          if (currentConn) {
+            console.log("📤 SYNCをPeerJsで送信します");
+            currentConn.send({ type: "SYNC", ...data });
+          } else {
+            console.warn("⚠️ SYNC送信エラー: 接続がありません");
+          }
           if (data.hostSword.hp <= 0 || data.clientSword.hp <= 0) {
+            console.warn("🏁 ゲームオーバー！");
             if (handleGameOverRef.current) handleGameOverRef.current(data);
           }
         } 
         else if (type === "INPUT" && currentConn && currentRole === "CLIENT") {
+          console.log("📤 INPUTをPeerJsで送信します");
           currentConn.send({ type: "INPUT", ...data });
         }
       }
@@ -108,7 +116,13 @@ export default function PoseSwordWeb() {
         setCountdown(null);
         setIsReady(false);
         setIsEnemyReady(false);
-        launchUnityBattle(roleRef.current, mySwordRef.current, enemySwordRef.current);
+        // 【修正】バトル開始前に両方のデータが揃っているか確認
+        if (mySwordRef.current && enemySwordRef.current) {
+          launchUnityBattle(roleRef.current, mySwordRef.current, enemySwordRef.current);
+        } else {
+          console.error("❌ バトル開始エラー：剣データが不足", { my: mySwordRef.current, enemy: enemySwordRef.current });
+          alert("剣データの準備ができていません。");
+        }
       }
     }
   }, [countdown]);
@@ -179,33 +193,50 @@ export default function PoseSwordWeb() {
         // 【追加】プレビュー用の剣データを受信
         case "EXCHANGE_SWORD":
           console.log("【受信】相手の剣データを確認しました");
+          console.log("  相手の剣:", data.swordData);
           setEnemySwordData(data.swordData);
           break;
 
         case "SYNC_STATE": 
-          if (data.swordData) setEnemySwordData(data.swordData);
+          if (data.swordData) {
+            console.log("【受信】SYNC_STATE:", data);
+            setEnemySwordData(data.swordData);
+          }
           setIsEnemyReady(data.isReady);
           break;
 
         case "LEAVE":
+          console.warn("【受信】相手が退出しました");
           resetToLobby("相手が部屋を退出しました。"); 
           break;
 
         case "INPUT":
           if (currentRole === "HOST") {
-            try { sendMessage('GameManager', 'ReceiveInput', JSON.stringify(data)); } catch(e) {}
+            try { 
+              console.log("【受信INPUT】Hostへ転送します", data);
+              sendMessage('NetworkManager', 'ReceiveInput', JSON.stringify(data)); 
+            } catch(e) {
+              console.error("INPUT転送エラー:", e);
+            }
           }
           break;
 
         case "SYNC":
           if (currentRole === "CLIENT") {
-            try { sendMessage('GameManager', 'SyncTransform', JSON.stringify(data)); } catch(e) {}
+            try { 
+              console.log("【受信SYNC】Clientへ同期します", data);
+              sendMessage('NetworkManager', 'SyncTransform', JSON.stringify(data)); 
+            } catch(e) {
+              console.error("SYNC転送エラー:", e);
+            }
             if (data.hostSword.hp <= 0 || data.clientSword.hp <= 0) {
+              console.warn("【ゲームオーバー】", data);
               if (handleGameOverRef.current) handleGameOverRef.current(data);
             }
           }
           break;
         default:
+          console.log("【受信】不明なメッセージタイプ:", data.type);
           break;
       }
     });
@@ -218,17 +249,30 @@ export default function PoseSwordWeb() {
   };
 
   const launchUnityBattle = (currentRole, myData, enemyData) => {
+    // 【修正】ホスト/クライアントのデータ割り当てを正しくする
+    // hostSwordはHost側、clientSwordはClient側と決まっている
+    const hostData = currentRole === "HOST" ? myData : enemyData;
+    const clientData = currentRole === "CLIENT" ? myData : enemyData;
+    
+    if (!hostData || !clientData) {
+      console.error("❌ バトル開始エラー：剣データが不足しています", { hostData, clientData });
+      alert("両方の剣データが準備できていません。もう一度やり直してください。");
+      return;
+    }
+    
     const startJson = {
-      hostSword: currentRole === "HOST" ? myData : enemyData,
-      clientSword: currentRole === "CLIENT" ? myData : enemyData
+      hostSword: hostData,
+      clientSword: clientData
     };
+    
+    console.log("🎮 バトル開始:", { role: currentRole, hostData: hostData.name, clientData: clientData.name });
     
     try {
       const mode = currentRole === "HOST" ? 1 : 0;
-      sendMessage('GameManager', 'SetHostMode', mode);
+      sendMessage('NetworkManager', 'SetHostMode', mode);
       sendMessage('SceneController', 'StartBattle', JSON.stringify(startJson));
     } catch (e) {
-      console.warn("※Unity未ロードによるSendMessageスキップ");
+      console.warn("※Unity未ロードによるSendMessageスキップ", e);
     }
     
     setStep("PLAYING");

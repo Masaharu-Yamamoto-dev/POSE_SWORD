@@ -26,9 +26,16 @@ public class SwordGenerator : MonoBehaviour
     // 以降の GenerateSwordFromJson(string jsonString) の中身はそのまま！
     public void GenerateSwordFromJson(string jsonString)
     {
-        if (string.IsNullOrEmpty(jsonString)) return;
+        if (string.IsNullOrEmpty(jsonString)) 
+        {
+            Debug.LogError("❌ SwordGenerator: jsonStringが空です！");
+            return;
+        }
 
+        Debug.Log($"📄 SwordGenerator.GenerateSwordFromJson 呼び出し: {jsonString.Substring(0, Mathf.Min(100, jsonString.Length))}...");
+        
         SwordData data = JsonUtility.FromJson<SwordData>(jsonString);
+        Debug.Log($"✅ Parsed SwordData: name={data.name}, hp={data.hp}, attack={data.attack}, weight={data.weight}");
         
         if (swordRigidbody != null)
         {

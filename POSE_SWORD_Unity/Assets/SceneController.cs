@@ -22,9 +22,11 @@ public class SceneController : MonoBehaviour
     public void StartBattle(string jsonString)
     {
         Debug.Log("⚔️ Webからバトル開始データを受信しました！");
+        Debug.Log($"📋 受信JSON: {jsonString}");
         
         // JSON文字列をC#のデータに変換
         BattleStartData data = JsonUtility.FromJson<BattleStartData>(jsonString);
+        Debug.Log($"🎯 Host: {data.hostSword.name}, Client: {data.clientSword.name}");
 
         // --- 💡 通信ズレを防ぐ「魔法のランダム」 ---
         // 2つの剣の名前を合体させた文字列からハッシュ（一意の数字）を作り、乱数の種（シード）にします
@@ -43,22 +45,27 @@ public class SceneController : MonoBehaviour
         {
             NetworkManager.Instance.hostSword.transform.position = hostPos;
             NetworkManager.Instance.clientSword.transform.position = clientPos;
+            Debug.Log($"📍 配置: Host={hostPos}, Client={clientPos}");
         }
 
         // --- 剣の生成 ---
         // 既存の関数をそのまま使えるように、単体のJSON文字列に戻して渡します
         hostGenerator.GenerateSwordFromJson(JsonUtility.ToJson(data.hostSword));
+        Debug.Log($"✅ Host側の剣を生成: {data.hostSword.name}");
+        
         clientGenerator.GenerateSwordFromJson(JsonUtility.ToJson(data.clientSword));
+        Debug.Log($"✅ Client側の剣を生成: {data.clientSword.name}");
 
         // 物理演算と操作権限を適用（HostとClientのモード切り替え）
         if (NetworkManager.Instance != null)
         {
             NetworkManager.Instance.ApplyModeSettings();
+            Debug.Log($"🎮 モード設定適用: isHost={NetworkManager.Instance.isHost}");
         }
 
         // 乱数を通常の状態（時間ベース）に戻しておく
         Random.InitState((int)System.DateTime.Now.Ticks);
         
-        Debug.Log($"⚔️ バトル開始！ Hostは{(hostIsLeft ? "左" : "右")}に配置されました。");
+        Debug.Log($"⚔️ バトル開始完了！ Hostは{(hostIsLeft ? "左" : "右")}に配置されました。");
     }
 }
