@@ -17,10 +17,10 @@ public class SwordGenerator : MonoBehaviour
     void Start()
     {
         // ▼ Startの中身もファイルからテキストを取り出すように変更
-        if (dummyJsonFile != null)
-        {
-            GenerateSwordFromJson(dummyJsonFile.text);
-        }
+        // if (dummyJsonFile != null)
+        // {
+        //     GenerateSwordFromJson(dummyJsonFile.text);
+        // }
     }
 
     // 以降の GenerateSwordFromJson(string jsonString) の中身はそのまま！
@@ -77,9 +77,9 @@ public class SwordGenerator : MonoBehaviour
             Debug.Log($"剣の生成完了: {data.name} | 見た目の攻撃力:{rawAttack} → 実攻撃力:{actualAttack} | 見た目の重さ:{rawWeight} → 実質量:{actualWeight}");
         }
 
-        if (!string.IsNullOrEmpty(data.imageData))
+        if (!string.IsNullOrEmpty(data.imageStr))
         {
-            byte[] imageBytes = Convert.FromBase64String(data.imageData);
+            byte[] imageBytes = Convert.FromBase64String(data.imageStr);
             Texture2D tex = new Texture2D(2, 2);
             tex.LoadImage(imageBytes); 
 
