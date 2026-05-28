@@ -63,10 +63,26 @@ export default function PoseSwordWeb() {
   const handleGameOver = (syncData) => {
     const currentRole = roleRef.current;
     const clientWon = syncData.hostSword.hp <= 0;
+
+    // 初期HPを取得（mySwordRef = 自分の剣、enemySwordRef = 相手の剣）
+    const myInitialHp = mySwordRef.current?.hp ?? 100;
+    const enemyInitialHp = enemySwordRef.current?.hp ?? 100;
+
+    // HOST: 自分=hostSword、相手=clientSword
+    // CLIENT: 自分=clientSword、相手=hostSword
+    let damageDealt, damageTaken;
+    if (currentRole === "HOST") {
+      damageDealt = Math.max(0, enemyInitialHp - syncData.clientSword.hp);
+      damageTaken  = Math.max(0, myInitialHp  - syncData.hostSword.hp);
+    } else {
+      damageDealt = Math.max(0, enemyInitialHp - syncData.hostSword.hp);
+      damageTaken  = Math.max(0, myInitialHp  - syncData.clientSword.hp);
+    }
+
     setMatchResult({
       winnerName: clientWon ? "Client側の剣" : "Host側の剣",
-      damageDealt: currentRole === "HOST" ? (clientWon ? 0 : 100) : (clientWon ? 100 : 0),
-      damageTaken: currentRole === "HOST" ? (clientWon ? 100 : 0) : (clientWon ? 0 : 100)
+      damageDealt,
+      damageTaken
     });
     
     setIsReady(false);
@@ -352,8 +368,9 @@ export default function PoseSwordWeb() {
     const base64Full = canvas.toDataURL('image/jpeg');
     const base64DataOnly = base64Full.split(',')[1]; 
 
-    // ※ PythonAPIのIPアドレスに書き換えてください（例: 192.168.x.x）
-    const pythonApiUrl = 'http://127.0.0.1:8000/cutout';
+    // Vercel のサーバーサイド関数を経由する（APIキーはサーバー側で付与）
+    // ローカル開発時は vite.config.js のプロキシ設定で 8000 番ポートに転送される
+    const pythonApiUrl = '/api/cutout';
 
     fetch(pythonApiUrl, {
       method: 'POST',
