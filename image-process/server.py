@@ -27,10 +27,14 @@ app = FastAPI(title="POSE_SWORD API", version="0.1.0")
 # 未設定の場合は認証なし（ローカル開発用）
 _API_KEY = os.environ.get("API_KEY", "")
 
-# Vercel のサーバーサイド関数（/api/cutout）からのみ受け付ける
+# ブラウザから直接呼ばれるため、Vercel の URL のみ許可する
+# CORS_ORIGINS 環境変数で追加できる（カンマ区切り）
+_cors_env = os.environ.get("CORS_ORIGINS", "")
+_allow_origins = [o.strip() for o in _cors_env.split(",") if o.strip()] or ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allow_origins,
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
