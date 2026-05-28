@@ -368,9 +368,9 @@ export default function PoseSwordWeb() {
     const base64Full = canvas.toDataURL('image/jpeg');
     const base64DataOnly = base64Full.split(',')[1]; 
 
-    // Vercel のサーバーサイド関数を経由する（APIキーはサーバー側で付与）
-    // ローカル開発時は vite.config.js のプロキシ設定で 8000 番ポートに転送される
-    const pythonApiUrl = '/api/cutout';
+    // HuggingFace Space に直接接続（Vercelのタイムアウト10秒を回避するため）
+    // ローカル開発時は VITE_API_URL=http://127.0.0.1:8000 を .env.local に設定
+    const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? 'https://akequreru-pose-sword-api.hf.space'}/cutout`;
 
     fetch(pythonApiUrl, {
       method: 'POST',
