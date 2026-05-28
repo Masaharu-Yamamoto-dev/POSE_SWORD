@@ -44,15 +44,45 @@ export default function PoseSwordWeb() {
     codeUrl: "../POSE_SWORD_Unity/Builds/ver1.2/Build/ver1.2.wasm",
   });
 
+  // 【重要】Unity が isLoaded になるまで sendMessage を遅延するためのキュー
+  // Unityコンポーネントは PLAYING 画面に初めてマウントされるため、
+  // launchUnityBattle 呼び出し時点では Unity は存在しない
+  const pendingBattleRef = useRef(null);
+
+  const syncCountRef = useRef({ fromUnity: 0, toPeer: 0, fromPeer: 0, toUnity: 0 });
+
+  // 【重要】sendMessage は react-unity-webgl が Unity ロード時に新しい参照を生成する。
+  // setupConnection は MATCHING 中（Unity ロード前）に呼ばれるため、
+  // conn.on('data',...) のクロージャは古い sendMessage（unityInstance=null）を掴んでしまう。
+  // ref を使い「常に最新の sendMessage」を参照させることで stale closure を防ぐ。
+  const sendMessageRef = useRef(sendMessage);
+  useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
+
   const handleGameOverRef = useRef(null);
 
   const handleGameOver = (syncData) => {
     const currentRole = roleRef.current;
     const clientWon = syncData.hostSword.hp <= 0;
+
+    // 初期HPを取得（mySwordRef = 自分の剣、enemySwordRef = 相手の剣）
+    const myInitialHp = mySwordRef.current?.hp ?? 100;
+    const enemyInitialHp = enemySwordRef.current?.hp ?? 100;
+
+    // HOST: 自分=hostSword、相手=clientSword
+    // CLIENT: 自分=clientSword、相手=hostSword
+    let damageDealt, damageTaken;
+    if (currentRole === "HOST") {
+      damageDealt = Math.max(0, enemyInitialHp - syncData.clientSword.hp);
+      damageTaken  = Math.max(0, myInitialHp  - syncData.hostSword.hp);
+    } else {
+      damageDealt = Math.max(0, enemyInitialHp - syncData.hostSword.hp);
+      damageTaken  = Math.max(0, myInitialHp  - syncData.clientSword.hp);
+    }
+
     setMatchResult({
       winnerName: clientWon ? "Client側の剣" : "Host側の剣",
-      damageDealt: currentRole === "HOST" ? (clientWon ? 0 : 100) : (clientWon ? 100 : 0),
-      damageTaken: currentRole === "HOST" ? (clientWon ? 100 : 0) : (clientWon ? 0 : 100)
+      damageDealt,
+      damageTaken
     });
     
     setIsReady(false);
@@ -63,6 +93,22 @@ export default function PoseSwordWeb() {
 
   useEffect(() => { handleGameOverRef.current = handleGameOver; });
 
+  // 【修正】Unity が完全にロードされたタイミングで、保留中のバトルコマンドを送信する
+  // launchUnityBattle は setStep("PLAYING") を呼んでから Unity がマウント・ロードされるため、
+  // isLoaded が true になるまでコマンドを遅延させる必要がある
+  useEffect(() => {
+    if (isLoaded && pendingBattleRef.current !== null) {
+      const { mode, startJson } = pendingBattleRef.current;
+      pendingBattleRef.current = null;
+      console.log("✅ Unity読み込み完了！保留中のバトルコマンドを送信します");
+      console.log(`📡 SetHostMode(${mode})`);
+      sendMessage('GameManager', 'SetHostMode', mode);
+      console.log(`📡 StartBattle`);
+      sendMessage('GameManager', 'StartBattle', JSON.stringify(startJson));
+      console.log("✅ SetHostMode と StartBattle 送信完了");
+    }
+  }, [isLoaded]);
+
   useEffect(() => {
     window.ReactApp = {
       receiveFromUnity: (type, jsonString) => {
@@ -72,8 +118,9 @@ export default function PoseSwordWeb() {
         const currentConn = connRef.current;
 
         if (type === "SYNC" && currentRole === "HOST") {
+          syncCountRef.current.fromUnity++;  // ① Unity→React SYNC カウント
           if (currentConn) {
-            console.log("📤 SYNCをPeerJsで送信します");
+            syncCountRef.current.toPeer++;    // ② React→PeerJS SYNC カウント
             currentConn.send({ type: "SYNC", ...data });
           } else {
             console.warn("⚠️ SYNC送信エラー: 接続がありません");
@@ -225,9 +272,10 @@ export default function PoseSwordWeb() {
 
         case "INPUT":
           if (currentRole === "HOST") {
-            try { 
+            try {
               console.log("【受信INPUT】Hostへ転送します", data);
-              sendMessage('NetworkManager', 'ReceiveInput', JSON.stringify(data)); 
+              // sendMessageRef.current を使い、最新の sendMessage（Unity ロード後）を参照する
+              sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data));
             } catch(e) {
               console.error("INPUT転送エラー:", e);
             }
@@ -236,10 +284,13 @@ export default function PoseSwordWeb() {
 
         case "SYNC":
           if (currentRole === "CLIENT") {
-            try { 
-              console.log("【受信SYNC】Clientへ同期します", data);
-              sendMessage('NetworkManager', 'SyncTransform', JSON.stringify(data)); 
+            syncCountRef.current.fromPeer++;   // ③ PeerJS→React SYNC カウント
+            try {
+              syncCountRef.current.toUnity++;  // ④ React→Unity SyncTransform カウント
+              // sendMessageRef.current を使い、最新の sendMessage（Unity ロード後）を参照する
+              sendMessageRef.current('GameManager', 'SyncTransform', JSON.stringify(data));
             } catch(e) {
+              syncCountRef.current.toUnity--;  // 失敗したら戻す
               console.error("SYNC転送エラー:", e);
             }
             if (data.hostSword.hp <= 0 || data.clientSword.hp <= 0) {
@@ -273,25 +324,32 @@ export default function PoseSwordWeb() {
       return;
     }
     
+    // Unity向けのデータは必要なフィールドのみ（imageSrcはReact UI用なので除外）
+    // imageSrcを含めるとJSONが数MBになりSendMessageが失敗する
+    const toUnityData = (data) => ({
+      name: data.name,
+      hp: data.hp,
+      attack: data.attack,
+      weight: data.weight,
+      imageStr: data.imageStr  // Base64文字列のみ（Unity用）
+    });
+
     const startJson = {
-      hostSword: hostData,
-      clientSword: clientData
+      hostSword: toUnityData(hostData),
+      clientSword: toUnityData(clientData)
     };
     
-    console.log("🎮 バトル開始:", { role: currentRole, hostData: hostData.name, clientData: clientData.name });
-    
-    try {
-      const mode = currentRole === "HOST" ? 1 : 0;
-      console.log(`📡 SetHostMode(${mode}) を送信: ${currentRole === "HOST" ? "HOST" : "CLIENT"}`);
-      sendMessage('NetworkManager', 'SetHostMode', mode);
-      console.log(`📡 StartBattle を送信...`);
-      sendMessage('SceneController', 'StartBattle', JSON.stringify(startJson));
-      console.log(`✅ バトル開始コマンド送信完了`);
-    } catch (e) {
-      console.warn("※Unity未ロードによるSendMessageスキップ", e);
-    }
-    
-    setStep("PLAYING");
+    const mode = currentRole === "HOST" ? 1 : 0;
+    console.log("🎮 バトル開始準備:", { role: currentRole, mode, hostData: hostData.name, clientData: clientData.name });
+
+    // 【重要】<Unity> コンポーネントは PLAYING 画面にのみ存在するため、
+    // setStep("PLAYING") を呼ぶ前には Unity はまだ DOM に存在しない。
+    // sendMessage はここでは絶対に呼ばない。
+    // 代わりにデータを ref に保存し、isLoaded が true になった時点で送信する。
+    pendingBattleRef.current = { mode, startJson };
+    console.log("⏳ バトルデータを保存しました。Unity ロード完了まで待機...");
+
+    setStep("PLAYING"); // ← これで Unity コンポーネントがマウントされ、ロードが始まる
   };
 
   const handleReady = () => {
@@ -310,8 +368,9 @@ export default function PoseSwordWeb() {
     const base64Full = canvas.toDataURL('image/jpeg');
     const base64DataOnly = base64Full.split(',')[1]; 
 
-    // ※ PythonAPIのIPアドレスに書き換えてください（例: 192.168.x.x）
-    const pythonApiUrl = 'http://127.0.0.1:8000/cutout';
+    // HuggingFace Space に直接接続（Vercelのタイムアウト10秒を回避するため）
+    // ローカル開発時は VITE_API_URL=http://127.0.0.1:8000 を .env.local に設定
+    const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? 'https://akequreru-pose-sword-api.hf.space'}/cutout`;
 
     fetch(pythonApiUrl, {
       method: 'POST',
@@ -463,27 +522,8 @@ export default function PoseSwordWeb() {
       case "PLAYING":
         return (
           <div style={styles.container}>
-            <h2>バトル中！</h2>
             <div style={styles.unityContainer}>
               <Unity unityProvider={unityProvider} style={{ width: '100%', height: '100%' }} />
-            </div>
-            {!isLoaded && <p style={{color: '#ff4444', fontWeight: 'bold'}}>※Unity未ロード（ダミー画面）</p>}
-            <div style={styles.debugPanel}>
-              <h3>🛠 Unity連携デバッグパネル</h3>
-              <button style={styles.button} onClick={() => {
-                if (role === "HOST") {
-                  window.ReactApp.receiveFromUnity("SYNC", JSON.stringify({ hostSword: { hp: 50 }, clientSword: { hp: 100 } }));
-                } else {
-                  window.ReactApp.receiveFromUnity("INPUT", JSON.stringify({ action: "JUMP" }));
-                }
-              }}>
-                {role === "HOST" ? "【Host】UnityがSYNCを送るフリ" : "【Client】UnityがINPUTを送るフリ"}
-              </button>
-              <button style={{...styles.button, backgroundColor: '#333', color: '#fff'}} onClick={() => {
-                if (role === "HOST") window.ReactApp.receiveFromUnity("SYNC", JSON.stringify({ hostSword: { hp: 0 }, clientSword: { hp: 100 } }));
-              }}>
-                強制決着テスト（Host専用）
-              </button>
             </div>
           </div>
         );
@@ -522,8 +562,7 @@ const styles = {
   connectedBox: { marginTop: '10px', padding: '10px 20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
   video: { width: '400px', borderRadius: '8px', backgroundColor: '#000', marginBottom: '20px' },
   unityContainer: { width: '800px', height: '450px', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555' },
-  debugPanel: { marginTop: '20px', padding: '15px', border: '2px dashed gray', borderRadius: '8px', backgroundColor: '#f9f9f9', textAlign: 'center' },
-  readyBox: (isReady) => ({
+readyBox: (isReady) => ({
     padding: '10px 20px', border: `2px solid ${isReady ? '#4CAF50' : '#9e9e9e'}`, backgroundColor: isReady ? '#e8f5e9' : '#f5f5f5', borderRadius: '8px', fontWeight: 'bold', minWidth: '100px'
   }),
   errorMessage: { padding: '15px 25px', backgroundColor: '#ffdddd', color: '#cc0000', borderRadius: '8px', marginBottom: '20px', fontWeight: 'bold', border: '1px solid #cc0000' },

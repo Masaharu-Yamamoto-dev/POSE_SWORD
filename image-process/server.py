@@ -11,8 +11,9 @@ React 等から JSON で画像(base64)を受け取り、人物を切り抜いて
 
 import base64
 import io
+import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from rembg import new_session
@@ -22,8 +23,11 @@ from stats import compute_stats, silhouette_mask
 
 app = FastAPI(title="POSE_SWORD API", version="0.1.0")
 
-# ブラウザ(React)から別オリジンで叩けるように CORS を許可
-# 本番では allow_origins をフロントの URL に絞ること
+# HuggingFace Spaces の「Secrets」で API_KEY を設定する
+# 未設定の場合は認証なし（ローカル開発用）
+_API_KEY = os.environ.get("API_KEY", "")
+
+# Vercel のサーバーサイド関数（/api/cutout）からのみ受け付ける
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -45,7 +49,11 @@ def health():
 
 
 @app.post("/cutout")
-def cutout(req: CutoutRequest):
+def cutout(req: CutoutRequest, x_api_key: str = Header(None)):
+    # APIキーが設定されている場合は認証チェック
+    if _API_KEY and x_api_key != _API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     # 1. base64 をデコード(不正なら 400)
     try:
         original = decode_image(req.imageData)  # RGBA(元画像)
