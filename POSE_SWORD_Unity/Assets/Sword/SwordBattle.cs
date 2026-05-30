@@ -36,6 +36,9 @@ public AudioClip critHitSound;   // クリティカル・弱点音
 private AudioSource audioSource; // 音を鳴らすスピーカー    
 public static bool matchEnded = false;
 
+    // SwordBattle.cs の変数宣言エリアに追加
+    [HideInInspector] public Vector2 trueVelocity; // 独自の真の速度
+    private Vector2 lastPosition;
     private Rigidbody2D rb;
     private bool isDead = false;
 
@@ -52,6 +55,13 @@ public static bool matchEnded = false;
 
         maxHp = hp;
         UpdateUI();
+        lastPosition = transform.position;
+    }
+
+    void FixedUpdate()
+    {
+        trueVelocity = ((Vector2)transform.position - lastPosition) / Time.fixedDeltaTime;
+        lastPosition = transform.position;
     }
 
     // ▼【追加】毎フレーム呼ばれる関数
@@ -131,6 +141,18 @@ public static bool matchEnded = false;
                 bool isWeakPoint = false;
                 Vector2 hitPoint = collision.GetContact(0).point;
 
+                if (SwordController.isKomaMode)
+                {
+                    // 【独楽モードのクリティカル判定】
+                    // 自分の回転速度がものすごく速い ＆ 相手より重い ときにクリティカル！
+                    if (rb.mass > collision.gameObject.GetComponent<Rigidbody2D>().mass)
+                    {
+                        damage *= 2;
+                        isCrit = true;
+                        Debug.Log("💥 独楽ヘビースマッシュ・クリティカル！");
+                    }
+                }
+                else{
                     if (myCollider is PolygonCollider2D myPoly && IsPointy(hitPoint, myPoly))
                     {
                         damage *= 3;
@@ -143,7 +165,7 @@ public static bool matchEnded = false;
                         damage *= 2;
                         isWeakPoint = true;
                     }
-
+                }
                     // ▼変更：TakeDamageの結果（倒したかどうか）を受け取る
                     bool killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
 
@@ -162,7 +184,7 @@ public static bool matchEnded = false;
                 }
             }
         }
-
+    
     bool IsPointy(Vector2 hitPointWorld, PolygonCollider2D poly)
     {
         Vector2[] points = poly.points;

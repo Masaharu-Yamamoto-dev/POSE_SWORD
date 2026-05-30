@@ -42,12 +42,19 @@ public class BattleCamera : MonoBehaviour
 
         // 今の「基準となる位置」を変数に入れておく
         Vector3 currentBasePosition = transform.position;
+        float targetY;
 
         // 戦闘中：追従モード
         if (isTracking)
         {
             Vector3 centerPoint = (player.position + enemy.position) / 2f;
-            float targetY = Mathf.Max(baseY, centerPoint.y * 0.3f); 
+            if(!SwordController.isKomaMode){
+                targetY = Mathf.Max(baseY, centerPoint.y * 0.3f); 
+            }
+            else
+            {
+                targetY = centerPoint.y;
+            }
             Vector3 targetPosition = new Vector3(centerPoint.x, targetY, -10f);
             
             currentBasePosition = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 5f);

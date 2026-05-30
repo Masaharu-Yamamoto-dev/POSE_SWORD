@@ -14,6 +14,53 @@ public class SwordGenerator : MonoBehaviour
 
     public SwordBattle swordBattle;
     public float desiredHeight = 5f; 
+
+    [Header("柄のオブジェクト（独楽モード時は消す）")]
+    public GameObject handleObject; 
+
+    [Header("【テスト用】合成テスト画像")]
+    public Texture2D testTexture;
+    public SpriteRenderer bladeRenderer;
+
+    // ▼【追加】柄にぴったり収まる理想の太さ（Unity上のサイズ）
+    [Header("刀身の理想の太さ（横幅）")]
+    public float targetBladeWidth = 1.5f; // 柄の太さに合わせて調整してください！
+
+    [ContextMenu("テスト: 柄の合成を実行！")]
+    public void TestHandleSynthesis()
+    {
+        if (testTexture == null || bladeRenderer == null) return;
+
+        // 1. Spriteの生成（底辺中央を基準点にするのはそのまま）
+        Sprite testSprite = Sprite.Create(
+            testTexture,
+            new Rect(0, 0, testTexture.width, testTexture.height),
+            new Vector2(0.5f, 0.0f), 
+            100f
+        );
+
+        bladeRenderer.sprite = testSprite;
+
+        // ▼【新規追加】画像サイズに関わらず、理想の太さに自動リサイズする処理
+        // 生成されたSpriteの実際の横幅（Unit）を取得
+        float currentWidth = testSprite.bounds.size.x;
+        
+        // 理想の太さにするための倍率を計算（例: 理想1.5 ÷ 実際3.0 = 0.5倍）
+        float scaleRatio = targetBladeWidth / currentWidth;
+        
+        // 縦横の比率（アスペクト比）を保ったままスケールを適用
+        bladeRenderer.transform.localScale = new Vector3(scaleRatio, scaleRatio, 1f);
+
+
+        // 3. モードを「剣モード」にして柄を表示する
+        SwordController.isKomaMode = false;
+        if (handleObject != null)
+        {
+            handleObject.SetActive(true);
+        }
+
+        Debug.Log($"⚔️ リサイズ完了！倍率: {scaleRatio}x");
+    }
     void Start()
     {
         // ▼ Startの中身もファイルからテキストを取り出すように変更
@@ -82,6 +129,7 @@ public class SwordGenerator : MonoBehaviour
             }
 
             Debug.Log($"剣の生成完了: {data.name} | 見た目の攻撃力:{rawAttack} → 実攻撃力:{actualAttack} | 見た目の重さ:{rawWeight} → 実質量:{actualWeight}");
+            
         }
 
         if (!string.IsNullOrEmpty(data.imageStr))
@@ -101,20 +149,31 @@ public class SwordGenerator : MonoBehaviour
                 Texture2D tex = new Texture2D(2, 2);
                 tex.LoadImage(imageBytes); 
 
-                float ppu = tex.height / desiredHeight; // ピクセル密度を自動計算
+                // ▼ ここから差し替え ▼
 
+                // 1. Spriteの生成（テスト時と同じく 100f 固定で生成します）
                 Sprite newSprite = Sprite.Create(
                     tex, 
                     new Rect(0, 0, tex.width, tex.height), 
                     new Vector2(0.5f, 0.0f),
-                    ppu // ← 計算した密度を指定
+                    100f 
                 );
 
                 if (targetSpriteRenderer != null)
                 {
                     targetSpriteRenderer.sprite = newSprite;
-                    Debug.Log($"✅ 剣のスプライトを設定しました: {tex.width}x{tex.height}");
+                    
+                    // 2. 画像サイズに関わらず、理想の太さに自動リサイズする処理
+                    float currentWidth = newSprite.bounds.size.x;
+                    if (currentWidth > 0)
+                    {
+                        float scaleRatio = targetBladeWidth / currentWidth;
+                        targetSpriteRenderer.transform.localScale = new Vector3(scaleRatio, scaleRatio, 1f);
+                    }
 
+                    Debug.Log($"✅ 剣のスプライトを設定し、太さを {targetBladeWidth} に統一しました");
+
+                    // 3. コライダーの再生成（スケール変更後に実行するのがベストです）
                     if (bladeCollider != null)
                     {
                         Destroy(bladeCollider);
@@ -122,11 +181,21 @@ public class SwordGenerator : MonoBehaviour
                         Debug.Log("✅ PolygonCollider2D を再生成しました");
                     }
                 }
+
+                // 4. 独楽モードかどうかで、柄の表示/非表示を切り替える
+                if (handleObject != null)
+                {
+                    handleObject.SetActive(!SwordController.isKomaMode);
+                    Debug.Log($"✅ 柄の表示状態を更新しました: {!SwordController.isKomaMode}");
+                }
+
+                // ▲ ここまで差し替え ▲
             }
             catch (System.Exception e)
             {
                 Debug.LogError($"❌ 画像の読み込みに失敗: {e.Message}\n Base64文字列: {base64String.Substring(0, Mathf.Min(50, base64String.Length))}...");
             }
+            
         }
     }
 }

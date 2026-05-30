@@ -189,7 +189,18 @@ private static extern void SendToReact(string type, string jsonString);
             UnityEngine.SceneManagement.SceneManager.GetActiveScene().name
         );
     }
-    // ========================================================
-    // ▼ WebのJS側から試合開始時には SceneController.StartBattle が呼ばれる
-    // ========================================================
+    // NetworkManager.cs
+
+    // ▼【追加】Webから呼ばれるモード切り替え
+    // Web担当者様: sendMessage('NetworkManager', 'SetGameMode', '1'); (1=独楽, 0=剣)
+    public void SetGameMode(string modeStr)
+    {
+        SwordController.isKomaMode = (modeStr == "1");
+
+        // 両方の剣の重力を切り替える
+        if (hostSword != null) hostSword.GetComponent<SwordController>().ApplyPhysicsMode();
+        if (clientSword != null) clientSword.GetComponent<SwordController>().ApplyPhysicsMode();
+        
+        Debug.Log(SwordController.isKomaMode ? "🌀 独楽モードを受信しました" : "⚔️ 剣モードを受信しました");
+    }
 }
