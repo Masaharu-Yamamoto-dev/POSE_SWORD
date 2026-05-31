@@ -1,9 +1,10 @@
 using UnityEngine;
 using System;
 
+// ▼ JSONのデータ構造に完全に一致させたクラス
+
 public class SwordGenerator : MonoBehaviour
 {
-    // ▼ここを string から TextAsset に変更！
     [Header("テスト用のJSONファイル")]
     public TextAsset dummyJsonFile;
 
@@ -11,66 +12,26 @@ public class SwordGenerator : MonoBehaviour
     public SpriteRenderer targetSpriteRenderer;
     public Rigidbody2D swordRigidbody;
     public PolygonCollider2D bladeCollider;
-
     public SwordBattle swordBattle;
-    public float desiredHeight = 5f; 
 
     [Header("柄のオブジェクト（独楽モード時は消す）")]
     public GameObject handleObject; 
 
-    [Header("【テスト用】合成テスト画像")]
-    public Texture2D testTexture;
-    public SpriteRenderer bladeRenderer;
-
-    // ▼【追加】柄にぴったり収まる理想の太さ（Unity上のサイズ）
     [Header("刀身の理想の太さ（横幅）")]
-    public float targetBladeWidth = 1.5f; // 柄の太さに合わせて調整してください！
+    public float targetBladeWidth = 1.5f;
 
-    [ContextMenu("テスト: 柄の合成を実行！")]
-    public void TestHandleSynthesis()
-    {
-        if (testTexture == null || bladeRenderer == null) return;
+    [Header("テスト実行設定")]
+    public bool generateOnStart = true; // チェックを入れるとゲーム開始時に自動生成
 
-        // 1. Spriteの生成（底辺中央を基準点にするのはそのまま）
-        Sprite testSprite = Sprite.Create(
-            testTexture,
-            new Rect(0, 0, testTexture.width, testTexture.height),
-            new Vector2(0.5f, 0.0f), 
-            100f
-        );
-
-        bladeRenderer.sprite = testSprite;
-
-        // ▼【新規追加】画像サイズに関わらず、理想の太さに自動リサイズする処理
-        // 生成されたSpriteの実際の横幅（Unit）を取得
-        float currentWidth = testSprite.bounds.size.x;
-        
-        // 理想の太さにするための倍率を計算（例: 理想1.5 ÷ 実際3.0 = 0.5倍）
-        float scaleRatio = targetBladeWidth / currentWidth;
-        
-        // 縦横の比率（アスペクト比）を保ったままスケールを適用
-        bladeRenderer.transform.localScale = new Vector3(scaleRatio, scaleRatio, 1f);
-
-
-        // 3. モードを「剣モード」にして柄を表示する
-        SwordController.isKomaMode = false;
-        if (handleObject != null)
-        {
-            handleObject.SetActive(true);
-        }
-
-        Debug.Log($"⚔️ リサイズ完了！倍率: {scaleRatio}x");
-    }
     void Start()
     {
-        // ▼ Startの中身もファイルからテキストを取り出すように変更
-        // if (dummyJsonFile != null)
-        // {
-        //     GenerateSwordFromJson(dummyJsonFile.text);
-        // }
+        // TextAssetからJSONテキストを取り出して実行
+        if (generateOnStart && dummyJsonFile != null && !string.IsNullOrEmpty(dummyJsonFile.text))
+        {
+            GenerateSwordFromJson(dummyJsonFile.text);
+        }
     }
 
-    // 以降の GenerateSwordFromJson(string jsonString) の中身はそのまま！
     public void GenerateSwordFromJson(string jsonString)
     {
         if (string.IsNullOrEmpty(jsonString)) 
@@ -82,25 +43,21 @@ public class SwordGenerator : MonoBehaviour
         Debug.Log($"📄 SwordGenerator.GenerateSwordFromJson 呼び出し: {jsonString.Substring(0, Mathf.Min(100, jsonString.Length))}...");
         
         SwordData data = JsonUtility.FromJson<SwordData>(jsonString);
-        Debug.Log($"✅ Parsed SwordData: name={data.name}, hp={data.hp}, attack={data.attack}, weight={data.weight}");
         
-        if (swordRigidbody != null)
+        if (data == null)
         {
-            swordRigidbody.mass = data.weight;
-            swordRigidbody.centerOfMass = Vector2.zero;
+            Debug.LogError("❌ JSONの解析に失敗しました。形式が正しいか確認してください。");
+            return;
         }
 
-        // =========================================================
-    // JSONから剣を生成する関数の中身（ステータス反映部分）
-    // =========================================================
-    
-    // 1. JSONのデータをパースしたとする (data という変数に入っている想定)
-    // SwordData data = JsonUtility.FromJson<SwordData>(jsonString);
+        Debug.Log($"✅ Parsed SwordData: name={data.name}, hp={data.hp}, attack={data.attack}, weight={data.weight}");
 
+        // =========================================================
+        // ⚔️ ステータスと物理演算への適用
+        // =========================================================
+        
         if (swordBattle != null)
         {
-            // --- 📊 パラメータの変換（マッピング） ---
-            
             // Webから来た 1〜100 の値を安全に制限（1未満や100オーバーのバグを防ぐ）
             float rawAttack = Mathf.Clamp(data.attack, 1f, 100f);
             float rawWeight = Mathf.Clamp(data.weight, 1f, 100f);
@@ -109,34 +66,33 @@ public class SwordGenerator : MonoBehaviour
             float attackRatio = (rawAttack - 1f) / 99f;
             float weightRatio = (rawWeight - 1f) / 99f;
 
-            // ゲームの仕様に合わせた実際の数値に変換（Lerp関数）
-            // 攻撃力：割合に応じて 10 〜 100 の間に変換
+            // 攻撃力：割合に応じて 10 〜 90 の間に変換
             int actualAttack = Mathf.RoundToInt(Mathf.Lerp(10f, 90f, attackRatio));
             
-            // 重さ：割合に応じて 5.0 〜 30.0 の間に変換
+            // 重さ：割合に応じて 7.0 〜 25.0 の間に変換
             float actualWeight = Mathf.Lerp(7f, 25f, weightRatio);
-
-            // --- ⚔️ ステータスと物理演算への適用 ---
             
-            // HPはそのまま（100〜1000）、攻撃力は変換した値をセット
+            // HPはそのまま、攻撃力は変換した値をセット
             swordBattle.SetupStatus(data.name, data.hp, actualAttack);
 
-            // 剣のRigidbody2Dを取得して、重さ（mass）を適用
-            Rigidbody2D rb = swordBattle.GetComponent<Rigidbody2D>();
-            if (rb != null)
+            if (swordRigidbody != null)
             {
-                rb.mass = actualWeight;
+                swordRigidbody.mass = actualWeight;
+                swordRigidbody.centerOfMass = Vector2.zero; // 重心リセット
             }
 
             Debug.Log($"剣の生成完了: {data.name} | 見た目の攻撃力:{rawAttack} → 実攻撃力:{actualAttack} | 見た目の重さ:{rawWeight} → 実質量:{actualWeight}");
-            
         }
+
+        // =========================================================
+        // 🎨 画像と当たり判定の反映
+        // =========================================================
 
         if (!string.IsNullOrEmpty(data.imageStr))
         {
             string base64String = data.imageStr;
             
-            // 【修正】DataURL形式（data:image/png;base64,xxxxx）の場合は base64部分を抽出
+            // DataURL形式（data:image/png;base64,xxxxx）の場合は base64部分を抽出
             if (base64String.Contains(","))
             {
                 base64String = base64String.Split(',')[1];
@@ -146,12 +102,17 @@ public class SwordGenerator : MonoBehaviour
             try
             {
                 byte[] imageBytes = Convert.FromBase64String(base64String);
-                Texture2D tex = new Texture2D(2, 2);
-                tex.LoadImage(imageBytes); 
+                Texture2D tex = new Texture2D(4, 4);
+                
+                // ▼【重要】エラーを回避するための安全装置
+                bool isLoaded = tex.LoadImage(imageBytes); 
+                if (!isLoaded)
+                {
+                    Debug.LogError("❌ 画像データの読み込みに失敗しました！");
+                    return;
+                }
 
-                // ▼ ここから差し替え ▼
-
-                // 1. Spriteの生成（テスト時と同じく 100f 固定で生成します）
+                // Spriteの生成
                 Sprite newSprite = Sprite.Create(
                     tex, 
                     new Rect(0, 0, tex.width, tex.height), 
@@ -163,7 +124,7 @@ public class SwordGenerator : MonoBehaviour
                 {
                     targetSpriteRenderer.sprite = newSprite;
                     
-                    // 2. 画像サイズに関わらず、理想の太さに自動リサイズする処理
+                    // 画像サイズに関わらず、理想の太さに自動リサイズする処理
                     float currentWidth = newSprite.bounds.size.x;
                     if (currentWidth > 0)
                     {
@@ -173,7 +134,7 @@ public class SwordGenerator : MonoBehaviour
 
                     Debug.Log($"✅ 剣のスプライトを設定し、太さを {targetBladeWidth} に統一しました");
 
-                    // 3. コライダーの再生成（スケール変更後に実行するのがベストです）
+                    // コライダーの再生成（スケール変更後に実行するのがベストです）
                     if (bladeCollider != null)
                     {
                         Destroy(bladeCollider);
@@ -182,20 +143,17 @@ public class SwordGenerator : MonoBehaviour
                     }
                 }
 
-                // 4. 独楽モードかどうかで、柄の表示/非表示を切り替える
+                // 独楽モードかどうかで、柄の表示/非表示を切り替える
                 if (handleObject != null)
                 {
                     handleObject.SetActive(!SwordController.isKomaMode);
                     Debug.Log($"✅ 柄の表示状態を更新しました: {!SwordController.isKomaMode}");
                 }
-
-                // ▲ ここまで差し替え ▲
             }
             catch (System.Exception e)
             {
-                Debug.LogError($"❌ 画像の読み込みに失敗: {e.Message}\n Base64文字列: {base64String.Substring(0, Mathf.Min(50, base64String.Length))}...");
+                Debug.LogError($"❌ 画像の読み込みに失敗: {e.Message}");
             }
-            
         }
     }
 }

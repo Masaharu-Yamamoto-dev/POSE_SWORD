@@ -28,6 +28,7 @@ public class SwordController : MonoBehaviour
     [Header("独楽モード用の力")]
     public float komaSpinTorque = -3000f; // 独楽の回転力
     public float komaHomingForce = 20f;   // 敵に向かっていく力
+    public float maxKomaSpinSpeed = 1500f;
 
     [Header("【テスト用】チェックを入れると独楽モードで開始")]
     public bool testKomaMode = false;
@@ -54,19 +55,23 @@ public class SwordController : MonoBehaviour
 
     void FixedUpdate()
     {
-        // 独楽モードで、自分に操作権限がある時だけ自動で動かす
-        if (isKomaMode && swordRigidbody != null && swordRigidbody.bodyType == RigidbodyType2D.Dynamic){
-            // 1. 常に高速回転させる
-            swordRigidbody.AddTorque(komaSpinTorque * Time.fixedDeltaTime, ForceMode2D.Force);
-
-            // 2. 敵の方向へジワジワ向かう（見下ろしなのでXY平面を自由に移動）
+        if (isKomaMode && swordRigidbody != null && swordRigidbody.bodyType == RigidbodyType2D.Dynamic)
+        {
+            // ▼【修正】質量（mass）を掛け算することで、重い剣でも負けずに爆速回転する！
+            swordRigidbody.AddTorque(komaSpinTorque * swordRigidbody.mass * Time.fixedDeltaTime, ForceMode2D.Force);
+            
+            float currentSpin = swordRigidbody.angularVelocity;
+            swordRigidbody.angularVelocity = Mathf.Clamp(currentSpin, -maxKomaSpinSpeed, maxKomaSpinSpeed);
+            
             if (enemyTarget != null)
             {
                 Vector2 dirToEnemy = (enemyTarget.position - transform.position).normalized;
-                swordRigidbody.AddForce(dirToEnemy * komaHomingForce * Time.fixedDeltaTime, ForceMode2D.Force);
+                // ▼【修正】追従する力にも質量を掛ける
+                swordRigidbody.AddForce(dirToEnemy * komaHomingForce * swordRigidbody.mass * Time.fixedDeltaTime, ForceMode2D.Force);
             }
         }
     }
+
     void JumpAndSpin()
     {
         if (swordRigidbody != null)
@@ -102,27 +107,30 @@ public class SwordController : MonoBehaviour
     {
         if (swordRigidbody == null) return;
 
-
-        if (handleObject != null)
-        {
-            handleObject.SetActive(!isKomaMode);
-        }
+        if (handleObject != null) handleObject.SetActive(!isKomaMode);
         
         if (isKomaMode)
         {
-            // 【見下ろし独楽モード】
-            swordRigidbody.gravityScale = 0f;      // 重力を完全に消す！
-            swordRigidbody.linearDamping = 1.0f;      // 床の摩擦（滑りすぎないように）
-            swordRigidbody.angularDamping = 0.5f;     // 回転の空気抵抗
-            Debug.Log("🌀 独楽物理演算を適用（重力0・見下ろし型）");
+            swordRigidbody.gravityScale = 0f;      
+            swordRigidbody.linearDamping = 1.0f;      
+            swordRigidbody.angularDamping = 0f;     
+            
+            // ▼【新規追加】重心（回転軸）を「柄」から「刃の中央（Y軸+2.0など）」に引き上げる！
+            // ※剣の長さによって、1.5f や 2.5f など気持ちいい位置に調整してください
+            swordRigidbody.centerOfMass = new Vector2(0f, 2.0f); 
+            
+            Debug.Log("🌀 独楽物理演算を適用（重力0・重心を上に移動）");
         }
         else
         {
-            // 【横視点 剣モード】
-            swordRigidbody.gravityScale = 1f;      // 通常の重力（インスペクタの値に合わせてください）
+            swordRigidbody.gravityScale = 1f;      
             swordRigidbody.linearDamping = 0f;
             swordRigidbody.angularDamping = 0.05f;
-            Debug.Log("⚔️ 剣物理演算を適用（重力あり）");
+            
+            // ▼【新規追加】剣モードの時は、振り子のように安定させるため重心を柄に戻す
+            swordRigidbody.centerOfMass = Vector2.zero; 
+            
+            Debug.Log("⚔️ 剣物理演算を適用（重力あり・重心リセット）");
         }
     }
 }

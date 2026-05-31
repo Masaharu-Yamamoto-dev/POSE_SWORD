@@ -3,12 +3,16 @@ using UnityEngine.SceneManagement;
 using System.Runtime.InteropServices;
 
 // ▼ Web側の仕様書に完全一致させたJSONデータ構造
+
+
 [System.Serializable]
 public class SwordSyncData {
     public float x;
     public float y;
     public float rotation;
     public int hp;
+    public bool isDashing;
+    public float sp;
 }
 
 [System.Serializable]
@@ -27,7 +31,10 @@ public class InputMessage {
 public class NetworkManager : MonoBehaviour
 {
     public static NetworkManager Instance;
-
+    // NetworkManager.cs の上部（変数を宣言している場所）に追加
+    [Header("ステージ設定")]
+    public GameObject swordStage; // 剣モード用のステージ（背景や床）
+    public GameObject komaStage;  // 独楽モード用のステージ（背景や四方の壁）
     [DllImport("__Internal")]
 private static extern void SendToReact(string type, string jsonString);
     [Header("ネットワーク設定")]
@@ -126,7 +133,9 @@ private static extern void SendToReact(string type, string jsonString);
             x = obj.transform.position.x,
             y = obj.transform.position.y,
             rotation = obj.transform.eulerAngles.z,
-            hp = battle != null ? battle.hp : 100
+            hp = battle != null ? battle.hp : 100,
+            isDashing = battle != null ? battle.isDashing : false,
+            sp = battle != null ? battle.currentSp : 0f
         };
     }
 
@@ -135,6 +144,7 @@ private static extern void SendToReact(string type, string jsonString);
     // ========================================================
 
     // 【Host専用】 Web仕様書5：Clientからの操作入力を受信
+    // 【Host専用】 Web仕様書5：Clientからの操作入力を受信
     public void ReceiveInput(string jsonString)
     {
         if (!isHost) return; 
@@ -142,9 +152,14 @@ private static extern void SendToReact(string type, string jsonString);
         
         if (clientSword != null)
         {
-            // 受信した瞬間に、Clientの剣をジャンプさせる！
-            clientSword.GetComponent<SwordController>().NetworkJump();
-            Debug.Log("✅ クライアント側の剣がジャンプしました！");
+            SwordBattle battle = clientSword.GetComponent<SwordBattle>();
+            if (battle != null)
+            {
+                // ▼【修正】分岐はすべてSwordBattleにお任せ！
+                // 独楽でも剣でも、とりあえずアクションを発動させる
+                battle.TryAction(); 
+                Debug.Log("✅ クライアントの剣がアクション（ジャンプ or ダッシュ）を実行しました！");
+            }
         }
     }
 
@@ -161,20 +176,43 @@ private static extern void SendToReact(string type, string jsonString);
         Debug.Log($"✅ 同期完了: Host HP={sync.hostSword.hp}, Client HP={sync.clientSword.hp}");
     }
 
+    // ▼【修正】NetworkManager.cs の ApplySyncToGameObject
     void ApplySyncToGameObject(GameObject obj, SwordSyncData data)
     {
         if (obj == null) return;
 
-        // Hostから送られてきた座標と回転を強制上書き
         obj.transform.position = new Vector3(data.x, data.y, obj.transform.position.z);
         obj.transform.rotation = Quaternion.Euler(0, 0, data.rotation);
 
-        // HPの更新とUIの反映
         SwordBattle battle = obj.GetComponent<SwordBattle>();
-        if (battle != null && battle.hp != data.hp)
+        if (battle != null)
         {
-            battle.hp = data.hp;
-            battle.UpdateUI();
+            // ▼【追加】HPが減っていたら、クライアント側でダメージ演出を発動！
+            if (battle.hp > data.hp)
+            {
+                int damageTaken = battle.hp - data.hp;
+                battle.PlayClientDamageEffect(damageTaken);
+            }
+
+            if (battle.hp != data.hp)
+            {
+                battle.hp = data.hp;
+                battle.UpdateUI(); // HPバーの更新
+            }
+
+            // ▼【追加】SPゲージの同期！
+            battle.currentSp = data.sp;
+
+            battle.isDashing = data.isDashing;
+            Transform blade = obj.transform.Find("Blade");
+            if (blade != null)
+            {
+                SpriteRenderer sr = blade.GetComponent<SpriteRenderer>();
+                if (sr != null)
+                {
+                    sr.color = data.isDashing ? new Color(1f, 0.5f, 0.5f) : Color.white;
+                }
+            }
         }
     }
     public void ResetMatch(string emptyMessage)
@@ -197,10 +235,14 @@ private static extern void SendToReact(string type, string jsonString);
     {
         SwordController.isKomaMode = (modeStr == "1");
 
-        // 両方の剣の重力を切り替える
+        // 両方の剣の物理演算設定を切り替える
         if (hostSword != null) hostSword.GetComponent<SwordController>().ApplyPhysicsMode();
         if (clientSword != null) clientSword.GetComponent<SwordController>().ApplyPhysicsMode();
         
-        Debug.Log(SwordController.isKomaMode ? "🌀 独楽モードを受信しました" : "⚔️ 剣モードを受信しました");
+        // ▼【新規追加】ステージの表示・非表示を切り替える！
+        if (swordStage != null) swordStage.SetActive(!SwordController.isKomaMode);
+        if (komaStage != null) komaStage.SetActive(SwordController.isKomaMode);
+
+        Debug.Log(SwordController.isKomaMode ? "🌀 独楽モード・ステージへ移行" : "⚔️ 剣モード・ステージへ移行");
     }
 }
