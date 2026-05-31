@@ -23,6 +23,11 @@ export default function PoseSwordWeb() {
   const enemySwordRef = useRef(null);
   useEffect(() => { enemySwordRef.current = enemySwordData; }, [enemySwordData]);
 
+  // ▼【新規追加】ゲームモードの管理 ("1" = 独楽, "0" = 剣)
+  const [gameMode, setGameMode] = useState("1");
+  const gameModeRef = useRef("1");
+  useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
+
   const [myPeerId, setMyPeerId] = useState("");
   const [targetId, setTargetId] = useState("");
   const peerRef = useRef(null);
@@ -38,23 +43,15 @@ export default function PoseSwordWeb() {
   const [systemMessage, setSystemMessage] = useState("");
 
   const { unityProvider, sendMessage, isLoaded } = useUnityContext({
-    loaderUrl: "../POSE_SWORD_Unity/Builds/ver1.2/Build/ver1.2.loader.js",
-    dataUrl: "../POSE_SWORD_Unity/Builds/ver1.2/Build/ver1.2.data",
-    frameworkUrl: "../POSE_SWORD_Unity/Builds/ver1.2/Build/ver1.2.framework.js",
-    codeUrl: "../POSE_SWORD_Unity/Builds/ver1.2/Build/ver1.2.wasm",
+    loaderUrl: "../POSE_SWORD_Unity/Builds/ver2.3/Build/ver2.3.loader.js",
+    dataUrl: "../POSE_SWORD_Unity/Builds/ver2.3/Build/ver2.3.data",
+    frameworkUrl: "../POSE_SWORD_Unity/Builds/ver2.3/Build/ver2.3.framework.js",
+    codeUrl: "../POSE_SWORD_Unity/Builds/ver2.3/Build/ver2.3.wasm",
   });
 
-  // 【重要】Unity が isLoaded になるまで sendMessage を遅延するためのキュー
-  // Unityコンポーネントは PLAYING 画面に初めてマウントされるため、
-  // launchUnityBattle 呼び出し時点では Unity は存在しない
   const pendingBattleRef = useRef(null);
-
   const syncCountRef = useRef({ fromUnity: 0, toPeer: 0, fromPeer: 0, toUnity: 0 });
 
-  // 【重要】sendMessage は react-unity-webgl が Unity ロード時に新しい参照を生成する。
-  // setupConnection は MATCHING 中（Unity ロード前）に呼ばれるため、
-  // conn.on('data',...) のクロージャは古い sendMessage（unityInstance=null）を掴んでしまう。
-  // ref を使い「常に最新の sendMessage」を参照させることで stale closure を防ぐ。
   const sendMessageRef = useRef(sendMessage);
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
@@ -64,12 +61,9 @@ export default function PoseSwordWeb() {
     const currentRole = roleRef.current;
     const clientWon = syncData.hostSword.hp <= 0;
 
-    // 初期HPを取得（mySwordRef = 自分の剣、enemySwordRef = 相手の剣）
     const myInitialHp = mySwordRef.current?.hp ?? 100;
     const enemyInitialHp = enemySwordRef.current?.hp ?? 100;
 
-    // HOST: 自分=hostSword、相手=clientSword
-    // CLIENT: 自分=clientSword、相手=hostSword
     let damageDealt, damageTaken;
     if (currentRole === "HOST") {
       damageDealt = Math.max(0, enemyInitialHp - syncData.clientSword.hp);
@@ -93,45 +87,45 @@ export default function PoseSwordWeb() {
 
   useEffect(() => { handleGameOverRef.current = handleGameOver; });
 
-  // 【修正】Unity が完全にロードされたタイミングで、保留中のバトルコマンドを送信する
-  // launchUnityBattle は setStep("PLAYING") を呼んでから Unity がマウント・ロードされるため、
-  // isLoaded が true になるまでコマンドを遅延させる必要がある
   useEffect(() => {
     if (isLoaded && pendingBattleRef.current !== null) {
-      const { mode, startJson } = pendingBattleRef.current;
+      // ▼【修正】gameMode を取り出して Unity に送る
+      const { mode, startJson, gameModeStr } = pendingBattleRef.current;
       pendingBattleRef.current = null;
       console.log("✅ Unity読み込み完了！保留中のバトルコマンドを送信します");
+      
       console.log(`📡 SetHostMode(${mode})`);
       sendMessage('GameManager', 'SetHostMode', mode);
+      
+      // ▼【新規追加】Unity側の NetworkManager にゲームモードを指示する
+      console.log(`📡 SetGameMode(${gameModeStr})`);
+      sendMessage('GameManager', 'SetGameMode', gameModeStr);
+      
       console.log(`📡 StartBattle`);
-      sendMessage('GameManager', 'StartBattle', JSON.stringify(startJson));
-      console.log("✅ SetHostMode と StartBattle 送信完了");
+      sendMessage('GameManager', 'StartBattle', JSON.stringify(startJson)); // ※StartBattleはSceneControllerに変更済み
+      
+      console.log("✅ 全バトル初期化コマンド送信完了");
     }
-  }, [isLoaded]);
+  }, [step, isLoaded]);
 
   useEffect(() => {
     window.ReactApp = {
       receiveFromUnity: (type, jsonString) => {
-        console.log(`🎮 [Unity→Web] タイプ: ${type}, JSON: ${jsonString.substring(0, 100)}...`);
         const data = JSON.parse(jsonString);
         const currentRole = roleRef.current;
         const currentConn = connRef.current;
 
         if (type === "SYNC" && currentRole === "HOST") {
-          syncCountRef.current.fromUnity++;  // ① Unity→React SYNC カウント
+          syncCountRef.current.fromUnity++; 
           if (currentConn) {
-            syncCountRef.current.toPeer++;    // ② React→PeerJS SYNC カウント
+            syncCountRef.current.toPeer++;  
             currentConn.send({ type: "SYNC", ...data });
-          } else {
-            console.warn("⚠️ SYNC送信エラー: 接続がありません");
           }
           if (data.hostSword.hp <= 0 || data.clientSword.hp <= 0) {
-            console.warn("🏁 ゲームオーバー！");
             if (handleGameOverRef.current) handleGameOverRef.current(data);
           }
         } 
         else if (type === "INPUT" && currentConn && currentRole === "CLIENT") {
-          console.log("📤 INPUTをPeerJsで送信します");
           currentConn.send({ type: "INPUT", ...data });
         }
       }
@@ -163,21 +157,17 @@ export default function PoseSwordWeb() {
         setCountdown(null);
         setIsReady(false);
         setIsEnemyReady(false);
-        // 【修正】バトル開始前に両方のデータが揃っているか確認
         if (mySwordRef.current && enemySwordRef.current) {
           launchUnityBattle(roleRef.current, mySwordRef.current, enemySwordRef.current);
         } else {
-          console.error("❌ バトル開始エラー：剣データが不足", { my: mySwordRef.current, enemy: enemySwordRef.current });
           alert("剣データの準備ができていません。");
         }
       }
     }
   }, [countdown]);
 
-  // 【追加】通信が繋がった瞬間に、お互いの剣のデータを送り合う（プレビュー用）
   useEffect(() => {
     if (connection && mySwordRef.current) {
-      // 少しだけ待ってから送る（接続直後のパケットロス防止）
       setTimeout(() => {
         connection.send({ type: "EXCHANGE_SWORD", swordData: mySwordRef.current });
       }, 500);
@@ -199,6 +189,7 @@ export default function PoseSwordWeb() {
     setEnemySwordData(null);
     setRole(null);
     setSystemMessage(msg);
+    setGameMode("1"); // ▼ 追加：モードリセット
     setStep("LOBBY");
   };
 
@@ -237,13 +228,17 @@ export default function PoseSwordWeb() {
       const currentRole = roleRef.current;
 
       switch (data.type) {
-        // 【追加】プレビュー用の剣データを受信
+        // ▼【新規追加】ゲームモードの同期受信（Client側）
+        case "SYNC_GAMEMODE":
+          console.log("【受信】ゲームモード変更:", data.gameMode);
+          if (currentRole === "CLIENT") {
+            setGameMode(data.gameMode);
+          }
+          break;
+
         case "EXCHANGE_SWORD":
-          console.log("【受信】相手の剣データを確認しました");
-          console.log("  相手の剣:", data.swordData);
           const enemyData1 = { ...data.swordData };
           if (enemyData1.imageStr && !enemyData1.imageSrc) {
-            // imageSrc を生成（base64文字列をDataURL形式に）
             enemyData1.imageSrc = enemyData1.imageStr.startsWith("data:") 
               ? enemyData1.imageStr 
               : "data:image/png;base64," + enemyData1.imageStr;
@@ -253,7 +248,6 @@ export default function PoseSwordWeb() {
 
         case "SYNC_STATE": 
           if (data.swordData) {
-            console.log("【受信】SYNC_STATE:", data);
             const enemyData2 = { ...data.swordData };
             if (enemyData2.imageStr && !enemyData2.imageSrc) {
               enemyData2.imageSrc = enemyData2.imageStr.startsWith("data:") 
@@ -266,15 +260,12 @@ export default function PoseSwordWeb() {
           break;
 
         case "LEAVE":
-          console.warn("【受信】相手が退出しました");
           resetToLobby("相手が部屋を退出しました。"); 
           break;
 
         case "INPUT":
           if (currentRole === "HOST") {
             try {
-              console.log("【受信INPUT】Hostへ転送します", data);
-              // sendMessageRef.current を使い、最新の sendMessage（Unity ロード後）を参照する
               sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data));
             } catch(e) {
               console.error("INPUT転送エラー:", e);
@@ -284,23 +275,19 @@ export default function PoseSwordWeb() {
 
         case "SYNC":
           if (currentRole === "CLIENT") {
-            syncCountRef.current.fromPeer++;   // ③ PeerJS→React SYNC カウント
+            syncCountRef.current.fromPeer++;   
             try {
-              syncCountRef.current.toUnity++;  // ④ React→Unity SyncTransform カウント
-              // sendMessageRef.current を使い、最新の sendMessage（Unity ロード後）を参照する
+              syncCountRef.current.toUnity++;  
               sendMessageRef.current('GameManager', 'SyncTransform', JSON.stringify(data));
             } catch(e) {
-              syncCountRef.current.toUnity--;  // 失敗したら戻す
-              console.error("SYNC転送エラー:", e);
+              syncCountRef.current.toUnity--;  
             }
             if (data.hostSword.hp <= 0 || data.clientSword.hp <= 0) {
-              console.warn("【ゲームオーバー】", data);
               if (handleGameOverRef.current) handleGameOverRef.current(data);
             }
           }
           break;
         default:
-          console.log("【受信】不明なメッセージタイプ:", data.type);
           break;
       }
     });
@@ -313,25 +300,20 @@ export default function PoseSwordWeb() {
   };
 
   const launchUnityBattle = (currentRole, myData, enemyData) => {
-    // 【修正】ホスト/クライアントのデータ割り当てを正しくする
-    // hostSwordはHost側、clientSwordはClient側と決まっている
     const hostData = currentRole === "HOST" ? myData : enemyData;
     const clientData = currentRole === "CLIENT" ? myData : enemyData;
     
     if (!hostData || !clientData) {
-      console.error("❌ バトル開始エラー：剣データが不足しています", { hostData, clientData });
       alert("両方の剣データが準備できていません。もう一度やり直してください。");
       return;
     }
     
-    // Unity向けのデータは必要なフィールドのみ（imageSrcはReact UI用なので除外）
-    // imageSrcを含めるとJSONが数MBになりSendMessageが失敗する
     const toUnityData = (data) => ({
       name: data.name,
       hp: data.hp,
       attack: data.attack,
       weight: data.weight,
-      imageStr: data.imageStr  // Base64文字列のみ（Unity用）
+      imageStr: data.imageStr  
     });
 
     const startJson = {
@@ -340,16 +322,10 @@ export default function PoseSwordWeb() {
     };
     
     const mode = currentRole === "HOST" ? 1 : 0;
-    console.log("🎮 バトル開始準備:", { role: currentRole, mode, hostData: hostData.name, clientData: clientData.name });
-
-    // 【重要】<Unity> コンポーネントは PLAYING 画面にのみ存在するため、
-    // setStep("PLAYING") を呼ぶ前には Unity はまだ DOM に存在しない。
-    // sendMessage はここでは絶対に呼ばない。
-    // 代わりにデータを ref に保存し、isLoaded が true になった時点で送信する。
-    pendingBattleRef.current = { mode, startJson };
-    console.log("⏳ バトルデータを保存しました。Unity ロード完了まで待機...");
-
-    setStep("PLAYING"); // ← これで Unity コンポーネントがマウントされ、ロードが始まる
+    
+    // ▼【修正】ゲームモード (gameModeRef.current) も一緒に pending に保存する
+    pendingBattleRef.current = { mode, startJson, gameModeStr: gameModeRef.current };
+    setStep("PLAYING"); 
   };
 
   const handleReady = () => {
@@ -368,8 +344,6 @@ export default function PoseSwordWeb() {
     const base64Full = canvas.toDataURL('image/jpeg');
     const base64DataOnly = base64Full.split(',')[1]; 
 
-    // HuggingFace Space に直接接続（Vercelのタイムアウト10秒を回避するため）
-    // ローカル開発時は VITE_API_URL=http://127.0.0.1:8000 を .env.local に設定
     const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? 'https://akequreru-pose-sword-api.hf.space'}/cutout`;
 
     fetch(pythonApiUrl, {
@@ -382,15 +356,13 @@ export default function PoseSwordWeb() {
       return response.json();
     })
     .then((data) => {
-      // 【修正】imageStr は Base64 文字列だけ（Unity用）
-      // UI表示用の URL はコンポーネント内で生成する
       setMySwordData({
         name: role === "HOST" ? "ホストブレード" : "クライアントソード",
         hp: data.params.hp,
         attack: data.params.attack,
         weight: data.params.weight,
-        imageStr: data.imageData,  // ← Base64文字列のみ
-        imageSrc: "data:image/png;base64," + data.imageData  // ← React UI用
+        imageStr: data.imageData,  
+        imageSrc: "data:image/png;base64," + data.imageData 
       });
       setIsCrafting(false);
       setStep("MATCHING");
@@ -434,7 +406,6 @@ export default function PoseSwordWeb() {
           <div style={styles.container}>
             <h2>マッチング待機</h2>
             
-            {/* 接続前の表示 */}
             {!connection && (
               <div>
                 <p>あなたのID: <strong style={{ color: 'blue' }}>{myPeerId || "取得中..."}</strong></p>
@@ -448,9 +419,7 @@ export default function PoseSwordWeb() {
               </div>
             )}
             
-            {/* 【追加】剣のプレビュー画面（自分と相手） */}
             <div style={styles.previewContainer}>
-              {/* 自分の剣 */}
               {mySwordData && (
                 <div style={styles.swordCard}>
                   <h3 style={{ margin: '0 0 10px 0', color: '#333' }}>自分の剣</h3>
@@ -464,10 +433,8 @@ export default function PoseSwordWeb() {
                 </div>
               )}
 
-              {/* VSマーク */}
               {connection && <div style={styles.vsText}>VS</div>}
 
-              {/* 相手の剣 */}
               {connection && (
                 <div style={styles.swordCard}>
                   <h3 style={{ margin: '0 0 10px 0', color: '#ff4444' }}>相手の剣</h3>
@@ -490,9 +457,33 @@ export default function PoseSwordWeb() {
               )}
             </div>
 
-            {/* 接続後の準備・カウントダウンUI */}
             {connection && (
               <div style={styles.connectedBox}>
+
+                {/* ▼【新規追加】ゲームモード選択UI */}
+                <div style={styles.modeBox}>
+                  <h3 style={{ margin: '0 0 10px 0' }}>バトルモード</h3>
+                  {role === "HOST" ? (
+                    <select
+                      value={gameMode}
+                      onChange={(e) => {
+                        const newMode = e.target.value;
+                        setGameMode(newMode);
+                        connection.send({ type: "SYNC_GAMEMODE", gameMode: newMode });
+                      }}
+                      style={{ padding: '8px', fontSize: '16px', borderRadius: '5px', cursor: 'pointer' }}
+                    >
+                      <option value="1">🌀 独楽（見下ろし）モード</option>
+                      <option value="0">⚔️ 剣（横視点・重力）モード</option>
+                    </select>
+                  ) : (
+                    <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>
+                      {gameMode === "1" ? "🌀 独楽（見下ろし）モード" : "⚔️ 剣（横視点・重力）モード"}
+                    </div>
+                  )}
+                </div>
+                {/* ▲ ここまで */}
+
                 {countdown !== null ? (
                   <h2 style={{ fontSize: '48px', color: 'red', margin: '0' }}>{countdown > 0 ? countdown : "START!"}</h2>
                 ) : (
@@ -560,14 +551,13 @@ const styles = {
   container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
   button: { padding: '10px 20px', margin: '10px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px', fontWeight: 'bold', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' },
   connectedBox: { marginTop: '10px', padding: '10px 20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
+  modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' }, // 追加
   video: { width: '400px', borderRadius: '8px', backgroundColor: '#000', marginBottom: '20px' },
   unityContainer: { width: '800px', height: '450px', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555' },
 readyBox: (isReady) => ({
     padding: '10px 20px', border: `2px solid ${isReady ? '#4CAF50' : '#9e9e9e'}`, backgroundColor: isReady ? '#e8f5e9' : '#f5f5f5', borderRadius: '8px', fontWeight: 'bold', minWidth: '100px'
   }),
   errorMessage: { padding: '15px 25px', backgroundColor: '#ffdddd', color: '#cc0000', borderRadius: '8px', marginBottom: '20px', fontWeight: 'bold', border: '1px solid #cc0000' },
-  
-  // 【追加】プレビュー表示用のスタイル
   previewContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', margin: '20px 0', width: '100%', maxWidth: '800px' },
   swordCard: { flex: 1, backgroundColor: '#fff', borderRadius: '12px', padding: '15px', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', border: '2px solid #e0e0e0' },
   previewImage: { width: '100%', height: '200px', objectFit: 'contain', backgroundColor: '#f0f0f0', borderRadius: '8px', marginBottom: '10px' },
