@@ -314,7 +314,7 @@ public static bool matchEnded = false;
                     // ▼【修正】ダッシュ時のバグ（/5で減っていた）を修正しつつ、強すぎない1.2倍ボーナスに
                     if (isDashing)
                     {
-                        damage = Mathf.RoundToInt(damage * 1.2f);
+                        damage = Mathf.RoundToInt(damage * 2f);
                     }
 
                     bool isSharp = (myCollider is PolygonCollider2D myPoly && IsPointy(hitPoint, myPoly));
@@ -641,31 +641,30 @@ public static bool matchEnded = false;
     }
 
     // ▼【修正】独楽モード：牽制の小ダッシュ（SP20〜69）
+    // ▼【修正】独楽モード：牽制の小ダッシュ
     IEnumerator DashRoutine()
     {
         isDashing = true;
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.5f, 0.5f);
         
         float consumedSp = currentSp;
-        currentSp = 0f; // SPを全て消費
+        currentSp = 0f; 
 
-        // 瞬間的な加速
-        if (controller != null && controller.enemyTarget != null && rb != null)
+        // ▼【修正】rb.bodyType == RigidbodyType2D.Dynamic を追加（Hostのみ動く）
+        if (controller != null && controller.enemyTarget != null && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
             rb.AddForce(dirToEnemy * (consumedSp * 1.5f), ForceMode2D.Impulse);
             rb.AddTorque(-consumedSp * 50f, ForceMode2D.Impulse); 
         }
 
-        // 牽制なので一瞬（0.2秒）で終わる
         yield return new WaitForSeconds(0.2f);
 
         isDashing = false;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
-    // ▼【新規追加】独楽モード：超必殺「竜巻」（SP70以上）
-    // ▼【修正】独楽モード：超必殺「竜巻」（SP70以上）
+    // ▼【修正】独楽モード：超必殺「竜巻」
     IEnumerator TornadoDashRoutine()
     {
         isDashing = true;
@@ -674,28 +673,24 @@ public static bool matchEnded = false;
 
         Debug.Log($"🌪️ 独楽モード：超必殺【竜巻】発動！ (消費SP: {consumedSp:F0})");
 
-        // ▼【新規追加】カットイン演出を呼び出す！
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            // 黄金色（Color）で竜巻の名前を出す
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f));
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "超必殺・竜巻!!", new Color(1f, 0.8f, 0.2f));
         }
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
 
-        float duration = 0.8f; // 【調整】1.5秒から 0.8秒 に短縮し、理不尽な長さを解消
+        float duration = 0.8f; 
         float timer = 0f;
 
         while (timer < duration)
         {
-            // ▼【重要】カウンターを食らって isDashing が false になったら即座に竜巻終了！
             if (!isDashing || isDead || matchEnded) break;
 
-            if (controller != null && controller.enemyTarget != null && rb != null)
+            // ▼【修正】rb.bodyType == RigidbodyType2D.Dynamic を追加（Hostのみ動く）
+            if (controller != null && controller.enemyTarget != null && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
             {
                 Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
-                
-                // 【調整】追従力と回転力を以前の半分以下に落とし、動きを少しマイルドに
                 rb.AddForce(dirToEnemy * (rb.mass * 30f), ForceMode2D.Force);
                 rb.AddTorque(2000f * rb.mass, ForceMode2D.Force);
             }
@@ -709,7 +704,8 @@ public static bool matchEnded = false;
             yield return null; 
         }
 
-        if (rb != null)
+        // ▼【修正】ブレーキもHostのみ
+        if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             rb.linearVelocity *= 0.5f; 
         }
@@ -718,8 +714,7 @@ public static bool matchEnded = false;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
-    // ▼【新規追加】剣モード専用のド派手な「大回転斬りダッシュ」
-    // ▼【変更】剣モード専用「一直線ジャンプダッシュ」
+    // ▼【修正】剣モード専用「一直線ジャンプダッシュ」
     IEnumerator SwordDashRoutine()
     {
         isDashing = true;
@@ -728,17 +723,15 @@ public static bool matchEnded = false;
         if (spriteRenderer != null) spriteRenderer.color = new Color(0.5f, 1f, 1f); 
 
         currentSp = 0f;
-        dashDamageBonus = 3.0f; 
+        dashDamageBonus = 5.0f; 
 
-        // ▼【新規追加】カットイン演出を呼び出す！
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            // 水色（Color）で剣モードの技名を出す
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬り!!", new Color(1f, 0.8f, 0.2f));
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬りダッシュ!!", new Color(0.5f, 1f, 1f));
         }
 
-        // 1. 小ジャンプの予備動作（ふわっと浮く）
-        if (rb != null)
+        // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）
+        if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             rb.linearVelocity = new Vector2(0f, 15f); 
             rb.angularVelocity = 720f; 
@@ -746,8 +739,8 @@ public static bool matchEnded = false;
         
         yield return new WaitForSeconds(0.2f);
 
-        // 2. 空中で一瞬静止（タメ演出＆一直線の準備）
-        if (rb != null)
+        // ▼【修正】2. 空中で一瞬静止（Hostのみ）
+        if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             rb.linearVelocity = Vector2.zero; 
             rb.gravityScale = 0f;            
@@ -756,10 +749,10 @@ public static bool matchEnded = false;
 
         yield return new WaitForSeconds(0.1f);
 
-        // 3. 敵に向かって一直線に発射！
-        isDashShooting = true; // ★ここでついに発射！（ここから壁バウンドが有効になる）
+        isDashShooting = true; 
 
-        if (controller != null && controller.enemyTarget != null && rb != null)
+        // ▼【修正】3. 敵に向かって一直線に発射！（Hostのみ）
+        if (controller != null && controller.enemyTarget != null && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
             rb.linearVelocity = dirToEnemy * 50f; 
@@ -770,7 +763,6 @@ public static bool matchEnded = false;
             Debug.Log($"⚔️ 剣モード：一直線ダッシュ発動！");
         }
 
-        // 4. 最大2秒経っても何にも当たらなかったら自動で解除
         yield return new WaitForSeconds(2.0f);
         if (isDashing && !SwordController.isKomaMode)
         {
@@ -779,17 +771,18 @@ public static bool matchEnded = false;
         }
     }
 
-    // ▼【新規追加】剣モードのダッシュを強制終了させる関数
+    // ▼【修正】ダッシュ終了時
     public void EndSwordDash()
     {
         if (!isDashing) return;
 
         isDashing = false;
-        isDashShooting = false; // ★終了時にもちゃんとオフにする
+        isDashShooting = false; 
         
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
         
-        if (rb != null)
+        // ▼【修正】停止処理もHostのみ
+        if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             rb.linearVelocity = Vector2.zero; 
             rb.angularVelocity = 0f;

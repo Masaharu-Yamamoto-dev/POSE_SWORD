@@ -61,6 +61,7 @@ private static extern void SendToReact(string type, string jsonString);
     }
 
     // HostとClientで物理演算と操作権限を切り替える
+    // HostとClientで物理演算と操作権限を切り替える
     public void ApplyModeSettings()
     {
         if (isHost)
@@ -71,7 +72,7 @@ private static extern void SendToReact(string type, string jsonString);
         }
         else
         {
-            // 【Clientモード】操作権限を奪い、物理演算を無効化（パラパラ漫画状態にする）
+            // 【Clientモード】
             if (hostSword != null)
             {
                 hostSword.GetComponent<Rigidbody2D>().bodyType = RigidbodyType2D.Kinematic;
@@ -80,9 +81,11 @@ private static extern void SendToReact(string type, string jsonString);
             if (clientSword != null)
             {
                 clientSword.GetComponent<Rigidbody2D>().bodyType = RigidbodyType2D.Kinematic;
-                clientSword.GetComponent<SwordController>().isLocalControlled = false;
+                
+                // ▼【ココを修正！】Client側も、自分の剣は操作できるように「true」にする！
+                clientSword.GetComponent<SwordController>().isLocalControlled = true;
             }
-            Debug.Log("🌐 Clientモードで起動：物理演算を停止し、受信待機します");
+            Debug.Log("🌐 Clientモードで起動：物理演算を停止し、操作と受信待機します");
         }
     }
 

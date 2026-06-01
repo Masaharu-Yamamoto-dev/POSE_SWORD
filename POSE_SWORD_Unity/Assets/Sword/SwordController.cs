@@ -78,36 +78,24 @@ public class SwordController : MonoBehaviour
 
     public void JumpAndSpin(bool jumpRight)
     {
-        if (swordRigidbody == null) return;
+        // ▼【修正】物理演算がオン（Host側）の時だけ力を加える！
+        if (swordRigidbody == null || swordRigidbody.bodyType != RigidbodyType2D.Dynamic) return;
 
         Vector2 appliedForce = jumpForce;
         float appliedTorque = spinTorque;
 
-        // 左に飛ぶ場合は力と回転を反転！
         if (!jumpRight)
         {
             appliedForce.x *= -1f; 
             appliedTorque *= -1f;  
         }
 
-        // ▼【追加】連続タップした時にキビキビ動くように、上向きの勢いを少し殺してから再ジャンプする
         Vector2 currentVel = swordRigidbody.linearVelocity;
         if (currentVel.y > 0) currentVel.y *= 0.5f; 
         swordRigidbody.linearVelocity = currentVel;
 
         swordRigidbody.AddForce(appliedForce, ForceMode2D.Impulse);
         swordRigidbody.AddTorque(appliedTorque, ForceMode2D.Impulse);
-    }
-
-    
-    public void NetworkJump()
-    {
-        bool jumpRight = true;
-        if (enemyTarget != null && enemyTarget.position.x < transform.position.x)
-        {
-            jumpRight = false; // 敵が左にいれば左に飛ぶ
-        }
-        JumpAndSpin(jumpRight);
     }
 
     public void NetworkJump(bool jumpRight)

@@ -43,10 +43,10 @@ export default function PoseSwordWeb() {
   const [systemMessage, setSystemMessage] = useState("");
 
   const { unityProvider, sendMessage, isLoaded } = useUnityContext({
-    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.4/Build/ver2.4.loader.js",
-    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.4/Build/ver2.4.data",
-    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.4/Build/ver2.4.framework.js",
-    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.4/Build/ver2.4.wasm",
+    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.loader.js",
+    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.data",
+    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.framework.js",
+    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.wasm",
   });
 
   const pendingBattleRef = useRef(null);

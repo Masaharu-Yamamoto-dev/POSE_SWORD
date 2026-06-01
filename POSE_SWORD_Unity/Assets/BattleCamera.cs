@@ -16,7 +16,6 @@ public class BattleCamera : MonoBehaviour
     [Header("高さの制限")]
     public float baseY = 3f;
 
-    // ▼【新規追加】カウントダウン演出時の上下位置を調整する枠！
     [Header("カウントダウン演出設定")]
     [Tooltip("数値が大きいほど、クローズアップ時にカメラが上に移動します（剣が画面のやや下に映るようになります）")]
     public float countdownOffsetY = 2.0f; 
@@ -58,6 +57,24 @@ public class BattleCamera : MonoBehaviour
         isTracking = true; 
     }
 
+    // ▼【新規追加】重心（回転の本当の中心）を取得する関数
+    private Vector3 GetSafePosition(Transform t)
+    {
+        if (t == null) return Vector3.zero;
+        
+        // 独楽モードの時は、猛烈に振り回されている「柄（position）」ではなく、
+        // 安定している「回転軸の中心（worldCenterOfMass）」をカメラのターゲットにする！
+        if (SwordController.isKomaMode)
+        {
+            Rigidbody2D rb = t.GetComponent<Rigidbody2D>();
+            if (rb != null)
+            {
+                return rb.worldCenterOfMass;
+            }
+        }
+        return t.position;
+    }
+
     void LateUpdate()
     {
         Vector3 currentBasePosition = transform.position;
@@ -68,7 +85,11 @@ public class BattleCamera : MonoBehaviour
         {
             if (player == null || enemy == null) return;
 
-            Vector3 centerPoint = (player.position + enemy.position) / 2f;
+            // ▼【修正】生の position ではなく、重心を考慮した安全な座標を取得する
+            Vector3 playerPos = GetSafePosition(player);
+            Vector3 enemyPos = GetSafePosition(enemy);
+
+            Vector3 centerPoint = (playerPos + enemyPos) / 2f;
             if (!SwordController.isKomaMode)
             {
                 targetY = Mathf.Max(baseY, centerPoint.y * 0.3f); 
@@ -82,7 +103,7 @@ public class BattleCamera : MonoBehaviour
             currentBasePosition = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 5f);
             transform.position = currentBasePosition;
 
-            float distance = Vector2.Distance(player.position, enemy.position);
+            float distance = Vector2.Distance(playerPos, enemyPos);
             float targetSize = Mathf.Clamp(distance * zoomMultiplier + margin, minSize, maxSize);
             cam.orthographicSize = Mathf.Lerp(cam.orthographicSize, targetSize, Time.deltaTime * zoomSpeed);
         }
@@ -91,10 +112,12 @@ public class BattleCamera : MonoBehaviour
         {
             if (focusTarget != null)
             {
-                // ★【修正】Y座標の計算に countdownOffsetY をプラスして、カメラを少し上に持ち上げる！
+                // ▼【修正】カウントダウン中も重心を狙うようにする
+                Vector3 focusPos = GetSafePosition(focusTarget);
+                
                 Vector3 targetPos = new Vector3(
-                    focusTarget.position.x, 
-                    focusTarget.position.y + countdownOffsetY, 
+                    focusPos.x, 
+                    focusPos.y + countdownOffsetY, 
                     -10f
                 );
                 
