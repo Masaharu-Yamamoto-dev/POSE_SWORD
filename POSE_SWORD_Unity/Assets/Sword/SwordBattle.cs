@@ -23,6 +23,8 @@ public class SwordBattle : MonoBehaviour
     public float maxImpactValue = 40f;
     public float pointyAngleThreshold = 80f;
     public float critThreshold = 3000f; 
+    [Header("ダメージポップアップ")]
+    public GameObject damagePopupPrefab;
 
 [Header("演出（エフェクト）")]
 public ParticleSystem critEffectPrefab;   
@@ -44,9 +46,10 @@ public static bool matchEnded = false;
     public float maxSp = 100f;         // SPの最大値
     public float passiveSpFill = 5f;   // 1秒間に自動で溜まる量
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
-
+ 
     // 突進状態の管理用
     [HideInInspector] public bool isDashing = false;
+    [HideInInspector] public bool isDashShooting = false; // ▼【新規追加】発射したかどうか
     private float dashDamageBonus = 1.0f; // 突進中の追加ダメージ倍率
 
     // SwordBattle.cs の変数宣言エリアに追加
@@ -55,9 +58,12 @@ public static bool matchEnded = false;
     private Rigidbody2D rb;
     private bool isDead = false;
 
+    public static bool isRoundStarted = false; // ★新規追加：ラウンドが開始したか
+
     void Start()
     {   
         matchEnded = false;
+        isRoundStarted = false; // ★開始時は一回 false にする
         rb = GetComponent<Rigidbody2D>();
         controller = GetComponent<SwordController>();
         Transform blade = transform.Find("Blade");
@@ -80,40 +86,35 @@ public static bool matchEnded = false;
     // ▼【追加】毎フレーム呼ばれる関数
     void Update()
     {
-        // 赤ゲージが存在し、かつ緑ゲージよりも多い場合（ダメージを受けた直後）
         if (delayHpBar != null && hpBar != null && delayHpBar.value > hpBar.value)
         {
-            // Lerp（線形補間）を使って、徐々に減速しながら滑らかに追従させる
-            // Time.unscaledDeltaTime を使うことで、ヒットストップで時間が止まっていてもUIは動く！
             delayHpBar.value = Mathf.Lerp(delayHpBar.value, hpBar.value, 5f * Time.unscaledDeltaTime);
-            
-            // 誤差レベルまで近づいたらピッタリ合わせる
-            if (delayHpBar.value - hpBar.value < 0.5f)
-            {
-                delayHpBar.value = hpBar.value;
-            }
+            if (delayHpBar.value - hpBar.value < 0.5f) delayHpBar.value = hpBar.value;
         }
-        if (!isDead && !matchEnded)
+
+        if (!isRoundStarted || isDead || matchEnded) return;
+
+        currentSp += passiveSpFill * Time.deltaTime;
+        currentSp = Mathf.Clamp(currentSp, 0f, maxSp);
+
+        if (spGaugeBar != null)
         {
-            currentSp += passiveSpFill * Time.deltaTime;
-            currentSp = Mathf.Clamp(currentSp, 0f, maxSp);
+            spGaugeBar.maxValue = maxSp;
+            spGaugeBar.value = currentSp;
+        }
 
-            if (spGaugeBar != null)
-            {
-                spGaugeBar.maxValue = maxSp;
-                spGaugeBar.value = currentSp;
-            }
+        if (spText != null)
+        {
+            spText.text = $"SP: {Mathf.FloorToInt(currentSp)} / {maxSp}";
+        }
 
-            if (spText != null)
-            {
-                spText.text = $"SP: {Mathf.FloorToInt(currentSp)} / {maxSp}";
-            }
-
-            // ▼【変更】独楽モードかどうかの判定を外し、TryActionを呼ぶ！
-            if (Input.GetMouseButtonDown(0) && controller != null && controller.isLocalControlled)
-            {
-                TryAction(); 
-            }
+        // ▼【変更】画面の「右半分」か「左半分」かを判定してジャンプ！
+        if (Input.GetMouseButtonDown(0) && controller != null && controller.isLocalControlled)
+        {
+            // クリックしたX座標が、画面幅の半分より大きければ「右（true）」、小さければ「左（false）」
+            bool clickedRight = Input.mousePosition.x > (Screen.width / 2f);
+            
+            TryAction(clickedRight); 
         }
     }
 
@@ -150,35 +151,96 @@ public static bool matchEnded = false;
     {
         if (isDead) return;
         bool wasDashing = isDashing;
+        
+        SwordBattle target = collision.gameObject.GetComponent<SwordBattle>();
+
+        // ==========================================
+        // ▼【修正1】剣モード：必殺技ダッシュ中の「地形バウンド」
+        // ==========================================
         if (!SwordController.isKomaMode && isDashing)
         {
-            EndSwordDash();
+            if (!isDashShooting) return;
+            if (target == null)
+            {
+                // 相手の剣ではなく「壁」や「床」にぶつかった場合はピンボールのように跳ね返る！
+                if (rb != null && collision.contacts.Length > 0)
+                {
+                    Vector2 inDirection = rb.linearVelocity.normalized;
+                    Vector2 normal = collision.contacts[0].normal;
+                    Vector2 bounceDir = Vector2.Reflect(inDirection, normal);
+                    
+                    // スピードを維持して反射（最低40fは担保して超高速をキープ）
+                    float currentSpeed = Mathf.Max(rb.linearVelocity.magnitude, 40f);
+                    rb.linearVelocity = bounceDir * currentSpeed; 
+                    
+                    // 回転も進行方向に合わせる
+                    rb.angularVelocity = Mathf.Sign(bounceDir.x) * -2500f;
+
+                    // 壁に当たった音とエフェクト
+                    if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+                    if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
+                    
+                    // 画面も軽く揺らす
+                    BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
+                    if (cam != null) cam.TriggerShake(0.1f, 0.2f);
+                }
+                // ダッシュは終わらせず、ここで処理を抜ける（反射し続ける）
+                return;
+            }
+            else
+            {
+                // 相手の剣に当たった時は突き刺さってダッシュ終了
+                EndSwordDash();
+            }
         }
-        SwordBattle target = collision.gameObject.GetComponent<SwordBattle>();
+
+        // 相手の剣との衝突
         if (target != null && target != this)
         {
+            Collider2D myCollider = collision.otherCollider;
+            Collider2D targetCollider = collision.collider;
+
+            // ==========================================
+            // ▼【修正2】柄同士の鍔迫り合い（ガキン！と大きく弾く）
+            // ==========================================
+            bool isHandleClash = myCollider.CompareTag("Handle") && targetCollider.CompareTag("Handle");
+            if (isHandleClash && !wasDashing)
+            {
+                // 火花を出して音を鳴らす
+                if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
+                if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+
+                if (rb != null)
+                {
+                    Vector2 clashBounce = (transform.position - target.transform.position).normalized;
+                    clashBounce.y += 1.0f; // やや上方向に激しく弾く
+                    rb.AddForce(clashBounce * (bounceForce * rb.mass * 1.5f), ForceMode2D.Impulse);
+                }
+                return; // 鍔迫り合いなのでダメージ計算はせず終了
+            }
+
             if (rb != null)
             {
                 if (!wasDashing)
                 {
                     Vector2 bounceDir = (transform.position - collision.transform.position).normalized;
-                    
-                    // ▼【修正】独楽モード（見下ろし）の時は上（Y軸）に跳ねさせない！
                     if (!SwordController.isKomaMode) {
                         bounceDir.y += 0.5f; 
                     }
-                    
-                    // ▼【修正】質量（mass）を掛けることで、重い剣同士でも「ガキンッ！」と大きく弾かれる！
                     rb.AddForce(bounceDir.normalized * (bounceForce * rb.mass), ForceMode2D.Impulse);
                 }
             }
 
-            Collider2D myCollider = collision.otherCollider;
-            Collider2D targetCollider = collision.collider;
-
-            if (myCollider.CompareTag("Handle")) return;
+            // ==========================================
+            // ▼【修正3】柄ガードのブレイク（必殺技中は柄で当たっても攻撃判定！）
+            // ==========================================
+            // 自分が「ダッシュ中ではない通常時」だけ、自分の柄が当たった時の攻撃をキャンセルする。
+            // つまり、必殺技中は柄だろうが何だろうが問答無用で相手を叩き斬る！
+            if (!wasDashing && myCollider.CompareTag("Handle")) return;
 
             float impact = collision.relativeVelocity.magnitude;
+            
+            // ===== 以降は既存のコードがそのまま続きます =====
             if (impact > 2.0f)
             {
                 float clampedImpact = Mathf.Min(impact, maxImpactValue);
@@ -188,6 +250,32 @@ public static bool matchEnded = false;
                 bool isCrit = false;
                 bool isWeakPoint = false;
                 Vector2 hitPoint = collision.GetContact(0).point;
+
+                // 相手の剣との衝突
+
+            // ==========================================
+            // ▼【新規追加】独楽モード：カウンター（必殺技ブレイク）！
+            // ==========================================
+            // 自分が竜巻（ダッシュ）中で、相手も小ダッシュ（または竜巻）で突っ込んできた場合
+            if (SwordController.isKomaMode && wasDashing && target.isDashing)
+            {
+                isDashing = false; // 竜巻を強制終了！
+                isDashShooting = false;
+                
+                Debug.Log("💥 カウンター炸裂！相手の突進によって竜巻がブレイクされた！");
+                
+                // 竜巻を破られたペナルティとして、大きく後方に弾き飛ばされる
+                if (rb != null)
+                {
+                    Vector2 breakBounce = (transform.position - target.transform.position).normalized;
+                    rb.AddForce(breakBounce * (bounceForce * rb.mass * 2.0f), ForceMode2D.Impulse);
+                }
+                
+                // 画面を激しく揺らしてブレイク成功を演出
+                BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
+                if (cam != null) cam.TriggerShake(0.2f, 0.4f);
+            }
+
 
                 if (SwordController.isKomaMode)
                 {
@@ -340,6 +428,15 @@ public static bool matchEnded = false;
         if (hp < 0) hp = 0;
         UpdateUI();
 
+        // ▼【新規追加】ダメージ数値をポップアップさせる！
+        if (damagePopupPrefab != null && damage > 0)
+        {
+            // 剣がぶつかった位置(hitPos)に数字を出す
+            GameObject popup = Instantiate(damagePopupPrefab, hitPos, Quaternion.identity);
+            DamagePopup popupScript = popup.GetComponent<DamagePopup>();
+            if (popupScript != null) popupScript.Setup(damage, isCrit || isWeakPoint);
+        }
+
         if (hp == 0)
         {
             matchEnded = true;
@@ -440,8 +537,19 @@ public static bool matchEnded = false;
     {
         if (isDead || matchEnded) return;
 
-        // 音を鳴らす（クリティカルの細かい判定は通信量が重くなるので通常音で代用）
         if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+
+        // ▼【新規追加】通信相手の画面にもダメージ数値を出す
+        if (damagePopupPrefab != null && damage > 0)
+        {
+            // クライアント側は正確なhitPosが分からないので、剣の少し上にランダムにずらして出す
+            Vector3 spawnPos = transform.position + (Vector3)Random.insideUnitCircle * 1.5f;
+            GameObject popup = Instantiate(damagePopupPrefab, spawnPos, Quaternion.identity);
+            DamagePopup popupScript = popup.GetComponent<DamagePopup>();
+            
+            // クライアント側は通信節約のためクリティカル判定を受け取っていないので、ダメージが20以上なら赤(Crit扱い)にする
+            if (popupScript != null) popupScript.Setup(damage, damage >= 20);
+        }
 
         if (damage >= 20)
         {
@@ -456,75 +564,158 @@ public static bool matchEnded = false;
         }
     }
     // ▼【新規追加】突進アクション
-    IEnumerator DashRoutine()
-    {
-        isDashing = true;
-        if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.5f, 0.5f);
-        // 現在のSPを全て記録し、ゲージを空にする
-        float consumedSp = currentSp;
-        currentSp = 0f;
-
-        // SPの量に応じて、突進の「強さ」と「ボーナス倍率」を計算
-        // 例: SP100なら、突進力300、ダメージボーナス2倍
-        float dashPower = consumedSp; 
-        dashDamageBonus = 1.0f + (consumedSp / 100f); 
-
-        // 敵の方向を計算
-        if (controller != null && controller.enemyTarget != null)
-        {
-            Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
-            
-            // 瞬間的な超加速（Impulse）を与える！
-            rb.AddForce(dirToEnemy * dashPower, ForceMode2D.Impulse);
-            
-            // ついでに回転速度もブーストする
-            rb.AddTorque(-dashPower * 50f, ForceMode2D.Impulse); 
-
-            Debug.Log($"🚀 SP消費 {consumedSp:F0} で突進！ ボーナス倍率 {dashDamageBonus:F1}x");
-        }
-
-        // SPの量に応じて、突進状態の有効時間を決める（0.2秒 〜 0.5秒など）
-        float dashDuration = Mathf.Clamp(consumedSp / 200f, 0.1f, 0.4f);
-        yield return new WaitForSeconds(dashDuration);
-
-        if (rb != null)
-        {
-            rb.linearVelocity *= 0.1f; // 移動速度を10%まで一気に落とす
-            rb.angularVelocity *= 0.3f; // 上がりすぎた回転速度も落ち着かせる
-        }
-
-        isDashing = false;
-        dashDamageBonus = 1.0f;
-        if (spriteRenderer != null) spriteRenderer.color = Color.white;
-    }
-
-    // ▼【新規追加】外部（自分自身やNetworkManager）からダッシュを試みる関数
-    // ▼【変更】TryDash をやめて、モードごとに動きを変える TryAction に！
-    public void TryAction()
+    // ▼【変更】SPの量によって技を分岐させる
+    // ▼【変更】自分のアクションを実行しつつ、その名前をWebに送る！
+    public void TryAction(bool clickedRight = true)
     {
         if (isDead || matchEnded || isDashing) return;
 
+        string actionName = ""; // ★Webに送る用のアクション名
+
         if (SwordController.isKomaMode)
         {
-            // 【独楽モード】SPが20以上なら小出しに突進できる
-            if (currentSp >= 20f)
+            if (currentSp >= 70f)
             {
-                StartCoroutine(DashRoutine()); // 既存の突進
+                StartCoroutine(TornadoDashRoutine());
+                actionName = "Tornado";
+            }
+            else if (currentSp >= 20f)
+            {
+                StartCoroutine(DashRoutine()); 
+                actionName = "KomaDash";
             }
         }
         else
         {
-            // 【剣モード】SPがMAX（100）の時だけ、次のクリックが「必殺ダッシュ」になる！
             if (currentSp >= maxSp)
             {
                 StartCoroutine(SwordDashRoutine());
+                actionName = "SwordDash";
             }
             else if (controller != null)
             {
-                // SPが足りない場合は、今まで通りの「通常ジャンプ」
-                controller.NetworkJump(); 
+                controller.NetworkJump(clickedRight); 
+                actionName = clickedRight ? "JumpRight" : "JumpLeft";
             }
         }
+
+        // ▼【新規追加】自分が操作した時だけ、Web（React）側にアクションを伝える！
+        if (controller != null && controller.isLocalControlled && !string.IsNullOrEmpty(actionName))
+        {
+            InputMessage msg = new InputMessage();
+            msg.action = actionName;
+            NetworkManager.Instance.SendData("INPUT", JsonUtility.ToJson(msg));
+        }
+    }
+
+    // ▼【新規追加】通信相手のアクションを「強制発動」させる受信専用関数！
+    public void ExecuteRemoteAction(string actionName)
+    {
+        if (isDead || matchEnded || isDashing) return;
+
+        Debug.Log($"📡 相手からの通信を受信！ 強制発動: {actionName}");
+
+        if (actionName == "Tornado")
+        {
+            currentSp = 0f; // 強制消費
+            StartCoroutine(TornadoDashRoutine());
+        }
+        else if (actionName == "KomaDash")
+        {
+            currentSp = 0f;
+            StartCoroutine(DashRoutine());
+        }
+        else if (actionName == "SwordDash")
+        {
+            currentSp = 0f;
+            StartCoroutine(SwordDashRoutine());
+        }
+        else if (actionName == "JumpRight")
+        {
+            if (controller != null) controller.NetworkJump(true);
+        }
+        else if (actionName == "JumpLeft")
+        {
+            if (controller != null) controller.NetworkJump(false);
+        }
+    }
+
+    // ▼【修正】独楽モード：牽制の小ダッシュ（SP20〜69）
+    IEnumerator DashRoutine()
+    {
+        isDashing = true;
+        if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.5f, 0.5f);
+        
+        float consumedSp = currentSp;
+        currentSp = 0f; // SPを全て消費
+
+        // 瞬間的な加速
+        if (controller != null && controller.enemyTarget != null && rb != null)
+        {
+            Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
+            rb.AddForce(dirToEnemy * (consumedSp * 1.5f), ForceMode2D.Impulse);
+            rb.AddTorque(-consumedSp * 50f, ForceMode2D.Impulse); 
+        }
+
+        // 牽制なので一瞬（0.2秒）で終わる
+        yield return new WaitForSeconds(0.2f);
+
+        isDashing = false;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】独楽モード：超必殺「竜巻」（SP70以上）
+    // ▼【修正】独楽モード：超必殺「竜巻」（SP70以上）
+    IEnumerator TornadoDashRoutine()
+    {
+        isDashing = true;
+        float consumedSp = currentSp;
+        currentSp = 0f; 
+
+        Debug.Log($"🌪️ 独楽モード：超必殺【竜巻】発動！ (消費SP: {consumedSp:F0})");
+
+        // ▼【新規追加】カットイン演出を呼び出す！
+        if (CutinManager.Instance != null && spriteRenderer != null)
+        {
+            // 黄金色（Color）で竜巻の名前を出す
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f));
+        }
+
+        if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
+
+        float duration = 0.8f; // 【調整】1.5秒から 0.8秒 に短縮し、理不尽な長さを解消
+        float timer = 0f;
+
+        while (timer < duration)
+        {
+            // ▼【重要】カウンターを食らって isDashing が false になったら即座に竜巻終了！
+            if (!isDashing || isDead || matchEnded) break;
+
+            if (controller != null && controller.enemyTarget != null && rb != null)
+            {
+                Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
+                
+                // 【調整】追従力と回転力を以前の半分以下に落とし、動きを少しマイルドに
+                rb.AddForce(dirToEnemy * (rb.mass * 30f), ForceMode2D.Force);
+                rb.AddTorque(2000f * rb.mass, ForceMode2D.Force);
+            }
+
+            if (Random.value > 0.7f && guardEffectPrefab != null)
+            {
+                Instantiate(guardEffectPrefab, transform.position + (Vector3)Random.insideUnitCircle * 1.5f, Quaternion.identity);
+            }
+
+            timer += Time.deltaTime;
+            yield return null; 
+        }
+
+        if (rb != null)
+        {
+            rb.linearVelocity *= 0.5f; 
+        }
+
+        isDashing = false;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
     // ▼【新規追加】剣モード専用のド派手な「大回転斬りダッシュ」
@@ -532,55 +723,59 @@ public static bool matchEnded = false;
     IEnumerator SwordDashRoutine()
     {
         isDashing = true;
+        isDashShooting = false; 
         
         if (spriteRenderer != null) spriteRenderer.color = new Color(0.5f, 1f, 1f); 
 
         currentSp = 0f;
-        dashDamageBonus = 3.0f; // ダメージ2倍ボーナス！
+        dashDamageBonus = 3.0f; 
+
+        // ▼【新規追加】カットイン演出を呼び出す！
+        if (CutinManager.Instance != null && spriteRenderer != null)
+        {
+            // 水色（Color）で剣モードの技名を出す
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬り!!", new Color(1f, 0.8f, 0.2f));
+        }
 
         // 1. 小ジャンプの予備動作（ふわっと浮く）
         if (rb != null)
         {
-            rb.linearVelocity = new Vector2(0f, 15f); // 上向きの速度だけを与える
-            rb.angularVelocity = 720f; // 1秒間に2回転
+            rb.linearVelocity = new Vector2(0f, 15f); 
+            rb.angularVelocity = 720f; 
         }
         
-        // 0.2秒ほど浮き上がるのを待つ
         yield return new WaitForSeconds(0.2f);
 
         // 2. 空中で一瞬静止（タメ演出＆一直線の準備）
         if (rb != null)
         {
-            rb.linearVelocity = Vector2.zero; // ピタッと止まる
-            rb.gravityScale = 0f;             // 重力を切る
-            
-            // ▼ ここでさらに回転を上げて、発射直前の「ギュイィィン！」という感じを出します
+            rb.linearVelocity = Vector2.zero; 
+            rb.gravityScale = 0f;            
             rb.angularVelocity = 1440f;
         }
 
-        // 0.1秒タメる
         yield return new WaitForSeconds(0.1f);
 
         // 3. 敵に向かって一直線に発射！
+        isDashShooting = true; // ★ここでついに発射！（ここから壁バウンドが有効になる）
+
         if (controller != null && controller.enemyTarget != null && rb != null)
         {
             Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
+            rb.linearVelocity = dirToEnemy * 50f; 
             
-            // 速度（Velocity）を直接設定して、重さに関係なく弾丸のように真っ直ぐ飛ばす！
-            rb.linearVelocity = dirToEnemy * 50f; // ★速すぎる場合はこの数値を下げてください
-            
-            float spinDir = Mathf.Sign(dirToEnemy.x) * -1f; // 進む方向に合わせた回転
-            rb.angularVelocity = spinDir * 2500f; // ★数値を上げるとより激しく回ります
+            float spinDir = Mathf.Sign(dirToEnemy.x) * -1f; 
+            rb.angularVelocity = spinDir * 2500f; 
 
             Debug.Log($"⚔️ 剣モード：一直線ダッシュ発動！");
         }
 
-        // 4. 最大2秒経っても何にも当たらなかったら自動で解除する（宇宙の彼方へ飛んでいくのを防ぐ）
+        // 4. 最大2秒経っても何にも当たらなかったら自動で解除
         yield return new WaitForSeconds(2.0f);
         if (isDashing && !SwordController.isKomaMode)
         {
             EndSwordDash();
-            dashDamageBonus = 1.0f; // ダメージボーナスも元に戻す
+            dashDamageBonus = 1.0f; 
         }
     }
 
@@ -590,16 +785,14 @@ public static bool matchEnded = false;
         if (!isDashing) return;
 
         isDashing = false;
+        isDashShooting = false; // ★終了時にもちゃんとオフにする
         
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
         
         if (rb != null)
         {
-            // 速度と回転をゼロにして空中でピタッと止める
             rb.linearVelocity = Vector2.zero; 
             rb.angularVelocity = 0f;
-            
-            // 重力を元のモード（剣モードなら重力あり）に戻す
             if (controller != null) controller.ApplyPhysicsMode();
         }
         StartCoroutine(DelayEndDashFlag());

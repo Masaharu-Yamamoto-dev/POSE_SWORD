@@ -94,15 +94,15 @@ private static extern void SendToReact(string type, string jsonString);
     }
 
     // --- Client側：画面タップをHostへ送信 ---
-    void Update()
-    {
-        // Clientの時だけ、画面クリックを検知してWeb(Host)へINPUTを送る
-        if (!isHost && Input.GetMouseButtonDown(0))
-        {
-            InputMessage msg = new InputMessage();
-            SendData("INPUT", JsonUtility.ToJson(msg));
-        }
-    }
+    // void Update()
+    // {
+    //     // Clientの時だけ、画面クリックを検知してWeb(Host)へINPUTを送る
+    //     if (!isHost && Input.GetMouseButtonDown(0))
+    //     {
+    //         InputMessage msg = new InputMessage();
+    //         SendData("INPUT", JsonUtility.ToJson(msg));
+    //     }
+    // }
 
     // --- Host側：毎フレーム座標をClientへ送信 ---
     void FixedUpdate()
@@ -145,20 +145,23 @@ private static extern void SendToReact(string type, string jsonString);
 
     // 【Host専用】 Web仕様書5：Clientからの操作入力を受信
     // 【Host専用】 Web仕様書5：Clientからの操作入力を受信
+    // ▼【変更】HostもClientも、相手のアクションを受信して強制発動させる
     public void ReceiveInput(string jsonString)
     {
-        if (!isHost) return; 
         Debug.Log($"🎮 ReceiveInput: {jsonString}");
+        InputMessage msg = JsonUtility.FromJson<InputMessage>(jsonString);
         
-        if (clientSword != null)
+        // 自分がHostなら相手はClient剣、自分がClientなら相手はHost剣
+        GameObject enemyObj = isHost ? clientSword : hostSword;
+        
+        if (enemyObj != null)
         {
-            SwordBattle battle = clientSword.GetComponent<SwordBattle>();
+            SwordBattle battle = enemyObj.GetComponent<SwordBattle>();
             if (battle != null)
             {
-                // ▼【修正】分岐はすべてSwordBattleにお任せ！
-                // 独楽でも剣でも、とりあえずアクションを発動させる
-                battle.TryAction(); 
-                Debug.Log("✅ クライアントの剣がアクション（ジャンプ or ダッシュ）を実行しました！");
+                // 送られてきたアクション名（JumpRightやTornado等）を渡して強制発動！
+                battle.ExecuteRemoteAction(msg.action);
+                Debug.Log($"✅ 相手の剣がアクション（{msg.action}）を実行しました！");
             }
         }
     }
