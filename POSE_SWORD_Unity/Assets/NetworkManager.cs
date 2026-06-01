@@ -13,6 +13,8 @@ public class SwordSyncData {
     public int hp;
     public bool isDashing;
     public float sp;
+    public float centerX; // ▼【新規追加】本物の中心X
+    public float centerY; // ▼【新規追加】本物の中心Y
 }
 
 [System.Serializable]
@@ -131,6 +133,18 @@ private static extern void SendToReact(string type, string jsonString);
     SwordSyncData GetSyncData(GameObject obj)
     {
         SwordBattle battle = obj.GetComponent<SwordBattle>();
+        
+        // デフォルトは通常の座標
+        float cx = obj.transform.position.x;
+        float cy = obj.transform.position.y;
+
+        // 独楽モードなら、SwordBattleが計算した「ブレない本当の中心」を載せる
+        if (battle != null)
+        {
+            cx = battle.currentCenterPosition.x;
+            cy = battle.currentCenterPosition.y;
+        }
+
         return new SwordSyncData
         {
             x = obj.transform.position.x,
@@ -138,7 +152,9 @@ private static extern void SendToReact(string type, string jsonString);
             rotation = obj.transform.eulerAngles.z,
             hp = battle != null ? battle.hp : 100,
             isDashing = battle != null ? battle.isDashing : false,
-            sp = battle != null ? battle.currentSp : 0f
+            sp = battle != null ? battle.currentSp : 0f,
+            centerX = cx, // ▼【新規追加】
+            centerY = cy  // ▼【新規追加】
         };
     }
 
@@ -193,7 +209,11 @@ private static extern void SendToReact(string type, string jsonString);
         SwordBattle battle = obj.GetComponent<SwordBattle>();
         if (battle != null)
         {
-            // ▼【追加】HPが減っていたら、クライアント側でダメージ演出を発動！
+            // ▼【新規追加】Client側：Hostから送られてきた「ブレない本当の中心座標」を同期する
+            if (!isHost)
+            {
+                battle.currentCenterPosition = new Vector3(data.centerX, data.centerY, obj.transform.position.z);
+            }
             if (battle.hp > data.hp)
             {
                 int damageTaken = battle.hp - data.hp;

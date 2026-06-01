@@ -1046,6 +1046,7 @@ MonoBehaviour:
   isDashing: 0
   isDashShooting: 0
   trueVelocity: {x: 0, y: 0}
+  currentCenterPosition: {x: 0, y: 0, z: 0}
 --- !u!4 &287059452
 Transform:
   m_ObjectHideFlags: 0
@@ -1838,6 +1839,7 @@ MonoBehaviour:
   isDashing: 0
   isDashShooting: 0
   trueVelocity: {x: 0, y: 0}
+  currentCenterPosition: {x: 0, y: 0, z: 0}
 --- !u!82 &503523104
 AudioSource:
   m_ObjectHideFlags: 0
@@ -5265,7 +5267,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1302093870
 Transform:
   m_ObjectHideFlags: 0

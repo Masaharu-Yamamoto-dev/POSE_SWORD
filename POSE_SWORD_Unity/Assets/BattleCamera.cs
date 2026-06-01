@@ -64,16 +64,19 @@ public class BattleCamera : MonoBehaviour
 
     // ▼【新規追加】重心（回転の本当の中心）を取得する関数
     // ▼【修正】重心（回転の本当の中心）を取得する関数
+    // ▼【修正】画像サイズや物理モードに一切左右されず、完全にブレない中心座標を直接取得する！
     private Vector3 GetSafePosition(Transform t)
     {
         if (t == null) return Vector3.zero;
         
-        if (SwordController.isKomaMode)
+        // オブジェクトから SwordBattle コンポーネントを取得
+        SwordBattle battle = t.GetComponent<SwordBattle>();
+        if (battle != null)
         {
-            // Unityの仕様（Kinematicは重心を無視する）の対策として、
-            // Rigidbodyに頼らず、剣の向きに合わせて手動で「Y軸方向に+2.0」ズラしたワールド座標を計算する！
-            return t.TransformPoint(new Vector3(0f, komaCenterOffsetY, 0f));
+            // 独楽モード・剣モード、Host・Clientに関わらず、完全に同期された中心を返す
+            return battle.currentCenterPosition;
         }
+        
         return t.position;
     }
 

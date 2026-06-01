@@ -53,10 +53,14 @@ public static bool matchEnded = false;
     private float dashDamageBonus = 1.0f; // 突進中の追加ダメージ倍率
 
     // SwordBattle.cs の変数宣言エリアに追加
+    // SwordBattle.cs の変数宣言エリアに追加
     [HideInInspector] public Vector2 trueVelocity; // 独自の真の速度
     private Vector2 lastPosition;
     private Rigidbody2D rb;
     private bool isDead = false;
+
+    // ▼【新規追加】カメラが追従するための、画像サイズに左右されない本物の中心座標
+    [HideInInspector] public Vector3 currentCenterPosition;
 
     public static bool isRoundStarted = false; // ★新規追加：ラウンドが開始したか
 
@@ -75,12 +79,29 @@ public static bool matchEnded = false;
         maxHp = hp;
         UpdateUI();
         lastPosition = transform.position;
+        
+        // ▼【新規追加】初期値は通常の座標にしておく
+        currentCenterPosition = transform.position;
     }
 
     void FixedUpdate()
     {
         trueVelocity = ((Vector2)transform.position - lastPosition) / Time.fixedDeltaTime;
         lastPosition = transform.position;
+
+        // ▼【新規追加】Host側（物理演算が動いている側）は、自分の本物の回転中心を毎フレーム記録する
+        if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
+        {
+            if (SwordController.isKomaMode)
+            {
+                // 物理エンジンが回している中心（worldCenterOfMass）を正確に捉える！
+                currentCenterPosition = new Vector3(rb.worldCenterOfMass.x, rb.worldCenterOfMass.y, transform.position.z);
+            }
+            else
+            {
+                currentCenterPosition = transform.position;
+            }
+        }
     }
 
     // ▼【追加】毎フレーム呼ばれる関数
