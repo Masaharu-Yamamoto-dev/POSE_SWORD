@@ -20,6 +20,11 @@ public class BattleCamera : MonoBehaviour
     [Tooltip("数値が大きいほど、クローズアップ時にカメラが上に移動します（剣が画面のやや下に映るようになります）")]
     public float countdownOffsetY = 2.0f; 
 
+    // ▼【新規追加】独楽モードのカメラ重心調整
+    [Header("独楽モードのカメラ重心調整")]
+    [Tooltip("SwordControllerの centerOfMass のY値と同じにしてください")]
+    public float komaCenterOffsetY = 2.0f;
+
     private float shakeDuration = 0f;
     private float shakeMagnitude = 0.5f;
 
@@ -58,19 +63,16 @@ public class BattleCamera : MonoBehaviour
     }
 
     // ▼【新規追加】重心（回転の本当の中心）を取得する関数
+    // ▼【修正】重心（回転の本当の中心）を取得する関数
     private Vector3 GetSafePosition(Transform t)
     {
         if (t == null) return Vector3.zero;
         
-        // 独楽モードの時は、猛烈に振り回されている「柄（position）」ではなく、
-        // 安定している「回転軸の中心（worldCenterOfMass）」をカメラのターゲットにする！
         if (SwordController.isKomaMode)
         {
-            Rigidbody2D rb = t.GetComponent<Rigidbody2D>();
-            if (rb != null)
-            {
-                return rb.worldCenterOfMass;
-            }
+            // Unityの仕様（Kinematicは重心を無視する）の対策として、
+            // Rigidbodyに頼らず、剣の向きに合わせて手動で「Y軸方向に+2.0」ズラしたワールド座標を計算する！
+            return t.TransformPoint(new Vector3(0f, komaCenterOffsetY, 0f));
         }
         return t.position;
     }
