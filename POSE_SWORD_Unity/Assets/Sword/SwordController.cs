@@ -45,62 +45,62 @@ public class SwordController : MonoBehaviour
 
     void Update()
     {
-        // 自分に操作権限がある時だけクリックを検知する
-        if (!isKomaMode && isLocalControlled && Input.GetMouseButtonDown(0))
-        {
-            JumpAndSpin();
-        }
+        // // ▼【修正】剣モード：ラウンド開始（GO!）が出るまでクリック操作（ジャンプ）を受け付けない
+        // if (SwordBattle.isRoundStarted && !isKomaMode && isLocalControlled && Input.GetMouseButtonDown(0))
+        // {
+        //     JumpAndSpin();
+        // }
     }
 
 
     void FixedUpdate()
     {
+        // 独楽モードで、自分に操作権限がある時だけ自動で動かす
         if (isKomaMode && swordRigidbody != null && swordRigidbody.bodyType == RigidbodyType2D.Dynamic)
         {
-            // ▼【修正】質量（mass）を掛け算することで、重い剣でも負けずに爆速回転する！
+            // ==========================================
+            // 1. 高速回転（カウントダウン中もその場でギュイィィンと回り続ける！）
+            // ==========================================
             swordRigidbody.AddTorque(komaSpinTorque * swordRigidbody.mass * Time.fixedDeltaTime, ForceMode2D.Force);
-            
             float currentSpin = swordRigidbody.angularVelocity;
             swordRigidbody.angularVelocity = Mathf.Clamp(currentSpin, -maxKomaSpinSpeed, maxKomaSpinSpeed);
             
-            if (enemyTarget != null)
+            // ==========================================
+            // 2. 敵の方向へ向かう（GO! の合図が出た時だけ追尾を開始する！）
+            // ==========================================
+            if (SwordBattle.isRoundStarted && enemyTarget != null)
             {
                 Vector2 dirToEnemy = (enemyTarget.position - transform.position).normalized;
-                // ▼【修正】追従する力にも質量を掛ける
                 swordRigidbody.AddForce(dirToEnemy * komaHomingForce * swordRigidbody.mass * Time.fixedDeltaTime, ForceMode2D.Force);
             }
         }
     }
 
-    void JumpAndSpin()
+    public void JumpAndSpin(bool jumpRight)
     {
-        if (swordRigidbody != null)
+        // ▼【修正】物理演算がオン（Host側）の時だけ力を加える！
+        if (swordRigidbody == null || swordRigidbody.bodyType != RigidbodyType2D.Dynamic) return;
+
+        Vector2 appliedForce = jumpForce;
+        float appliedTorque = spinTorque;
+
+        if (!jumpRight)
         {
-            swordRigidbody.linearVelocity = Vector2.zero;
-            swordRigidbody.angularVelocity = 0f;
-
-            // 基本の力と回転をセット
-            Vector2 appliedForce = jumpForce;
-            float appliedTorque = spinTorque;
-
-            // ▼追加：敵が自分より「左」にいる場合は、方向を反転する！
-            if (enemyTarget != null && enemyTarget.position.x < transform.position.x)
-            {
-                appliedForce.x *= -1f; // 左へ飛ぶように反転
-                appliedTorque *= -1f;  // 回転を逆回り（反時計回り）に反転
-            }
-
-            // 計算した力でジャンプ＆回転
-            swordRigidbody.AddForce(appliedForce, ForceMode2D.Impulse);
-            swordRigidbody.AddTorque(appliedTorque, ForceMode2D.Impulse);
+            appliedForce.x *= -1f; 
+            appliedTorque *= -1f;  
         }
+
+        Vector2 currentVel = swordRigidbody.linearVelocity;
+        if (currentVel.y > 0) currentVel.y *= 0.5f; 
+        swordRigidbody.linearVelocity = currentVel;
+
+        swordRigidbody.AddForce(appliedForce, ForceMode2D.Impulse);
+        swordRigidbody.AddTorque(appliedTorque, ForceMode2D.Impulse);
     }
 
-    
-    public void NetworkJump()
+    public void NetworkJump(bool jumpRight)
     {
-        // 通信越しに「飛べ！」と言われたら強制的にジャンプする
-        JumpAndSpin();
+        JumpAndSpin(jumpRight);
     }
 
     public void ApplyPhysicsMode()

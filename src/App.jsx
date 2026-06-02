@@ -44,10 +44,10 @@ export default function PoseSwordWeb() {
   const [systemMessage, setSystemMessage] = useState("");
 
   const { unityProvider, sendMessage, isLoaded } = useUnityContext({
-    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.3/Build/ver2.3.loader.js",
-    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.3/Build/ver2.3.data",
-    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.3/Build/ver2.3.framework.js",
-    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.3/Build/ver2.3.wasm",
+    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.loader.js",
+    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.data",
+    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.framework.js",
+    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.wasm",
   });
 
   const pendingBattleRef = useRef(null);
@@ -129,7 +129,7 @@ export default function PoseSwordWeb() {
             if (handleGameOverRef.current) handleGameOverRef.current(data);
           }
         } 
-        else if (type === "INPUT" && currentConn && currentRole === "CLIENT") {
+        else if (type === "INPUT" && currentConn ) {
           currentConn.send({ type: "INPUT", ...data });
         }
       }
@@ -315,13 +315,21 @@ export default function PoseSwordWeb() {
           resetToLobby("相手が部屋を退出しました。"); 
           break;
 
+        // case "INPUT":
+        //   if (currentRole === "HOST") {
+        //     try {
+        //       sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data));
+        //     } catch(e) {
+        //       console.error("INPUT転送エラー:", e);
+        //     }
+        //   }
+        //   break;
+
         case "INPUT":
-          if (currentRole === "HOST") {
-            try {
-              sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data));
-            } catch(e) {
-              console.error("INPUT転送エラー:", e);
-            }
+          try {
+            sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data));
+          } catch(e) {
+            console.error("INPUT転送エラー:", e);
           }
           break;
 

@@ -13,6 +13,8 @@ public class SwordSyncData {
     public int hp;
     public bool isDashing;
     public float sp;
+    public float centerX; // ▼【新規追加】本物の中心X
+    public float centerY; // ▼【新規追加】本物の中心Y
 }
 
 [System.Serializable]
@@ -61,6 +63,7 @@ private static extern void SendToReact(string type, string jsonString);
     }
 
     // HostとClientで物理演算と操作権限を切り替える
+    // HostとClientで物理演算と操作権限を切り替える
     public void ApplyModeSettings()
     {
         if (isHost)
@@ -71,7 +74,7 @@ private static extern void SendToReact(string type, string jsonString);
         }
         else
         {
-            // 【Clientモード】操作権限を奪い、物理演算を無効化（パラパラ漫画状態にする）
+            // 【Clientモード】
             if (hostSword != null)
             {
                 hostSword.GetComponent<Rigidbody2D>().bodyType = RigidbodyType2D.Kinematic;
@@ -80,9 +83,11 @@ private static extern void SendToReact(string type, string jsonString);
             if (clientSword != null)
             {
                 clientSword.GetComponent<Rigidbody2D>().bodyType = RigidbodyType2D.Kinematic;
-                clientSword.GetComponent<SwordController>().isLocalControlled = false;
+                
+                // ▼【ココを修正！】Client側も、自分の剣は操作できるように「true」にする！
+                clientSword.GetComponent<SwordController>().isLocalControlled = true;
             }
-            Debug.Log("🌐 Clientモードで起動：物理演算を停止し、受信待機します");
+            Debug.Log("🌐 Clientモードで起動：物理演算を停止し、操作と受信待機します");
         }
     }
 
@@ -94,15 +99,15 @@ private static extern void SendToReact(string type, string jsonString);
     }
 
     // --- Client側：画面タップをHostへ送信 ---
-    void Update()
-    {
-        // Clientの時だけ、画面クリックを検知してWeb(Host)へINPUTを送る
-        if (!isHost && Input.GetMouseButtonDown(0))
-        {
-            InputMessage msg = new InputMessage();
-            SendData("INPUT", JsonUtility.ToJson(msg));
-        }
-    }
+    // void Update()
+    // {
+    //     // Clientの時だけ、画面クリックを検知してWeb(Host)へINPUTを送る
+    //     if (!isHost && Input.GetMouseButtonDown(0))
+    //     {
+    //         InputMessage msg = new InputMessage();
+    //         SendData("INPUT", JsonUtility.ToJson(msg));
+    //     }
+    // }
 
     // --- Host側：毎フレーム座標をClientへ送信 ---
     void FixedUpdate()
@@ -128,6 +133,18 @@ private static extern void SendToReact(string type, string jsonString);
     SwordSyncData GetSyncData(GameObject obj)
     {
         SwordBattle battle = obj.GetComponent<SwordBattle>();
+        
+        // デフォルトは通常の座標
+        float cx = obj.transform.position.x;
+        float cy = obj.transform.position.y;
+
+        // 独楽モードなら、SwordBattleが計算した「ブレない本当の中心」を載せる
+        if (battle != null)
+        {
+            cx = battle.currentCenterPosition.x;
+            cy = battle.currentCenterPosition.y;
+        }
+
         return new SwordSyncData
         {
             x = obj.transform.position.x,
@@ -135,7 +152,9 @@ private static extern void SendToReact(string type, string jsonString);
             rotation = obj.transform.eulerAngles.z,
             hp = battle != null ? battle.hp : 100,
             isDashing = battle != null ? battle.isDashing : false,
-            sp = battle != null ? battle.currentSp : 0f
+            sp = battle != null ? battle.currentSp : 0f,
+            centerX = cx, // ▼【新規追加】
+            centerY = cy  // ▼【新規追加】
         };
     }
 
@@ -145,20 +164,23 @@ private static extern void SendToReact(string type, string jsonString);
 
     // 【Host専用】 Web仕様書5：Clientからの操作入力を受信
     // 【Host専用】 Web仕様書5：Clientからの操作入力を受信
+    // ▼【変更】HostもClientも、相手のアクションを受信して強制発動させる
     public void ReceiveInput(string jsonString)
     {
-        if (!isHost) return; 
         Debug.Log($"🎮 ReceiveInput: {jsonString}");
+        InputMessage msg = JsonUtility.FromJson<InputMessage>(jsonString);
         
-        if (clientSword != null)
+        // 自分がHostなら相手はClient剣、自分がClientなら相手はHost剣
+        GameObject enemyObj = isHost ? clientSword : hostSword;
+        
+        if (enemyObj != null)
         {
-            SwordBattle battle = clientSword.GetComponent<SwordBattle>();
+            SwordBattle battle = enemyObj.GetComponent<SwordBattle>();
             if (battle != null)
             {
-                // ▼【修正】分岐はすべてSwordBattleにお任せ！
-                // 独楽でも剣でも、とりあえずアクションを発動させる
-                battle.TryAction(); 
-                Debug.Log("✅ クライアントの剣がアクション（ジャンプ or ダッシュ）を実行しました！");
+                // 送られてきたアクション名（JumpRightやTornado等）を渡して強制発動！
+                battle.ExecuteRemoteAction(msg.action);
+                Debug.Log($"✅ 相手の剣がアクション（{msg.action}）を実行しました！");
             }
         }
     }
@@ -187,7 +209,11 @@ private static extern void SendToReact(string type, string jsonString);
         SwordBattle battle = obj.GetComponent<SwordBattle>();
         if (battle != null)
         {
-            // ▼【追加】HPが減っていたら、クライアント側でダメージ演出を発動！
+            // ▼【新規追加】Client側：Hostから送られてきた「ブレない本当の中心座標」を同期する
+            if (!isHost)
+            {
+                battle.currentCenterPosition = new Vector3(data.centerX, data.centerY, obj.transform.position.z);
+            }
             if (battle.hp > data.hp)
             {
                 int damageTaken = battle.hp - data.hp;
