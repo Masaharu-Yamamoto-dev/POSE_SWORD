@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "socket.io-client": "^4.7.5",
+    "peerjs": "^1.5.5",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-unity-webgl": "^10.2.0"
