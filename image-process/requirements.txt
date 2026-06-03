@@ -12,3 +12,6 @@ mediapipe>=0.10.30
 # API サーバ
 fastapi>=0.110
 uvicorn[standard]>=0.29
+
+# リアルタイム通信 (Socket.IO)
+python-socketio[asgi]>=5.11

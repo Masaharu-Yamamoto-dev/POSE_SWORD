@@ -13,11 +13,13 @@ import base64
 import io
 import os
 import random
+import string
 
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from rembg import new_session
+import socketio
 
 # ランダムに選ばれる剣の銘
 SWORD_NAMES = [
@@ -125,3 +127,107 @@ def cutout(req: CutoutRequest, x_api_key: str = Header(None)):
         "detail": stats["detail"],   # 各値の内訳(デバッグ用)
         "swordName": sword_name,
     }
+
+
+# ---------------------------------------------------------------------------
+# Socket.IO サーバー（リアルタイム通信）
+# ---------------------------------------------------------------------------
+
+sio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins=_allow_origins,
+    max_http_buffer_size=5 * 1024 * 1024,  # 5 MB
+)
+
+# ルーム管理: room_id → {"host_sid": str, "client_sid": str | None}
+rooms: dict[str, dict] = {}
+
+
+def _generate_room_id() -> str:
+    """6桁のランダムな数字IDを生成する。"""
+    return "".join(random.choices(string.digits, k=6))
+
+
+def _find_room_by_sid(sid: str) -> tuple[str | None, str | None]:
+    """sid が所属するルームを探し (room_id, role) を返す。"""
+    for room_id, info in rooms.items():
+        if info["host_sid"] == sid:
+            return room_id, "host"
+        if info.get("client_sid") == sid:
+            return room_id, "client"
+    return None, None
+
+
+@sio.event
+async def create_room(sid: str):
+    """ホストがルームを作成する。"""
+    for _ in range(10):
+        room_id = _generate_room_id()
+        if room_id not in rooms:
+            break
+    else:
+        await sio.emit("error", {"message": "ルーム作成に失敗しました"}, to=sid)
+        return
+
+    rooms[room_id] = {"host_sid": sid, "client_sid": None}
+    await sio.enter_room(sid, room_id)
+    await sio.emit("room_created", {"roomId": room_id}, to=sid)
+
+
+@sio.event
+async def join_room(sid: str, data: dict):
+    """クライアントがルームに参加する。"""
+    room_id = data.get("roomId", "")
+    if room_id not in rooms:
+        await sio.emit("error", {"message": "ルームが見つかりません"}, to=sid)
+        return
+    if rooms[room_id].get("client_sid") is not None:
+        await sio.emit("error", {"message": "ルームは満員です"}, to=sid)
+        return
+
+    rooms[room_id]["client_sid"] = sid
+    await sio.enter_room(sid, room_id)
+    # 双方に通知
+    await sio.emit("peer_joined", {"roomId": room_id}, to=rooms[room_id]["host_sid"])
+    await sio.emit("room_joined", {"roomId": room_id}, to=sid)
+
+
+@sio.event
+async def relay(sid: str, data: dict):
+    """メッセージを相手に中継する。"""
+    room_id, role = _find_room_by_sid(sid)
+    if room_id is None:
+        return
+    info = rooms[room_id]
+    target = info["client_sid"] if role == "host" else info["host_sid"]
+    if target:
+        await sio.emit("relay", data, to=target)
+
+
+@sio.event
+async def leave_room(sid: str):
+    """明示的にルームを退出する。"""
+    await _cleanup(sid)
+
+
+@sio.event
+async def disconnect(sid: str):
+    """切断時のクリーンアップ。"""
+    await _cleanup(sid)
+
+
+async def _cleanup(sid: str):
+    room_id, role = _find_room_by_sid(sid)
+    if room_id is None:
+        return
+    info = rooms[room_id]
+    # 相手に LEAVE を通知
+    other = info["client_sid"] if role == "host" else info["host_sid"]
+    if other:
+        await sio.emit("relay", {"type": "LEAVE"}, to=other)
+    # ルームを削除
+    del rooms[room_id]
+
+
+# FastAPI + Socket.IO を統合した ASGI アプリケーション
+application = socketio.ASGIApp(sio, other_app=app)

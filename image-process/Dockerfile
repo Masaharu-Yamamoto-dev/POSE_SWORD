@@ -23,4 +23,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 5. API起動（Spacesはポート 7860 を必須とする仕様です）
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "server:application", "--host", "0.0.0.0", "--port", "7860"]
