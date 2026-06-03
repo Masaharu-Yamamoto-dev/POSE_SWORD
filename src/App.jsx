@@ -187,25 +187,27 @@ export default function PoseSwordWeb() {
   useEffect(() => {
     if (!connection || !mySwordRef.current) return;
 
-    const { name, hp, attack, weight } = mySwordRef.current;
-    const statsData = { name, hp, attack, weight };
-    const imageStr = mySwordRef.current.imageStr;
+    const { name, hp, attack, weight, imageStr } = mySwordRef.current;
+    const statsOnly = { name, hp, attack, weight };
+    const fullData  = { name, hp, attack, weight, imageStr };
 
-    // 統計データのみを即時送信（小さいので確実に届く）
-    connection.send({ type: "EXCHANGE_SWORD", swordData: statsData });
+    // ① 300ms後：統計のみ（小さい）を送信 → ゲーム開始条件をすぐ満たす
+    const t1 = setTimeout(() => {
+      connection.send({ type: "EXCHANGE_SWORD", swordData: statsOnly });
+    }, 300);
 
-    // 相手データが届くまで1.5秒ごとにリトライ
-    const retryInterval = setInterval(() => {
-      if (enemySwordRef.current) { clearInterval(retryInterval); return; }
-      connection.send({ type: "EXCHANGE_SWORD", swordData: statsData });
-    }, 1500);
+    // ② 1000ms後：画像込みの完全データを送信
+    const t2 = setTimeout(() => {
+      connection.send({ type: "EXCHANGE_SWORD", swordData: fullData });
+    }, 1000);
 
-    // 画像は別送信（大きいが、届かなくてもゲームは開始できる）
-    const imageTimer = setTimeout(() => {
-      if (imageStr) connection.send({ type: "EXCHANGE_IMAGE", imageStr });
-    }, 800);
+    // ③ 2秒ごとにリトライ（画像が届くまで繰り返す）
+    const retry = setInterval(() => {
+      if (enemySwordRef.current?.imageSrc) { clearInterval(retry); return; }
+      connection.send({ type: "EXCHANGE_SWORD", swordData: !enemySwordRef.current ? statsOnly : fullData });
+    }, 2000);
 
-    return () => { clearInterval(retryInterval); clearTimeout(imageTimer); };
+    return () => { clearTimeout(t1); clearTimeout(t2); clearInterval(retry); };
   }, [connection]);
 
   useEffect(() => {
@@ -318,21 +320,20 @@ export default function PoseSwordWeb() {
           }
           break;
 
-        case "EXCHANGE_SWORD":
-          // 統計データのみ受信（imageStrは含まない）。重複受信は上書きで無害
-          setEnemySwordData(prev => ({ ...(prev || {}), ...data.swordData }));
-          break;
-
-        case "EXCHANGE_IMAGE":
-          // 画像データを既存の統計データに追加
+        case "EXCHANGE_SWORD": {
+          // 重複受信は安全（後着データがimageSrcを持てば上書き、持たなければ既存を保持）
+          const incoming = data.swordData;
           setEnemySwordData(prev => {
-            if (!prev) return null;
-            const imageSrc = data.imageStr?.startsWith("data:")
-              ? data.imageStr
-              : "data:image/png;base64," + data.imageStr;
-            return { ...prev, imageStr: data.imageStr, imageSrc };
+            const merged = { ...(prev || {}), ...incoming };
+            if (merged.imageStr && !merged.imageSrc) {
+              merged.imageSrc = merged.imageStr.startsWith("data:")
+                ? merged.imageStr
+                : "data:image/png;base64," + merged.imageStr;
+            }
+            return merged;
           });
           break;
+        }
 
         case "SYNC_STATE": 
           if (data.swordData) {
