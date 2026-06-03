@@ -1,32 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Peer } from 'peerjs';
+import { io } from 'socket.io-client';
 import { Unity, useUnityContext } from 'react-unity-webgl';
 
-// STUN + TURN サーバー設定（異なるネットワーク間でもWebRTCを繋げるため）
-const PEER_ICE_CONFIG = {
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-    ]
-  }
-};
+// Socket.IO サーバーURL（バックエンドと同じ HuggingFace Spaces）
+const SOCKET_URL = import.meta.env.VITE_API_URL ?? 'https://akequreru-pose-sword-api.hf.space';
 
 export default function PoseSwordWeb() {
   const [step, setStep] = useState("LOBBY");
   const stepRef = useRef(step);
   useEffect(() => { stepRef.current = step; }, [step]);
-  
+
   const [role, setRole] = useState(null);
   const roleRef = useRef(null);
   useEffect(() => { roleRef.current = role; }, [role]);
-  
-  const [connection, setConnection] = useState(null);
-  const connRef = useRef(null);
-  useEffect(() => { connRef.current = connection; }, [connection]);
+
+  // Socket.IO 接続状態
+  const socketRef = useRef(null);
+  const [isConnectedToPeer, setIsConnectedToPeer] = useState(false);
+  const isConnectedRef = useRef(false);
+  useEffect(() => { isConnectedRef.current = isConnectedToPeer; }, [isConnectedToPeer]);
 
   const [mySwordData, setMySwordData] = useState(null);
   const mySwordRef = useRef(null);
@@ -36,16 +28,15 @@ export default function PoseSwordWeb() {
   const enemySwordRef = useRef(null);
   useEffect(() => { enemySwordRef.current = enemySwordData; }, [enemySwordData]);
 
-  // ▼【新規追加】ゲームモードの管理 ("1" = 独楽, "0" = 剣)
+  // ゲームモードの管理 ("1" = 独楽, "0" = 剣)
   const [gameMode, setGameMode] = useState("1");
   const gameModeRef = useRef("1");
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
 
   const [userName, setUserName] = useState("");
 
-  const [myPeerId, setMyPeerId] = useState("");
-  const [targetId, setTargetId] = useState("");
-  const peerRef = useRef(null);
+  const [roomId, setRoomId] = useState("");
+  const [roomIdInput, setRoomIdInput] = useState("");
 
   const [isCrafting, setIsCrafting] = useState(false);
   const [captureCountdown, setCaptureCountdown] = useState(null);
@@ -75,10 +66,134 @@ export default function PoseSwordWeb() {
 
   const handleGameOverRef = useRef(null);
 
+  // --- Socket.IO ヘルパー ---
+  const sendToRelay = (data) => {
+    if (socketRef.current) {
+      socketRef.current.emit('relay', data);
+    }
+  };
+
+  // --- relay メッセージ受信ハンドラ ---
+  const handleRelayMessage = (data) => {
+    const currentRole = roleRef.current;
+
+    switch (data.type) {
+      case "SYNC_GAMEMODE":
+        console.log("【受信】ゲームモード変更:", data.gameMode);
+        if (currentRole === "CLIENT") {
+          setGameMode(data.gameMode);
+        }
+        break;
+
+      case "EXCHANGE_SWORD": {
+        const incoming = data.swordData;
+        setEnemySwordData(prev => {
+          const merged = { ...(prev || {}), ...incoming };
+          if (merged.imageStr && !merged.imageSrc) {
+            merged.imageSrc = merged.imageStr.startsWith("data:")
+              ? merged.imageStr
+              : "data:image/png;base64," + merged.imageStr;
+          }
+          return merged;
+        });
+        break;
+      }
+
+      case "SYNC_STATE":
+        if (data.swordData) {
+          const enemyData2 = { ...data.swordData };
+          if (enemyData2.imageStr && !enemyData2.imageSrc) {
+            enemyData2.imageSrc = enemyData2.imageStr.startsWith("data:")
+              ? enemyData2.imageStr
+              : "data:image/png;base64," + enemyData2.imageStr;
+          }
+          setEnemySwordData(enemyData2);
+        }
+        setIsEnemyReady(data.isReady);
+        break;
+
+      case "LEAVE":
+        resetToLobby("相手が部屋を退出しました。");
+        break;
+
+      case "INPUT":
+        try {
+          sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data));
+        } catch(e) {
+          console.error("INPUT転送エラー:", e);
+        }
+        break;
+
+      case "SYNC":
+        if (currentRole === "CLIENT") {
+          try {
+            sendMessageRef.current('GameManager', 'SyncTransform', JSON.stringify(data));
+          } catch(e) {}
+          if (data.hostSword?.hp <= 0 || data.clientSword?.hp <= 0) {
+            if (handleGameOverRef.current) handleGameOverRef.current(data);
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  };
+
+  // --- Socket.IO 初期化 (mount 時に作成、unmount 時に切断) ---
+  useEffect(() => {
+    const socket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      autoConnect: true,
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log("Socket.IO 接続完了:", socket.id);
+    });
+
+    socket.on('disconnect', () => {
+      console.log("Socket.IO 切断");
+    });
+
+    // ルーム作成成功
+    socket.on('room_created', (data) => {
+      console.log(`部屋を作成しました。ID: ${data.roomId}`);
+      setRoomId(data.roomId);
+    });
+
+    // クライアントがルーム参加成功
+    socket.on('room_joined', (data) => {
+      console.log(`ルームに参加しました: ${data.roomId}`);
+      setRoomId(data.roomId);
+      setIsConnectedToPeer(true);
+    });
+
+    // ホスト側：クライアントが参加した通知
+    socket.on('peer_joined', (data) => {
+      console.log(`クライアントがルームに参加: ${data.roomId}`);
+      setIsConnectedToPeer(true);
+    });
+
+    // relay メッセージ受信
+    socket.on('relay', (data) => {
+      handleRelayMessage(data);
+    });
+
+    // エラー
+    socket.on('error', (data) => {
+      console.error("Socket.IO エラー:", data.message);
+      setSystemMessage(data.message);
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, []);
+
 const handleGameOver = (syncData) => {
-    // ▼【新規追加】既に終了処理に入っている場合は、重複して処理しない
     if (isFinishingRef.current) return;
-    isFinishingRef.current = true; // 終了処理開始フラグを立てる
+    isFinishingRef.current = true;
 
     const currentRole = roleRef.current;
     const clientWon = syncData.hostSword.hp <= 0;
@@ -103,41 +218,37 @@ const handleGameOver = (syncData) => {
       damageDealt,
       damageTaken
     });
-    
-    // ▼【変更】すぐに RESULT 画面にせず、Unityの演出を見るために3秒待つ
+
     console.log("🏁 決着！演出終了を待機します...");
-    
+
     setTimeout(() => {
-      // 待機中にユーザーが「退出する」等を押していなければ画面遷移
       if (stepRef.current === "PLAYING") {
         setIsReady(false);
         setIsEnemyReady(false);
         setCountdown(null);
         setStep("RESULT");
       }
-      isFinishingRef.current = false; // 次の試合のためにフラグを戻す
-    }, 3000); // ★3000ミリ秒（3秒）待機
+      isFinishingRef.current = false;
+    }, 3000);
   };
 
   useEffect(() => { handleGameOverRef.current = handleGameOver; });
 
   useEffect(() => {
     if (isLoaded && pendingBattleRef.current !== null) {
-      // ▼【修正】gameMode を取り出して Unity に送る
       const { mode, startJson, gameModeStr } = pendingBattleRef.current;
       pendingBattleRef.current = null;
       console.log("✅ Unity読み込み完了！保留中のバトルコマンドを送信します");
-      
+
       console.log(`📡 SetHostMode(${mode})`);
       sendMessage('GameManager', 'SetHostMode', mode);
-      
-      // ▼【新規追加】Unity側の NetworkManager にゲームモードを指示する
+
       console.log(`📡 SetGameMode(${gameModeStr})`);
       sendMessage('GameManager', 'SetGameMode', gameModeStr);
-      
+
       console.log(`📡 StartBattle`);
-      sendMessage('GameManager', 'StartBattle', JSON.stringify(startJson)); // ※StartBattleはSceneControllerに変更済み
-      
+      sendMessage('GameManager', 'StartBattle', JSON.stringify(startJson));
+
       console.log("✅ 全バトル初期化コマンド送信完了");
     }
   }, [step, isLoaded]);
@@ -147,20 +258,19 @@ const handleGameOver = (syncData) => {
       receiveFromUnity: (type, jsonString) => {
         const data = JSON.parse(jsonString);
         const currentRole = roleRef.current;
-        const currentConn = connRef.current;
 
         if (type === "SYNC" && currentRole === "HOST") {
-          syncCountRef.current.fromUnity++; 
-          if (currentConn) {
-            syncCountRef.current.toPeer++;  
-            currentConn.send({ type: "SYNC", ...data });
+          syncCountRef.current.fromUnity++;
+          if (isConnectedRef.current) {
+            syncCountRef.current.toPeer++;
+            sendToRelay({ type: "SYNC", ...data });
           }
           if (data.hostSword.hp <= 0 || data.clientSword.hp <= 0) {
             if (handleGameOverRef.current) handleGameOverRef.current(data);
           }
-        } 
-        else if (type === "INPUT" && currentConn ) {
-          currentConn.send({ type: "INPUT", ...data });
+        }
+        else if (type === "INPUT" && isConnectedRef.current) {
+          sendToRelay({ type: "INPUT", ...data });
         }
       }
     };
@@ -202,30 +312,30 @@ const handleGameOver = (syncData) => {
   }, [countdown]);
 
   useEffect(() => {
-    if (!connection || !mySwordRef.current) return;
+    if (!isConnectedToPeer || !mySwordRef.current) return;
 
     const { name, hp, attack, weight, imageStr } = mySwordRef.current;
     const statsOnly = { name, hp, attack, weight };
     const fullData  = { name, hp, attack, weight, imageStr };
 
-    // ① 300ms後：統計のみ（小さい）を送信 → ゲーム開始条件をすぐ満たす
+    // ① 300ms後：統計のみ（小さい）を送信
     const t1 = setTimeout(() => {
-      connection.send({ type: "EXCHANGE_SWORD", swordData: statsOnly });
+      sendToRelay({ type: "EXCHANGE_SWORD", swordData: statsOnly });
     }, 300);
 
     // ② 1000ms後：画像込みの完全データを送信
     const t2 = setTimeout(() => {
-      connection.send({ type: "EXCHANGE_SWORD", swordData: fullData });
+      sendToRelay({ type: "EXCHANGE_SWORD", swordData: fullData });
     }, 1000);
 
     // ③ 2秒ごとにリトライ（画像が届くまで繰り返す）
     const retry = setInterval(() => {
       if (enemySwordRef.current?.imageSrc) { clearInterval(retry); return; }
-      connection.send({ type: "EXCHANGE_SWORD", swordData: !enemySwordRef.current ? statsOnly : fullData });
+      sendToRelay({ type: "EXCHANGE_SWORD", swordData: !enemySwordRef.current ? statsOnly : fullData });
     }, 2000);
 
     return () => { clearTimeout(t1); clearTimeout(t2); clearInterval(retry); };
-  }, [connection]);
+  }, [isConnectedToPeer]);
 
   useEffect(() => {
     if (captureCountdown !== null) {
@@ -234,19 +344,18 @@ const handleGameOver = (syncData) => {
         return () => clearTimeout(timer);
       } else {
         setCaptureCountdown(null);
-        executeCaptureAndCraft(); // 0になったら実際の撮影を実行
+        executeCaptureAndCraft();
       }
     }
   }, [captureCountdown]);
 
   const resetToLobby = (msg = "") => {
-    if (peerRef.current) {
-      peerRef.current.destroy(); 
-      peerRef.current = null;
+    if (socketRef.current) {
+      socketRef.current.emit('leave_room');
     }
-    setConnection(null);
-    setMyPeerId("");
-    setTargetId("");
+    setIsConnectedToPeer(false);
+    setRoomId("");
+    setRoomIdInput("");
     setIsReady(false);
     setIsEnemyReady(false);
     setCountdown(null);
@@ -254,220 +363,85 @@ const handleGameOver = (syncData) => {
     setEnemySwordData(null);
     setRole(null);
     setSystemMessage(msg);
-    setGameMode("1"); // ▼ 追加：モードリセット
+    setGameMode("1");
     setStep("LOBBY");
   };
 
   const handleLeave = () => {
-    if (connRef.current) {
-      connRef.current.send({ type: "LEAVE" });
-    }
-    resetToLobby(""); 
+    sendToRelay({ type: "LEAVE" });
+    resetToLobby("");
   };
 
   const handleCreateRoom = () => {
     setSystemMessage("");
     setRole("HOST"); setStep("CRAFT");
-
-    const maxRetries = 5;
-
-    const attemptCreatePeer = (retriesLeft) => {
-      // 6桁のランダムIDを生成
-      const hostId = Math.floor(100000 + Math.random() * 900000).toString();
-      const peer = new Peer(hostId, PEER_ICE_CONFIG);
-
-      // 成功時：IDをセットし、接続待ち状態にする
-      peer.on('open', (id) => {
-        console.log(`部屋を作成しました。ID: ${id}`);
-        setMyPeerId(id);
-        peerRef.current = peer;
-        
-        peer.on('connection', (conn) => { 
-          conn.on('open', () => {
-            console.log("クライアントとの通信経路が完全に開通しました！");
-            setConnection(conn); 
-            setupConnection(conn); 
-          });
-        });
-      });
-
-      // エラー時：ID重複なら自動リトライ、それ以外はエラー出力
-      peer.on('error', (err) => {
-        if (err.type === 'unavailable-id') {
-          console.warn(`ID: ${hostId} は既に使用されています。`);
-          peer.destroy(); // 失敗したPeerインスタンスを破棄
-
-          if (retriesLeft > 0) {
-            console.log(`新しいIDで再試行します... (残り ${retriesLeft} 回)`);
-            attemptCreatePeer(retriesLeft - 1);
-          } else {
-            alert("サーバーが混雑しており、部屋の作成に失敗しました。少し時間を置いてから再度お試しください。");
-            resetToLobby("");
-          }
-        } else {
-          console.error("PeerJS通信エラー:", err);
-        }
-      });
-    };
-
-    attemptCreatePeer(maxRetries);
+    if (socketRef.current) {
+      socketRef.current.emit('create_room');
+    }
   };
 
   const handleJoinRoom = () => {
     setSystemMessage("");
     setRole("CLIENT"); setStep("CRAFT");
-    const peer = new Peer(PEER_ICE_CONFIG);
-    peer.on('open', (id) => setMyPeerId(id));
-    peerRef.current = peer;
   };
 
   const connectToHost = () => {
-    if (!peerRef.current || !targetId) return;
-    const conn = peerRef.current.connect(targetId);
-    conn.on('open', () => { setConnection(conn); setupConnection(conn); });
-  };
-
-  const setupConnection = (conn) => {
-    conn.on('data', (data) => {
-      const currentRole = roleRef.current;
-
-      switch (data.type) {
-        // ▼【新規追加】ゲームモードの同期受信（Client側）
-        case "SYNC_GAMEMODE":
-          console.log("【受信】ゲームモード変更:", data.gameMode);
-          if (currentRole === "CLIENT") {
-            setGameMode(data.gameMode);
-          }
-          break;
-
-        case "EXCHANGE_SWORD": {
-          // 重複受信は安全（後着データがimageSrcを持てば上書き、持たなければ既存を保持）
-          const incoming = data.swordData;
-          setEnemySwordData(prev => {
-            const merged = { ...(prev || {}), ...incoming };
-            if (merged.imageStr && !merged.imageSrc) {
-              merged.imageSrc = merged.imageStr.startsWith("data:")
-                ? merged.imageStr
-                : "data:image/png;base64," + merged.imageStr;
-            }
-            return merged;
-          });
-          break;
-        }
-
-        case "SYNC_STATE": 
-          if (data.swordData) {
-            const enemyData2 = { ...data.swordData };
-            if (enemyData2.imageStr && !enemyData2.imageSrc) {
-              enemyData2.imageSrc = enemyData2.imageStr.startsWith("data:") 
-                ? enemyData2.imageStr 
-                : "data:image/png;base64," + enemyData2.imageStr;
-            }
-            setEnemySwordData(enemyData2);
-          }
-          setIsEnemyReady(data.isReady);
-          break;
-
-        case "LEAVE":
-          resetToLobby("相手が部屋を退出しました。"); 
-          break;
-
-        // case "INPUT":
-        //   if (currentRole === "HOST") {
-        //     try {
-        //       sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data));
-        //     } catch(e) {
-        //       console.error("INPUT転送エラー:", e);
-        //     }
-        //   }
-        //   break;
-
-        case "INPUT":
-          try {
-            sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data));
-          } catch(e) {
-            console.error("INPUT転送エラー:", e);
-          }
-          break;
-
-        case "SYNC":
-          if (currentRole === "CLIENT") {
-            try {
-              sendMessageRef.current('GameManager', 'SyncTransform', JSON.stringify(data));
-            } catch(e) {}
-            if (data.hostSword?.hp <= 0 || data.clientSword?.hp <= 0) {
-              if (handleGameOverRef.current) handleGameOverRef.current(data);
-            }
-          }
-          break;
-        default:
-          break;
-      }
-    });
-
-    conn.on('close', () => {
-      if (peerRef.current && stepRef.current !== "LOBBY") {
-        resetToLobby("通信が切断されました。");
-      }
-    });
+    if (!socketRef.current || !roomIdInput) return;
+    socketRef.current.emit('join_room', { roomId: roomIdInput });
   };
 
   const launchUnityBattle = (currentRole, myData, enemyData) => {
     const hostData = currentRole === "HOST" ? myData : enemyData;
     const clientData = currentRole === "CLIENT" ? myData : enemyData;
-    
+
     if (!hostData || !clientData) {
       alert("両方の剣データが準備できていません。もう一度やり直してください。");
       return;
     }
-    
+
     const toUnityData = (data) => ({
       name: data.name,
       hp: data.hp,
       attack: data.attack,
       weight: data.weight,
-      imageStr: data.imageStr  
+      imageStr: data.imageStr
     });
 
     const startJson = {
       hostSword: toUnityData(hostData),
       clientSword: toUnityData(clientData)
     };
-    
+
     const mode = currentRole === "HOST" ? 1 : 0;
-    
-    // ▼【修正】ゲームモード (gameModeRef.current) も一緒に pending に保存する
+
     pendingBattleRef.current = { mode, startJson, gameModeStr: gameModeRef.current };
-    setStep("PLAYING"); 
+    setStep("PLAYING");
   };
 
   const handleReady = () => {
     setIsReady(true);
-    if (connection && mySwordRef.current) {
-      connection.send({ type: "SYNC_STATE", isReady: true });
+    if (isConnectedToPeer && mySwordRef.current) {
+      sendToRelay({ type: "SYNC_STATE", isReady: true });
     }
   };
 
   const startCaptureCountdown = () => {
-    setCaptureCountdown(5); // 5秒のポーズ時間
+    setCaptureCountdown(5);
   };
 
-  // ▼【変更】カウントダウンが0になったら実行される実際の撮影＆API送信処理
   const executeCaptureAndCraft = () => {
     setIsCrafting(true);
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
-    
-    // --- 画像を左右反転してキャンバスに描画 ---
+
     context.save();
-    context.scale(-1, 1); // X軸を反転
-    context.translate(-canvas.width, 0); // 反転した分だけ位置をずらす
+    context.scale(-1, 1);
+    context.translate(-canvas.width, 0);
     context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    context.restore(); 
-    // ------------------------------------------
-    
+    context.restore();
+
     const base64Full = canvas.toDataURL('image/jpeg');
-    const base64DataOnly = base64Full.split(',')[1]; 
+    const base64DataOnly = base64Full.split(',')[1];
 
     const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? 'https://akequreru-pose-sword-api.hf.space'}/cutout`;
 
@@ -486,8 +460,8 @@ const handleGameOver = (syncData) => {
         hp: data.params.hp,
         attack: data.params.attack,
         weight: data.params.weight,
-        imageStr: data.imageData,  
-        imageSrc: "data:image/png;base64," + data.imageData 
+        imageStr: data.imageData,
+        imageSrc: "data:image/png;base64," + data.imageData
       });
       setIsCrafting(false);
       setStep("MATCHING");
@@ -523,12 +497,10 @@ const handleGameOver = (syncData) => {
         return (
           <div style={styles.container}>
             <h2>剣の錬成</h2>
-            
-            {/* ▼【変更】ビデオ領域を相対配置にし、上にカウントダウンを被せる */}
+
             <div style={{ position: 'relative', width: '400px', marginBottom: '20px' }}>
               <video ref={videoRef} autoPlay playsInline style={styles.video} />
-              
-              {/* カウントダウン実行中のみ大きな数字（0の時は📸）を表示 */}
+
               {captureCountdown !== null && (
                 <div style={styles.countdownOverlay}>
                   {captureCountdown > 0 ? captureCountdown : "📸"}
@@ -537,28 +509,27 @@ const handleGameOver = (syncData) => {
             </div>
 
             <canvas ref={canvasRef} width="640" height="480" style={{ display: 'none' }} />
-            
-            {/* ボタンの制御: カウントダウン中や錬成中は押せないようにする */}
-            <button 
-              style={{ 
-                ...styles.button, 
-                backgroundColor: (isCrafting || captureCountdown !== null) ? 'gray' : 'orange' 
-              }} 
-              onClick={startCaptureCountdown} 
+
+            <button
+              style={{
+                ...styles.button,
+                backgroundColor: (isCrafting || captureCountdown !== null) ? 'gray' : 'orange'
+              }}
+              onClick={startCaptureCountdown}
               disabled={isCrafting || captureCountdown !== null}
             >
               {isCrafting ? "錬成中..." : captureCountdown !== null ? "ポーズをとって！" : "撮影して剣を錬成！"}
             </button>
-            <button 
+            <button
               style={{
-                ...styles.button, 
-                backgroundColor: (isCrafting || captureCountdown !== null) ? 'gray' : '#333', 
-                color: 'white', 
-                display: 'block', 
+                ...styles.button,
+                backgroundColor: (isCrafting || captureCountdown !== null) ? 'gray' : '#333',
+                color: 'white',
+                display: 'block',
                 margin: '20px auto',
                 opacity: (isCrafting || captureCountdown !== null) ? 0.5 : 1,
                 cursor: (isCrafting || captureCountdown !== null) ? 'not-allowed' : 'pointer'
-              }} 
+              }}
               onClick={() => resetToLobby("")}
               disabled={isCrafting || captureCountdown !== null}
             >
@@ -571,38 +542,37 @@ const handleGameOver = (syncData) => {
         return (
           <div style={styles.container}>
             <h2>マッチング待機</h2>
-            
-            {!connection && (
+
+            {!isConnectedToPeer && (
               <div style={{ marginBottom: '20px' }}>
                 {role === "HOST" && (
                   <div>
                     <p style={{ fontSize: '20px', margin: '0' }}>あなたの部屋ID</p>
-                    {/* 6桁の数字を大きく、字間を開けて見やすく表示 */}
                     <p style={{ fontSize: '48px', color: 'blue', fontWeight: 'bold', letterSpacing: '8px', margin: '10px 0' }}>
-                      {myPeerId || "取得中..."}
+                      {roomId || "取得中..."}
                     </p>
                     <p>このIDをClient（対戦相手）に教えてください。</p>
                   </div>
                 )}
-                
+
                 {role === "CLIENT" && (
                   <div style={{ padding: '20px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
                     <p style={{ fontSize: '18px', fontWeight: 'bold' }}>Hostの部屋ID（6桁の数字）を入力</p>
-                    <input 
-                      type="text" 
-                      value={targetId} 
-                      onChange={(e) => setTargetId(e.target.value)} 
-                      placeholder="例: 123456" 
-                      maxLength={6} // 6文字までしか入力できないように制限
-                      style={{ 
-                        padding: '10px', 
-                        fontSize: '24px', 
-                        width: '180px', 
-                        textAlign: 'center', 
+                    <input
+                      type="text"
+                      value={roomIdInput}
+                      onChange={(e) => setRoomIdInput(e.target.value)}
+                      placeholder="例: 123456"
+                      maxLength={6}
+                      style={{
+                        padding: '10px',
+                        fontSize: '24px',
+                        width: '180px',
+                        textAlign: 'center',
                         letterSpacing: '4px',
                         borderRadius: '5px',
                         border: '2px solid #ccc'
-                      }} 
+                      }}
                     />
                     <button style={{ ...styles.button, marginLeft: '10px', backgroundColor: '#4CAF50', color: 'white' }} onClick={connectToHost}>
                       接続
@@ -611,17 +581,15 @@ const handleGameOver = (syncData) => {
                 )}
               </div>
             )}
-            
+
             <div style={styles.previewContainer}>
-              {/* 表示用のデータを事前に整理し、常に左右の枠を表示する */}
               {(() => {
                 const isHost = role === "HOST";
                 const hostData = isHost ? mySwordData : enemySwordData;
                 const clientData = !isHost ? mySwordData : enemySwordData;
-                
+
                 return (
                   <>
-                    {/* 左側：ホストの剣 */}
                     <div style={styles.swordCard}>
                       <h3 style={{ margin: '0 0 10px 0', color: isHost ? '#000000' : '#ff4444' }}>
                         {isHost ? "あなた" : "対戦相手"}
@@ -646,10 +614,8 @@ const handleGameOver = (syncData) => {
                       )}
                     </div>
 
-                    {/* 中央：VSマーク（常に出しておく） */}
                     <div style={styles.vsText}>VS</div>
 
-                    {/* 右側：クライアントの剣 */}
                     <div style={styles.swordCard}>
                       <h3 style={{ margin: '0 0 10px 0', color: isHost ? '#FF4444' : '#000000' }}>
                         {!isHost ? "あなた" : "対戦相手"}
@@ -680,10 +646,9 @@ const handleGameOver = (syncData) => {
               })()}
             </div>
 
-            {connection && (
+            {isConnectedToPeer && (
               <div style={styles.connectedBox}>
 
-                {/* ▼【新規追加】ゲームモード選択UI */}
                 <div style={styles.modeBox}>
                   <h3 style={{ margin: '0 0 10px 0' }}>バトルモード</h3>
                   {role === "HOST" ? (
@@ -692,7 +657,7 @@ const handleGameOver = (syncData) => {
                       onChange={(e) => {
                         const newMode = e.target.value;
                         setGameMode(newMode);
-                        connection.send({ type: "SYNC_GAMEMODE", gameMode: newMode });
+                        sendToRelay({ type: "SYNC_GAMEMODE", gameMode: newMode });
                       }}
                       style={{ padding: '8px', fontSize: '16px', borderRadius: '5px', cursor: 'pointer' }}
                     >
@@ -705,7 +670,6 @@ const handleGameOver = (syncData) => {
                     </div>
                   )}
                 </div>
-                {/* ▲ ここまで */}
 
                 {countdown !== null ? (
                   <h2 style={{ fontSize: '48px', color: 'red', margin: '0' }}>{countdown > 0 ? countdown : "START!"}</h2>
@@ -730,9 +694,9 @@ const handleGameOver = (syncData) => {
                 )}
               </div>
             )}
-            
-            <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white', marginTop: '20px' }} onClick={connection ? handleLeave : () => resetToLobby("")}>
-              {connection ? "退出する" : "キャンセル"}
+
+            <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white', marginTop: '20px' }} onClick={isConnectedToPeer ? handleLeave : () => resetToLobby("")}>
+              {isConnectedToPeer ? "退出する" : "キャンセル"}
             </button>
           </div>
         );
@@ -757,8 +721,8 @@ const handleGameOver = (syncData) => {
               <button style={{ ...styles.button, backgroundColor: 'orange', color: 'white' }} onClick={() => {
                 try { sendMessage('GameManager', 'ResetMatch', ''); } catch(e) {}
                 setStep("MATCHING");
-                if (connRef.current && mySwordRef.current) {
-                  connRef.current.send({ type: "SYNC_STATE", isReady: false });
+                if (isConnectedRef.current && mySwordRef.current) {
+                  sendToRelay({ type: "SYNC_STATE", isReady: false });
                 }
               }}>
                 もう一度遊ぶ（待機画面へ）
@@ -778,7 +742,7 @@ const styles = {
   container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
   button: { padding: '10px 20px', margin: '10px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px', fontWeight: 'bold', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' },
   connectedBox: { marginTop: '10px', padding: '10px 20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
-  modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' }, // 追加
+  modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' },
   video: { width: '400px', borderRadius: '8px', backgroundColor: '#000', display: 'block', transform: 'scaleX(-1)' },
   unityContainer: { width: '800px', height: '450px', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555' },
 readyBox: (isReady) => ({
@@ -791,7 +755,7 @@ readyBox: (isReady) => ({
   swordName: { fontSize: '20px', fontWeight: 'bold', margin: '5px 0' },
   statsBox: { display: 'flex', justifyContent: 'center', gap: '10px', fontSize: '14px', fontWeight: 'bold', color: '#555', backgroundColor: '#f9f9f9', padding: '5px 10px', borderRadius: '5px', width: '100%' },
   vsText: { fontSize: '36px', fontWeight: '900', fontStyle: 'italic', color: '#ff9800', textShadow: '2px 2px 0px #000' },
-  countdownOverlay: { 
+  countdownOverlay: {
     position: 'absolute',
     top: '20px',
     left: '50%',
@@ -800,7 +764,7 @@ readyBox: (isReady) => ({
     fontWeight: 'bold',
     color: 'rgba(255, 255, 255, 0.7)',
     textShadow: '0 0 20px red, 2px 2px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000',
-    pointerEvents: 'none', // クリック等の操作を邪魔しないようにする
+    pointerEvents: 'none',
     zIndex: 10
   },
 };
