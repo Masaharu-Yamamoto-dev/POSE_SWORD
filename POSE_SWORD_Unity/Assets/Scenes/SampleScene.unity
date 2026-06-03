@@ -1037,6 +1037,7 @@ MonoBehaviour:
   guardEffectPrefab: {fileID: 995215030239813062, guid: be718cabb944a644da14bdc75a71f70b, type: 3}
   normalHitSound: {fileID: 8300000, guid: 86b0aa7415a27c643886df9c0a811202, type: 3}
   critHitSound: {fileID: 8300000, guid: 7a379e66c22b3de4aa1a4b697e38d3e0, type: 3}
+  defeatSound: {fileID: 8300000, guid: 4e2a9b9e78e025242b5c25a6691280c2, type: 3}
   spGaugeBar: {fileID: 2002820462}
   spText: {fileID: 1212257911}
   currentSp: 0
@@ -1045,6 +1046,7 @@ MonoBehaviour:
   damageSpMultiplier: 1.5
   isDashing: 0
   isDashShooting: 0
+  currentDashType: 0
   trueVelocity: {x: 0, y: 0}
   currentCenterPosition: {x: 0, y: 0, z: 0}
 --- !u!4 &287059452
@@ -1830,6 +1832,7 @@ MonoBehaviour:
   guardEffectPrefab: {fileID: 995215030239813062, guid: be718cabb944a644da14bdc75a71f70b, type: 3}
   normalHitSound: {fileID: 8300000, guid: 86b0aa7415a27c643886df9c0a811202, type: 3}
   critHitSound: {fileID: 8300000, guid: 7a379e66c22b3de4aa1a4b697e38d3e0, type: 3}
+  defeatSound: {fileID: 8300000, guid: 4e2a9b9e78e025242b5c25a6691280c2, type: 3}
   spGaugeBar: {fileID: 1231099865}
   spText: {fileID: 568706384}
   currentSp: 0
@@ -1838,6 +1841,7 @@ MonoBehaviour:
   damageSpMultiplier: 1.5
   isDashing: 0
   isDashShooting: 0
+  currentDashType: 0
   trueVelocity: {x: 0, y: 0}
   currentCenterPosition: {x: 0, y: 0, z: 0}
 --- !u!82 &503523104
@@ -5267,7 +5271,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &1302093870
 Transform:
   m_ObjectHideFlags: 0

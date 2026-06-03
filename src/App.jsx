@@ -36,10 +36,15 @@ export default function PoseSwordWeb() {
   const enemySwordRef = useRef(null);
   useEffect(() => { enemySwordRef.current = enemySwordData; }, [enemySwordData]);
 
-  // ▼【新規追加】ゲームモードの管理 ("1" = 独楽, "0" = 剣)
+// App.jsx の gameMode の下あたりに追加
   const [gameMode, setGameMode] = useState("1");
   const gameModeRef = useRef("1");
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
+
+  // ▼【新規追加】相手のUnity(WebGL)のロードが完了したかを管理するフラグ
+  const [isEnemyUnityLoaded, setIsEnemyUnityLoaded] = useState(false);
+  const enemyUnityLoadedRef = useRef(false);
+  useEffect(() => { enemyUnityLoadedRef.current = isEnemyUnityLoaded; }, [isEnemyUnityLoaded]);
 
   const [myPeerId, setMyPeerId] = useState("");
   const [targetId, setTargetId] = useState("");
@@ -57,10 +62,10 @@ export default function PoseSwordWeb() {
   const [systemMessage, setSystemMessage] = useState("");
 
   const { unityProvider, sendMessage, isLoaded } = useUnityContext({
-    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.loader.js",
-    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.data",
-    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.framework.js",
-    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.wasm",
+    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.7/Build/ver2.7.loader.js",
+    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.7/Build/ver2.7.data",
+    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.7/Build/ver2.7.framework.js",
+    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.7/Build/ver2.7.wasm",
   });
 
   const pendingBattleRef = useRef(null);
@@ -104,26 +109,30 @@ export default function PoseSwordWeb() {
 
   useEffect(() => { handleGameOverRef.current = handleGameOver; });
 
+ // ❌ 修正前：自分が Loaded になったら即 Startしていたコードを以下に上書き
+  // ⭕ 修正後：自分のロード完了を相手に通知 ＆ 両方揃ったら同時にキック！
+  
+  // 1. 自分のUnityロードが終わったら、通信相手に「ロード終わったよ」と送る
   useEffect(() => {
-    if (isLoaded && pendingBattleRef.current !== null) {
-      // ▼【修正】gameMode を取り出して Unity に送る
+    if (isLoaded && connection) {
+      console.log("📡 自分のUnityロード完了。相手に通知します。");
+      connection.send({ type: "PEER_UNITY_LOADED" });
+    }
+  }, [isLoaded, connection]);
+
+  // 2. 自分と相手、両方のUnityロードが完全に揃ったら、同時に命令を撃ち込む！
+  useEffect(() => {
+    if (isLoaded && isEnemyUnityLoaded && pendingBattleRef.current !== null) {
       const { mode, startJson, gameModeStr } = pendingBattleRef.current;
       pendingBattleRef.current = null;
-      console.log("✅ Unity読み込み完了！保留中のバトルコマンドを送信します");
       
-      console.log(`📡 SetHostMode(${mode})`);
+      console.log("🏆 両端末のUnityロードが完全同期！バトルを同時開幕します！");
+      
       sendMessage('GameManager', 'SetHostMode', mode);
-      
-      // ▼【新規追加】Unity側の NetworkManager にゲームモードを指示する
-      console.log(`📡 SetGameMode(${gameModeStr})`);
       sendMessage('GameManager', 'SetGameMode', gameModeStr);
-      
-      console.log(`📡 StartBattle`);
-      sendMessage('GameManager', 'StartBattle', JSON.stringify(startJson)); // ※StartBattleはSceneControllerに変更済み
-      
-      console.log("✅ 全バトル初期化コマンド送信完了");
+      sendMessage('GameManager', 'StartBattle', JSON.stringify(startJson));
     }
-  }, [step, isLoaded]);
+  }, [isLoaded, isEnemyUnityLoaded]);
 
   useEffect(() => {
     window.ReactApp = {
@@ -160,10 +169,15 @@ export default function PoseSwordWeb() {
   }, [step]);
 
   useEffect(() => {
-    if (isReady && isEnemyReady && step === "MATCHING" && countdown === null) {
-      setCountdown(3);
+    if (isReady && isEnemyReady && step === "MATCHING") {
+      setIsEnemyUnityLoaded(false); // フラグをリセット
+      if (mySwordRef.current && enemySwordRef.current) {
+        launchUnityBattle(roleRef.current, mySwordRef.current, enemySwordRef.current);
+      } else {
+        alert("剣データの準備ができていません。");
+      }
     }
-  }, [isReady, isEnemyReady, step, countdown]);
+  }, [isReady, isEnemyReady, step]);
 
   useEffect(() => {
     if (countdown !== null) {
@@ -346,6 +360,11 @@ export default function PoseSwordWeb() {
             setEnemySwordData(enemyData2);
           }
           setIsEnemyReady(data.isReady);
+          break;
+
+        case "PEER_UNITY_LOADED":
+          console.log("📥 相手のUnityロード完了通知を受信しました！");
+          setIsEnemyUnityLoaded(true);
           break;
 
         case "LEAVE":
@@ -711,8 +730,19 @@ export default function PoseSwordWeb() {
 
       case "PLAYING":
         return (
-          <div style={styles.container}>
-            <div style={styles.unityContainer}>
+          <div style={{ ...styles.container, position: 'relative' }}>
+            <div style={{ ...styles.unityContainer, position: 'relative' }}>
+              
+              {/* ▼【新規追加】お互いのロードが完了するまで画面をロックするオーバーレイ */}
+              {(!isLoaded || !isEnemyUnityLoaded) && (
+                <div style={styles.loadingOverlay}>
+                  <div style={styles.loadingSpinner}></div>
+                  <p style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginTop: '20px' }}>
+                    {!isLoaded ? "あなたのUnityを読み込み中..." : "対戦相手の読み込みを待っています..."}
+                  </p>
+                </div>
+              )}
+              
               <Unity unityProvider={unityProvider} style={{ width: '100%', height: '100%' }} />
             </div>
           </div>
@@ -775,4 +805,19 @@ readyBox: (isReady) => ({
     pointerEvents: 'none', // クリック等の操作を邪魔しないようにする
     zIndex: 10
   },
+  // styles オブジェクトの最後に追加してください
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, width: '100%', height: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.9)', // ほぼ真っ黒にして裏を隠す
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    zIndex: 100
+  },
+  loadingSpinner: {
+    width: '50px', height: '50px',
+    border: '5px solid rgba(255,255,255,0.3)',
+    borderTop: '5px solid orange',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite'
+  }
 };
