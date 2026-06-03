@@ -41,6 +41,8 @@ export default function PoseSwordWeb() {
   const gameModeRef = useRef("1");
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
 
+  const [userName, setUserName] = useState("");
+
   const [myPeerId, setMyPeerId] = useState("");
   const [targetId, setTargetId] = useState("");
   const peerRef = useRef(null);
@@ -435,7 +437,7 @@ export default function PoseSwordWeb() {
     fetch(pythonApiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageData: base64DataOnly }) 
+      body: JSON.stringify({ imageData: base64DataOnly, userName: userName })
     })
     .then((response) => {
       if (!response.ok) throw new Error(`HTTPエラー: ${response.status}`);
@@ -443,7 +445,7 @@ export default function PoseSwordWeb() {
     })
     .then((data) => {
       setMySwordData({
-        name: role === "HOST" ? "ホストブレード" : "クライアントソード",
+        name: data.swordName || "無銘の剣",
         hp: data.params.hp,
         attack: data.params.attack,
         weight: data.params.weight,
@@ -467,6 +469,14 @@ export default function PoseSwordWeb() {
           <div style={styles.container}>
             <h1>POSE SWORD</h1>
             {systemMessage && <div style={styles.errorMessage}>⚠️ {systemMessage}</div>}
+            <input
+              type="text"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              placeholder="名前を入力"
+              maxLength={10}
+              style={{ padding: '10px', fontSize: '18px', width: '200px', textAlign: 'center', borderRadius: '5px', border: '2px solid #ccc', marginBottom: '10px' }}
+            />
             <button style={styles.button} onClick={handleCreateRoom}>部屋を作る (Host)</button>
             <button style={styles.button} onClick={handleJoinRoom}>部屋に入る (Client)</button>
           </div>
