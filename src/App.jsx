@@ -458,6 +458,8 @@ const handleGameOver = (syncData) => {
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
 
+    const video = videoRef.current;
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     
