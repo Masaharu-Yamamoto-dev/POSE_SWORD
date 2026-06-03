@@ -71,9 +71,15 @@ export default function PoseSwordWeb() {
   const sendMessageRef = useRef(sendMessage);
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
+  const isFinishingRef = useRef(false);
+
   const handleGameOverRef = useRef(null);
 
-  const handleGameOver = (syncData) => {
+const handleGameOver = (syncData) => {
+    // ▼【新規追加】既に終了処理に入っている場合は、重複して処理しない
+    if (isFinishingRef.current) return;
+    isFinishingRef.current = true; // 終了処理開始フラグを立てる
+
     const currentRole = roleRef.current;
     const clientWon = syncData.hostSword.hp <= 0;
 
@@ -98,10 +104,19 @@ export default function PoseSwordWeb() {
       damageTaken
     });
     
-    setIsReady(false);
-    setIsEnemyReady(false);
-    setCountdown(null);
-    setStep("RESULT");
+    // ▼【変更】すぐに RESULT 画面にせず、Unityの演出を見るために3秒待つ
+    console.log("🏁 決着！演出終了を待機します...");
+    
+    setTimeout(() => {
+      // 待機中にユーザーが「退出する」等を押していなければ画面遷移
+      if (stepRef.current === "PLAYING") {
+        setIsReady(false);
+        setIsEnemyReady(false);
+        setCountdown(null);
+        setStep("RESULT");
+      }
+      isFinishingRef.current = false; // 次の試合のためにフラグを戻す
+    }, 3000); // ★3000ミリ秒（3秒）待機
   };
 
   useEffect(() => { handleGameOverRef.current = handleGameOver; });
@@ -268,8 +283,11 @@ export default function PoseSwordWeb() {
         peerRef.current = peer;
         
         peer.on('connection', (conn) => { 
-          setConnection(conn); 
-          setupConnection(conn); 
+          conn.on('open', () => {
+            console.log("クライアントとの通信経路が完全に開通しました！");
+            setConnection(conn); 
+            setupConnection(conn); 
+          });
         });
       });
 
