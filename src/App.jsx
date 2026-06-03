@@ -2,6 +2,19 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Peer } from 'peerjs';
 import { Unity, useUnityContext } from 'react-unity-webgl';
 
+// STUN + TURN サーバー設定（異なるネットワーク間でもWebRTCを繋げるため）
+const PEER_ICE_CONFIG = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    ]
+  }
+};
+
 export default function PoseSwordWeb() {
   const [step, setStep] = useState("LOBBY");
   const stepRef = useRef(step);
@@ -164,7 +177,8 @@ export default function PoseSwordWeb() {
         if (mySwordRef.current && enemySwordRef.current) {
           launchUnityBattle(roleRef.current, mySwordRef.current, enemySwordRef.current);
         } else {
-          alert("剣データの準備ができていません。");
+          console.error("❌ バトル開始失敗: 自分の剣=", !!mySwordRef.current, "相手の剣=", !!enemySwordRef.current);
+          alert("相手の剣データがまだ届いていません。少し待ってから再度お試しください。");
         }
       }
     }
@@ -225,7 +239,7 @@ export default function PoseSwordWeb() {
     const attemptCreatePeer = (retriesLeft) => {
       // 6桁のランダムIDを生成
       const hostId = Math.floor(100000 + Math.random() * 900000).toString();
-      const peer = new Peer(hostId);
+      const peer = new Peer(hostId, PEER_ICE_CONFIG);
 
       // 成功時：IDをセットし、接続待ち状態にする
       peer.on('open', (id) => {
@@ -264,7 +278,7 @@ export default function PoseSwordWeb() {
   const handleJoinRoom = () => {
     setSystemMessage("");
     setRole("CLIENT"); setStep("CRAFT");
-    const peer = new Peer();
+    const peer = new Peer(PEER_ICE_CONFIG);
     peer.on('open', (id) => setMyPeerId(id));
     peerRef.current = peer;
   };
@@ -649,8 +663,12 @@ export default function PoseSwordWeb() {
                       <div style={styles.readyBox(isEnemyReady)}>相手: {isEnemyReady ? "準備OK!" : "準備中..."}</div>
                     </div>
                     {!isReady ? (
-                      <button style={{ ...styles.button, backgroundColor: 'orange', color: 'white' }} onClick={handleReady}>
-                        準備OK（バトルへ）
+                      <button
+                        style={{ ...styles.button, backgroundColor: enemySwordData ? 'orange' : 'gray', color: 'white' }}
+                        onClick={handleReady}
+                        disabled={!enemySwordData}
+                      >
+                        {enemySwordData ? "準備OK（バトルへ）" : "相手のデータ受信中..."}
                       </button>
                     ) : (
                       <p style={{ fontWeight: 'bold' }}>相手の準備を待っています...</p>
