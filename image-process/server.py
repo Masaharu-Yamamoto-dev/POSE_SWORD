@@ -12,11 +12,36 @@ React 等から JSON で画像(base64)を受け取り、人物を切り抜いて
 import base64
 import io
 import os
+import random
 
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from rembg import new_session
+
+# ランダムに選ばれる剣の銘
+SWORD_NAMES = [
+    "炎",
+    "氷",
+    "雷",
+    "風",
+    "光",
+    "闇",
+    "星",
+    "月",
+    "紅蓮",
+    "蒼穹",
+    "天空",
+    "大地",
+    "鉄",
+    "黄金",
+    "白銀",
+    "翠嵐",
+    "烈火",
+    "極光",
+    "疾風",
+    "破魔",
+]
 
 from person_cutout import crop_to_subject, cutout_person, decode_image
 from stats import compute_stats, silhouette_mask
@@ -45,6 +70,7 @@ _REMBG_SESSION = new_session("u2net")
 
 class CutoutRequest(BaseModel):
     imageData: str
+    userName: str = ""
 
 
 @app.get("/health")
@@ -78,6 +104,14 @@ def cutout(req: CutoutRequest, x_api_key: str = Header(None)):
     out.save(buf, format="PNG")
     out_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
+    # 剣の名前を生成: "ユーザ名の???ソード/カリバー/刀/ブレード"
+    sword_adj = random.choice(SWORD_NAMES)
+    sword_suffix = random.choice(["ソード", "カリバー", "刀", "ブレード"])
+    if req.userName:
+        sword_name = f"{req.userName}の{sword_adj}{sword_suffix}"
+    else:
+        sword_name = f"{sword_adj}{sword_suffix}"
+
     return {
         "imageData": out_b64,
         "width": out.width,
@@ -89,4 +123,5 @@ def cutout(req: CutoutRequest, x_api_key: str = Header(None)):
         ),
         "params": stats["params"],   # {"attack":.., "weight":.., "hp":..}
         "detail": stats["detail"],   # 各値の内訳(デバッグ用)
+        "swordName": sword_name,
     }
