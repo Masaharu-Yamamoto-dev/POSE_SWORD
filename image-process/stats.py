@@ -27,7 +27,7 @@ POSE_MODEL_PATH = Path.home() / ".pose_sword" / "pose_landmarker_lite.task"
 
 # ----- 正規化の基準(チューニング用) -----
 ATTACK_SPIKINESS_MAX = 0.45   # 尖り具合(=1-solidity)がこれ以上で尖り満点(50)
-ATTACK_ASYMMETRY_MAX = 0.40   # 左右非対称度がこれ以上で非対称満点(50)
+ATTACK_ASYMMETRY_MAX = 0.60   # 左右非対称度がこれ以上で非対称満点(50)
 WEIGHT_AREA_MIN = 0.04        # 面積比がこれ以下で体格 1
 WEIGHT_AREA_MAX = 0.45        # 面積比がこれ以上で体格 100
 HP_SPINE_WEIGHT = 0.5         # HP に占める「背筋まっすぐ」の比率
