@@ -440,6 +440,19 @@ const handleGameOver = (syncData) => {
     context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     context.restore();
 
+    const video = videoRef.current;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    // --- 画像を左右反転してキャンバスに描画 ---
+    context.save();
+    context.scale(-1, 1); // X軸を反転
+    context.translate(-canvas.width, 0); // 反転した分だけ位置をずらす
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    context.restore();
+    // ------------------------------------------
+    
     const base64Full = canvas.toDataURL('image/jpeg');
     const base64DataOnly = base64Full.split(',')[1];
 
