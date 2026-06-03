@@ -74,9 +74,15 @@ export default function PoseSwordWeb() {
   const sendMessageRef = useRef(sendMessage);
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
+  const isFinishingRef = useRef(false);
+
   const handleGameOverRef = useRef(null);
 
-  const handleGameOver = (syncData) => {
+const handleGameOver = (syncData) => {
+    // ▼【新規追加】既に終了処理に入っている場合は、重複して処理しない
+    if (isFinishingRef.current) return;
+    isFinishingRef.current = true; // 終了処理開始フラグを立てる
+
     const currentRole = roleRef.current;
     const clientWon = syncData.hostSword.hp <= 0;
 
@@ -101,10 +107,19 @@ export default function PoseSwordWeb() {
       damageTaken
     });
     
-    setIsReady(false);
-    setIsEnemyReady(false);
-    setCountdown(null);
-    setStep("RESULT");
+    // ▼【変更】すぐに RESULT 画面にせず、Unityの演出を見るために3秒待つ
+    console.log("🏁 決着！演出終了を待機します...");
+    
+    setTimeout(() => {
+      // 待機中にユーザーが「退出する」等を押していなければ画面遷移
+      if (stepRef.current === "PLAYING") {
+        setIsReady(false);
+        setIsEnemyReady(false);
+        setCountdown(null);
+        setStep("RESULT");
+      }
+      isFinishingRef.current = false; // 次の試合のためにフラグを戻す
+    }, 3000); // ★3000ミリ秒（3秒）待機
   };
 
   useEffect(() => { handleGameOverRef.current = handleGameOver; });
@@ -280,8 +295,11 @@ export default function PoseSwordWeb() {
         peerRef.current = peer;
         
         peer.on('connection', (conn) => { 
-          setConnection(conn); 
-          setupConnection(conn); 
+          conn.on('open', () => {
+            console.log("クライアントとの通信経路が完全に開通しました！");
+            setConnection(conn); 
+            setupConnection(conn); 
+          });
         });
       });
 
@@ -473,7 +491,7 @@ export default function PoseSwordWeb() {
     fetch(pythonApiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageData: base64DataOnly }) 
+      body: JSON.stringify({ imageData: base64DataOnly, userName: userName })
     })
     .then((response) => {
       if (!response.ok) throw new Error(`HTTPエラー: ${response.status}`);
@@ -481,7 +499,7 @@ export default function PoseSwordWeb() {
     })
     .then((data) => {
       setMySwordData({
-        name: role === "HOST" ? "ホストブレード" : "クライアントソード",
+        name: data.swordName || "無銘の剣",
         hp: data.params.hp,
         attack: data.params.attack,
         weight: data.params.weight,
@@ -505,6 +523,14 @@ export default function PoseSwordWeb() {
           <div style={styles.container}>
             <h1>POSE SWORD</h1>
             {systemMessage && <div style={styles.errorMessage}>⚠️ {systemMessage}</div>}
+            <input
+              type="text"
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              placeholder="名前を入力"
+              maxLength={10}
+              style={{ padding: '10px', fontSize: '18px', width: '200px', textAlign: 'center', borderRadius: '5px', border: '2px solid #ccc', marginBottom: '10px' }}
+            />
             <button style={styles.button} onClick={handleCreateRoom}>部屋を作る (Host)</button>
             <button style={styles.button} onClick={handleJoinRoom}>部屋に入る (Client)</button>
           </div>

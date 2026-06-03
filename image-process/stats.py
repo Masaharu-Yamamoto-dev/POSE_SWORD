@@ -26,7 +26,8 @@ POSE_MODEL_URL = (
 POSE_MODEL_PATH = Path.home() / ".pose_sword" / "pose_landmarker_lite.task"
 
 # ----- 正規化の基準(チューニング用) -----
-ATTACK_SPIKINESS_MAX = 0.45   # 尖り具合(=1-solidity)がこれ以上で攻撃力 100
+ATTACK_SPIKINESS_MAX = 0.45   # 尖り具合(=1-solidity)がこれ以上で尖り満点(50)
+ATTACK_ASYMMETRY_MAX = 0.60   # 左右非対称度がこれ以上で非対称満点(50)
 WEIGHT_AREA_MIN = 0.04        # 面積比がこれ以下で体格 1
 WEIGHT_AREA_MAX = 0.45        # 面積比がこれ以上で体格 100
 HP_SPINE_WEIGHT = 0.5         # HP に占める「背筋まっすぐ」の比率
@@ -48,21 +49,81 @@ def silhouette_mask(rgba: Image.Image) -> np.ndarray:
     return np.array(rgba.getchannel("A")) > 0
 
 
-def compute_attack(mask: np.ndarray) -> dict:
-    """尖り具合(1 - solidity)から攻撃力を計算する。"""
+def _compute_asymmetry(mask: np.ndarray, landmarks=None, width: int = 0, height: int = 0) -> float:
+    """シルエットの左右非対称度(0〜1)を返す。
+
+    landmarks がある場合: 肩と腰の中点を結ぶ中心軸を基準に左右反転して比較。
+    landmarks が None の場合: バウンディングボックスの中心で左右反転（フォールバック）。
+    """
+    area = int(mask.sum())
+    if area == 0:
+        return 0.0
+
+    if landmarks is not None and width > 0 and height > 0:
+        # MediaPipe の肩・腰中点から体の中心 X 座標を求める
+        shoulder_cx = (landmarks[L_SHOULDER].x + landmarks[R_SHOULDER].x) / 2 * width
+        hip_cx = (landmarks[L_HIP].x + landmarks[R_HIP].x) / 2 * width
+        center_x = (shoulder_cx + hip_cx) / 2
+
+        # 中心軸を基準に左右反転した mask を作る
+        h, w = mask.shape
+        cx = int(round(center_x))
+        cx = max(1, min(w - 1, cx))
+
+        # 左右それぞれの幅を揃える（短い方に合わせる）
+        half = min(cx, w - cx)
+        left = mask[:, cx - half:cx]
+        right = mask[:, cx:cx + half]
+        flipped_right = right[:, ::-1]
+
+        diff = np.logical_xor(left, flipped_right).sum()
+        union = np.logical_or(left, flipped_right).sum()
+    else:
+        # フォールバック: バウンディングボックス中心で反転
+        rows = np.any(mask, axis=1)
+        cols = np.any(mask, axis=0)
+        if not rows.any():
+            return 0.0
+        r0, r1 = np.where(rows)[0][[0, -1]]
+        c0, c1 = np.where(cols)[0][[0, -1]]
+        cropped = mask[r0:r1 + 1, c0:c1 + 1]
+        flipped = cropped[:, ::-1]
+        diff = np.logical_xor(cropped, flipped).sum()
+        union = np.logical_or(cropped, flipped).sum()
+
+    if union == 0:
+        return 0.0
+    return float(diff) / float(union)
+
+
+def compute_attack(mask: np.ndarray, landmarks=None) -> dict:
+    """尖り具合(50点) + 左右非対称度(50点) = 攻撃力(1〜100)。"""
     from skimage.morphology import convex_hull_image
 
     area = int(mask.sum())
     if area == 0:
-        return {"value": 1, "spikiness": 0.0, "solidity": 1.0}
+        return {"value": 1, "spikiness": 0.0, "solidity": 1.0, "asymmetry": 0.0}
+
+    h, w = mask.shape
+
+    # 尖り具合(0〜50点)
     hull_area = int(convex_hull_image(mask).sum())
     solidity = area / hull_area if hull_area else 1.0
     spikiness = 1.0 - solidity
-    norm = _clamp01(spikiness / ATTACK_SPIKINESS_MAX)
+    spike_score = _clamp01(spikiness / ATTACK_SPIKINESS_MAX) * 50
+
+    # 左右非対称度(0〜50点) — MediaPipe の中心軸基準
+    asymmetry = _compute_asymmetry(mask, landmarks, w, h)
+    asym_score = _clamp01(asymmetry / ATTACK_ASYMMETRY_MAX) * 50
+
+    value = int(round(1 + (spike_score + asym_score) * 99 / 100))
     return {
-        "value": int(round(1 + norm * 99)),
+        "value": value,
         "spikiness": round(spikiness, 4),
         "solidity": round(solidity, 4),
+        "asymmetry": round(asymmetry, 4),
+        "spikeScore": round(spike_score, 1),
+        "asymScore": round(asym_score, 1),
     }
 
 
@@ -150,10 +211,10 @@ def compute_stats(original_rgb: Image.Image, mask: np.ndarray) -> dict:
     original_rgb : 元画像(姿勢推定はこちらで行う)
     mask         : 切り抜きシルエットの bool マスク(元画像と同サイズ)
     """
-    attack = compute_attack(mask)
+    landmarks = _run_pose(original_rgb)
+    attack = compute_attack(mask, landmarks)
     weight = compute_weight(mask)
 
-    landmarks = _run_pose(original_rgb)
     if landmarks is None:
         # 姿勢が取れなければ HP は最小(100)。フロントで poseDetected を見て扱える
         hp = {"value": 100, "uprightness": None, "legSpread": None, "poseDetected": False}
