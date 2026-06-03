@@ -230,4 +230,4 @@ async def _cleanup(sid: str):
 
 
 # FastAPI + Socket.IO を統合した ASGI アプリケーション
-application = socketio.ASGIApp(sio, other_app=app)
+application = socketio.ASGIApp(sio, other_asgi_app=app)
