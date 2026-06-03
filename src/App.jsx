@@ -2,6 +2,19 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Peer } from 'peerjs';
 import { Unity, useUnityContext } from 'react-unity-webgl';
 
+// STUN + TURN サーバー設定（異なるネットワーク間でもWebRTCを繋げるため）
+const PEER_ICE_CONFIG = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    ]
+  }
+};
+
 export default function PoseSwordWeb() {
   const [step, setStep] = useState("LOBBY");
   const stepRef = useRef(step);
@@ -44,10 +57,10 @@ export default function PoseSwordWeb() {
   const [systemMessage, setSystemMessage] = useState("");
 
   const { unityProvider, sendMessage, isLoaded } = useUnityContext({
-    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.loader.js",
-    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.data",
-    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.framework.js",
-    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.wasm",
+    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.loader.js",
+    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.data",
+    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.framework.js",
+    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.wasm",
   });
 
   const pendingBattleRef = useRef(null);
@@ -164,18 +177,37 @@ export default function PoseSwordWeb() {
         if (mySwordRef.current && enemySwordRef.current) {
           launchUnityBattle(roleRef.current, mySwordRef.current, enemySwordRef.current);
         } else {
-          alert("剣データの準備ができていません。");
+          console.error("❌ バトル開始失敗: 自分の剣=", !!mySwordRef.current, "相手の剣=", !!enemySwordRef.current);
+          alert("相手の剣データがまだ届いていません。少し待ってから再度お試しください。");
         }
       }
     }
   }, [countdown]);
 
   useEffect(() => {
-    if (connection && mySwordRef.current) {
-      setTimeout(() => {
-        connection.send({ type: "EXCHANGE_SWORD", swordData: mySwordRef.current });
-      }, 500);
-    }
+    if (!connection || !mySwordRef.current) return;
+
+    const { name, hp, attack, weight, imageStr } = mySwordRef.current;
+    const statsOnly = { name, hp, attack, weight };
+    const fullData  = { name, hp, attack, weight, imageStr };
+
+    // ① 300ms後：統計のみ（小さい）を送信 → ゲーム開始条件をすぐ満たす
+    const t1 = setTimeout(() => {
+      connection.send({ type: "EXCHANGE_SWORD", swordData: statsOnly });
+    }, 300);
+
+    // ② 1000ms後：画像込みの完全データを送信
+    const t2 = setTimeout(() => {
+      connection.send({ type: "EXCHANGE_SWORD", swordData: fullData });
+    }, 1000);
+
+    // ③ 2秒ごとにリトライ（画像が届くまで繰り返す）
+    const retry = setInterval(() => {
+      if (enemySwordRef.current?.imageSrc) { clearInterval(retry); return; }
+      connection.send({ type: "EXCHANGE_SWORD", swordData: !enemySwordRef.current ? statsOnly : fullData });
+    }, 2000);
+
+    return () => { clearTimeout(t1); clearTimeout(t2); clearInterval(retry); };
   }, [connection]);
 
   useEffect(() => {
@@ -225,7 +257,7 @@ export default function PoseSwordWeb() {
     const attemptCreatePeer = (retriesLeft) => {
       // 6桁のランダムIDを生成
       const hostId = Math.floor(100000 + Math.random() * 900000).toString();
-      const peer = new Peer(hostId);
+      const peer = new Peer(hostId, PEER_ICE_CONFIG);
 
       // 成功時：IDをセットし、接続待ち状態にする
       peer.on('open', (id) => {
@@ -264,7 +296,7 @@ export default function PoseSwordWeb() {
   const handleJoinRoom = () => {
     setSystemMessage("");
     setRole("CLIENT"); setStep("CRAFT");
-    const peer = new Peer();
+    const peer = new Peer(PEER_ICE_CONFIG);
     peer.on('open', (id) => setMyPeerId(id));
     peerRef.current = peer;
   };
@@ -288,15 +320,20 @@ export default function PoseSwordWeb() {
           }
           break;
 
-        case "EXCHANGE_SWORD":
-          const enemyData1 = { ...data.swordData };
-          if (enemyData1.imageStr && !enemyData1.imageSrc) {
-            enemyData1.imageSrc = enemyData1.imageStr.startsWith("data:") 
-              ? enemyData1.imageStr 
-              : "data:image/png;base64," + enemyData1.imageStr;
-          }
-          setEnemySwordData(enemyData1);
+        case "EXCHANGE_SWORD": {
+          // 重複受信は安全（後着データがimageSrcを持てば上書き、持たなければ既存を保持）
+          const incoming = data.swordData;
+          setEnemySwordData(prev => {
+            const merged = { ...(prev || {}), ...incoming };
+            if (merged.imageStr && !merged.imageSrc) {
+              merged.imageSrc = merged.imageStr.startsWith("data:")
+                ? merged.imageStr
+                : "data:image/png;base64," + merged.imageStr;
+            }
+            return merged;
+          });
           break;
+        }
 
         case "SYNC_STATE": 
           if (data.swordData) {
@@ -335,14 +372,10 @@ export default function PoseSwordWeb() {
 
         case "SYNC":
           if (currentRole === "CLIENT") {
-            syncCountRef.current.fromPeer++;   
             try {
-              syncCountRef.current.toUnity++;  
               sendMessageRef.current('GameManager', 'SyncTransform', JSON.stringify(data));
-            } catch(e) {
-              syncCountRef.current.toUnity--;  
-            }
-            if (data.hostSword.hp <= 0 || data.clientSword.hp <= 0) {
+            } catch(e) {}
+            if (data.hostSword?.hp <= 0 || data.clientSword?.hp <= 0) {
               if (handleGameOverRef.current) handleGameOverRef.current(data);
             }
           }
@@ -567,7 +600,10 @@ export default function PoseSwordWeb() {
                       </h3>
                       {hostData ? (
                         <>
-                          <img src={hostData.imageSrc || hostData.imageStr} alt="Host Sword" style={styles.previewImage} />
+                          {hostData.imageSrc
+                            ? <img src={hostData.imageSrc} alt="Host Sword" style={styles.previewImage} />
+                            : <div style={{ ...styles.previewImage, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: '13px' }}>画像受信中...</div>
+                          }
                           <p style={styles.swordName}>{hostData.name}</p>
                           <div style={styles.statsBox}>
                             <span>HP: {hostData.hp}</span>
@@ -592,7 +628,10 @@ export default function PoseSwordWeb() {
                       </h3>
                       {clientData ? (
                         <>
-                          <img src={clientData.imageSrc || clientData.imageStr} alt="Client Sword" style={styles.previewImage} />
+                          {clientData.imageSrc
+                            ? <img src={clientData.imageSrc} alt="Client Sword" style={styles.previewImage} />
+                            : <div style={{ ...styles.previewImage, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: '13px' }}>画像受信中...</div>
+                          }
                           <p style={styles.swordName}>{clientData.name}</p>
                           <div style={styles.statsBox}>
                             <span>HP: {clientData.hp}</span>
@@ -649,8 +688,12 @@ export default function PoseSwordWeb() {
                       <div style={styles.readyBox(isEnemyReady)}>相手: {isEnemyReady ? "準備OK!" : "準備中..."}</div>
                     </div>
                     {!isReady ? (
-                      <button style={{ ...styles.button, backgroundColor: 'orange', color: 'white' }} onClick={handleReady}>
-                        準備OK（バトルへ）
+                      <button
+                        style={{ ...styles.button, backgroundColor: enemySwordData ? 'orange' : 'gray', color: 'white' }}
+                        onClick={handleReady}
+                        disabled={!enemySwordData}
+                      >
+                        {enemySwordData ? "準備OK（バトルへ）" : "相手のデータ受信中..."}
                       </button>
                     ) : (
                       <p style={{ fontWeight: 'bold' }}>相手の準備を待っています...</p>
