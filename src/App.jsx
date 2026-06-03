@@ -57,10 +57,10 @@ export default function PoseSwordWeb() {
   const [systemMessage, setSystemMessage] = useState("");
 
   const { unityProvider, sendMessage, isLoaded } = useUnityContext({
-    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.loader.js",
-    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.data",
-    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.framework.js",
-    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.5/Build/ver2.5.wasm",
+    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.loader.js",
+    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.data",
+    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.framework.js",
+    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.wasm",
   });
 
   const pendingBattleRef = useRef(null);
@@ -185,11 +185,27 @@ export default function PoseSwordWeb() {
   }, [countdown]);
 
   useEffect(() => {
-    if (connection && mySwordRef.current) {
-      setTimeout(() => {
-        connection.send({ type: "EXCHANGE_SWORD", swordData: mySwordRef.current });
-      }, 500);
-    }
+    if (!connection || !mySwordRef.current) return;
+
+    const { name, hp, attack, weight } = mySwordRef.current;
+    const statsData = { name, hp, attack, weight };
+    const imageStr = mySwordRef.current.imageStr;
+
+    // 統計データのみを即時送信（小さいので確実に届く）
+    connection.send({ type: "EXCHANGE_SWORD", swordData: statsData });
+
+    // 相手データが届くまで1.5秒ごとにリトライ
+    const retryInterval = setInterval(() => {
+      if (enemySwordRef.current) { clearInterval(retryInterval); return; }
+      connection.send({ type: "EXCHANGE_SWORD", swordData: statsData });
+    }, 1500);
+
+    // 画像は別送信（大きいが、届かなくてもゲームは開始できる）
+    const imageTimer = setTimeout(() => {
+      if (imageStr) connection.send({ type: "EXCHANGE_IMAGE", imageStr });
+    }, 800);
+
+    return () => { clearInterval(retryInterval); clearTimeout(imageTimer); };
   }, [connection]);
 
   useEffect(() => {
@@ -303,13 +319,19 @@ export default function PoseSwordWeb() {
           break;
 
         case "EXCHANGE_SWORD":
-          const enemyData1 = { ...data.swordData };
-          if (enemyData1.imageStr && !enemyData1.imageSrc) {
-            enemyData1.imageSrc = enemyData1.imageStr.startsWith("data:") 
-              ? enemyData1.imageStr 
-              : "data:image/png;base64," + enemyData1.imageStr;
-          }
-          setEnemySwordData(enemyData1);
+          // 統計データのみ受信（imageStrは含まない）。重複受信は上書きで無害
+          setEnemySwordData(prev => ({ ...(prev || {}), ...data.swordData }));
+          break;
+
+        case "EXCHANGE_IMAGE":
+          // 画像データを既存の統計データに追加
+          setEnemySwordData(prev => {
+            if (!prev) return null;
+            const imageSrc = data.imageStr?.startsWith("data:")
+              ? data.imageStr
+              : "data:image/png;base64," + data.imageStr;
+            return { ...prev, imageStr: data.imageStr, imageSrc };
+          });
           break;
 
         case "SYNC_STATE": 
@@ -349,14 +371,10 @@ export default function PoseSwordWeb() {
 
         case "SYNC":
           if (currentRole === "CLIENT") {
-            syncCountRef.current.fromPeer++;   
             try {
-              syncCountRef.current.toUnity++;  
               sendMessageRef.current('GameManager', 'SyncTransform', JSON.stringify(data));
-            } catch(e) {
-              syncCountRef.current.toUnity--;  
-            }
-            if (data.hostSword.hp <= 0 || data.clientSword.hp <= 0) {
+            } catch(e) {}
+            if (data.hostSword?.hp <= 0 || data.clientSword?.hp <= 0) {
               if (handleGameOverRef.current) handleGameOverRef.current(data);
             }
           }
@@ -581,7 +599,10 @@ export default function PoseSwordWeb() {
                       </h3>
                       {hostData ? (
                         <>
-                          <img src={hostData.imageSrc || hostData.imageStr} alt="Host Sword" style={styles.previewImage} />
+                          {hostData.imageSrc
+                            ? <img src={hostData.imageSrc} alt="Host Sword" style={styles.previewImage} />
+                            : <div style={{ ...styles.previewImage, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: '13px' }}>画像受信中...</div>
+                          }
                           <p style={styles.swordName}>{hostData.name}</p>
                           <div style={styles.statsBox}>
                             <span>HP: {hostData.hp}</span>
@@ -606,7 +627,10 @@ export default function PoseSwordWeb() {
                       </h3>
                       {clientData ? (
                         <>
-                          <img src={clientData.imageSrc || clientData.imageStr} alt="Client Sword" style={styles.previewImage} />
+                          {clientData.imageSrc
+                            ? <img src={clientData.imageSrc} alt="Client Sword" style={styles.previewImage} />
+                            : <div style={{ ...styles.previewImage, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: '13px' }}>画像受信中...</div>
+                          }
                           <p style={styles.swordName}>{clientData.name}</p>
                           <div style={styles.statsBox}>
                             <span>HP: {clientData.hp}</span>
