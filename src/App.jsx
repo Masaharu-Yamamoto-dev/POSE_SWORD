@@ -36,15 +36,18 @@ export default function PoseSwordWeb() {
   const enemySwordRef = useRef(null);
   useEffect(() => { enemySwordRef.current = enemySwordData; }, [enemySwordData]);
 
-// App.jsx の gameMode の下あたりに追加
+  // ゲームモードの管理 ("1" = 独楽, "0" = 剣)
   const [gameMode, setGameMode] = useState("1");
   const gameModeRef = useRef("1");
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
 
-  // ▼【新規追加】相手のUnity(WebGL)のロードが完了したかを管理するフラグ
+  // 相手のUnity(WebGL)のロードが完了したかを管理するフラグ
   const [isEnemyUnityLoaded, setIsEnemyUnityLoaded] = useState(false);
   const enemyUnityLoadedRef = useRef(false);
   useEffect(() => { enemyUnityLoadedRef.current = isEnemyUnityLoaded; }, [isEnemyUnityLoaded]);
+
+  // ▼【復活】消えてしまっていたユーザー名管理のステート
+  const [userName, setUserName] = useState("");
 
   const [myPeerId, setMyPeerId] = useState("");
   const [targetId, setTargetId] = useState("");
@@ -75,13 +78,11 @@ export default function PoseSwordWeb() {
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
   const isFinishingRef = useRef(false);
-
   const handleGameOverRef = useRef(null);
 
-const handleGameOver = (syncData) => {
-    // ▼【新規追加】既に終了処理に入っている場合は、重複して処理しない
+  const handleGameOver = (syncData) => {
     if (isFinishingRef.current) return;
-    isFinishingRef.current = true; // 終了処理開始フラグを立てる
+    isFinishingRef.current = true; 
 
     const currentRole = roleRef.current;
     const clientWon = syncData.hostSword.hp <= 0;
@@ -107,27 +108,22 @@ const handleGameOver = (syncData) => {
       damageTaken
     });
     
-    // ▼【変更】すぐに RESULT 画面にせず、Unityの演出を見るために3秒待つ
     console.log("🏁 決着！演出終了を待機します...");
     
     setTimeout(() => {
-      // 待機中にユーザーが「退出する」等を押していなければ画面遷移
       if (stepRef.current === "PLAYING") {
         setIsReady(false);
         setIsEnemyReady(false);
         setCountdown(null);
         setStep("RESULT");
       }
-      isFinishingRef.current = false; // 次の試合のためにフラグを戻す
-    }, 3000); // ★3000ミリ秒（3秒）待機
+      isFinishingRef.current = false; 
+    }, 3000); 
   };
 
   useEffect(() => { handleGameOverRef.current = handleGameOver; });
-
- // ❌ 修正前：自分が Loaded になったら即 Startしていたコードを以下に上書き
-  // ⭕ 修正後：自分のロード完了を相手に通知 ＆ 両方揃ったら同時にキック！
   
-  // 1. 自分のUnityロードが終わったら、通信相手に「ロード終わったよ」と送る
+  // 1. 自分のUnityロードが終わったら、通信相手に通知
   useEffect(() => {
     if (isLoaded && connection) {
       console.log("📡 自分のUnityロード完了。相手に通知します。");
@@ -135,7 +131,7 @@ const handleGameOver = (syncData) => {
     }
   }, [isLoaded, connection]);
 
-  // 2. 自分と相手、両方のUnityロードが完全に揃ったら、同時に命令を撃ち込む！
+  // 2. 両方のUnityロードが完全に揃ったら、同時に命令を撃ち込む！
   useEffect(() => {
     if (isLoaded && isEnemyUnityLoaded && pendingBattleRef.current !== null) {
       const { mode, startJson, gameModeStr } = pendingBattleRef.current;
@@ -185,7 +181,7 @@ const handleGameOver = (syncData) => {
 
   useEffect(() => {
     if (isReady && isEnemyReady && step === "MATCHING") {
-      setIsEnemyUnityLoaded(false); // フラグをリセット
+      setIsEnemyUnityLoaded(false); 
       if (mySwordRef.current && enemySwordRef.current) {
         launchUnityBattle(roleRef.current, mySwordRef.current, enemySwordRef.current);
       } else {
@@ -206,7 +202,7 @@ const handleGameOver = (syncData) => {
         if (mySwordRef.current && enemySwordRef.current) {
           launchUnityBattle(roleRef.current, mySwordRef.current, enemySwordRef.current);
         } else {
-          console.error("❌ バトル開始失敗: 自分の剣=", !!mySwordRef.current, "相手の剣=", !!enemySwordRef.current);
+          console.error("❌ バトル開始失敗");
           alert("相手の剣データがまだ届いていません。少し待ってから再度お試しください。");
         }
       }
@@ -220,17 +216,14 @@ const handleGameOver = (syncData) => {
     const statsOnly = { name, hp, attack, weight };
     const fullData  = { name, hp, attack, weight, imageStr };
 
-    // ① 300ms後：統計のみ（小さい）を送信 → ゲーム開始条件をすぐ満たす
     const t1 = setTimeout(() => {
       connection.send({ type: "EXCHANGE_SWORD", swordData: statsOnly });
     }, 300);
 
-    // ② 1000ms後：画像込みの完全データを送信
     const t2 = setTimeout(() => {
       connection.send({ type: "EXCHANGE_SWORD", swordData: fullData });
     }, 1000);
 
-    // ③ 2秒ごとにリトライ（画像が届くまで繰り返す）
     const retry = setInterval(() => {
       if (enemySwordRef.current?.imageSrc) { clearInterval(retry); return; }
       connection.send({ type: "EXCHANGE_SWORD", swordData: !enemySwordRef.current ? statsOnly : fullData });
@@ -246,7 +239,7 @@ const handleGameOver = (syncData) => {
         return () => clearTimeout(timer);
       } else {
         setCaptureCountdown(null);
-        executeCaptureAndCraft(); // 0になったら実際の撮影を実行
+        executeCaptureAndCraft(); 
       }
     }
   }, [captureCountdown]);
@@ -266,7 +259,7 @@ const handleGameOver = (syncData) => {
     setEnemySwordData(null);
     setRole(null);
     setSystemMessage(msg);
-    setGameMode("1"); // ▼ 追加：モードリセット
+    setGameMode("1"); 
     setStep("LOBBY");
   };
 
@@ -282,13 +275,10 @@ const handleGameOver = (syncData) => {
     setRole("HOST"); setStep("CRAFT");
 
     const maxRetries = 5;
-
     const attemptCreatePeer = (retriesLeft) => {
-      // 6桁のランダムIDを生成
       const hostId = Math.floor(100000 + Math.random() * 900000).toString();
       const peer = new Peer(hostId, PEER_ICE_CONFIG);
 
-      // 成功時：IDをセットし、接続待ち状態にする
       peer.on('open', (id) => {
         console.log(`部屋を作成しました。ID: ${id}`);
         setMyPeerId(id);
@@ -296,24 +286,20 @@ const handleGameOver = (syncData) => {
         
         peer.on('connection', (conn) => { 
           conn.on('open', () => {
-            console.log("クライアントとの通信経路が完全に開通しました！");
+            console.log("クライアントとの通信経路が開通しました！");
             setConnection(conn); 
             setupConnection(conn); 
           });
         });
       });
 
-      // エラー時：ID重複なら自動リトライ、それ以外はエラー出力
       peer.on('error', (err) => {
         if (err.type === 'unavailable-id') {
-          console.warn(`ID: ${hostId} は既に使用されています。`);
-          peer.destroy(); // 失敗したPeerインスタンスを破棄
-
+          peer.destroy();
           if (retriesLeft > 0) {
-            console.log(`新しいIDで再試行します... (残り ${retriesLeft} 回)`);
             attemptCreatePeer(retriesLeft - 1);
           } else {
-            alert("サーバーが混雑しており、部屋の作成に失敗しました。少し時間を置いてから再度お試しください。");
+            alert("サーバーが混雑しています。");
             resetToLobby("");
           }
         } else {
@@ -344,16 +330,13 @@ const handleGameOver = (syncData) => {
       const currentRole = roleRef.current;
 
       switch (data.type) {
-        // ▼【新規追加】ゲームモードの同期受信（Client側）
         case "SYNC_GAMEMODE":
-          console.log("【受信】ゲームモード変更:", data.gameMode);
           if (currentRole === "CLIENT") {
             setGameMode(data.gameMode);
           }
           break;
 
         case "EXCHANGE_SWORD": {
-          // 重複受信は安全（後着データがimageSrcを持てば上書き、持たなければ既存を保持）
           const incoming = data.swordData;
           setEnemySwordData(prev => {
             const merged = { ...(prev || {}), ...incoming };
@@ -388,16 +371,6 @@ const handleGameOver = (syncData) => {
         case "LEAVE":
           resetToLobby("相手が部屋を退出しました。"); 
           break;
-
-        // case "INPUT":
-        //   if (currentRole === "HOST") {
-        //     try {
-        //       sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data));
-        //     } catch(e) {
-        //       console.error("INPUT転送エラー:", e);
-        //     }
-        //   }
-        //   break;
 
         case "INPUT":
           try {
@@ -434,7 +407,7 @@ const handleGameOver = (syncData) => {
     const clientData = currentRole === "CLIENT" ? myData : enemyData;
     
     if (!hostData || !clientData) {
-      alert("両方の剣データが準備できていません。もう一度やり直してください。");
+      alert("データの準備ができていません。");
       return;
     }
     
@@ -452,8 +425,6 @@ const handleGameOver = (syncData) => {
     };
     
     const mode = currentRole === "HOST" ? 1 : 0;
-    
-    // ▼【修正】ゲームモード (gameModeRef.current) も一緒に pending に保存する
     pendingBattleRef.current = { mode, startJson, gameModeStr: gameModeRef.current };
     setStep("PLAYING"); 
   };
@@ -466,22 +437,19 @@ const handleGameOver = (syncData) => {
   };
 
   const startCaptureCountdown = () => {
-    setCaptureCountdown(5); // 5秒のポーズ時間
+    setCaptureCountdown(5); 
   };
 
-  // ▼【変更】カウントダウンが0になったら実行される実際の撮影＆API送信処理
   const executeCaptureAndCraft = () => {
     setIsCrafting(true);
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
     
-    // --- 画像を左右反転してキャンバスに描画 ---
     context.save();
-    context.scale(-1, 1); // X軸を反転
-    context.translate(-canvas.width, 0); // 反転した分だけ位置をずらす
+    context.scale(-1, 1); 
+    context.translate(-canvas.width, 0); 
     context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     context.restore(); 
-    // ------------------------------------------
     
     const base64Full = canvas.toDataURL('image/jpeg');
     const base64DataOnly = base64Full.split(',')[1]; 
@@ -540,22 +508,15 @@ const handleGameOver = (syncData) => {
         return (
           <div style={styles.container}>
             <h2>剣の錬成</h2>
-            
-            {/* ▼【変更】ビデオ領域を相対配置にし、上にカウントダウンを被せる */}
             <div style={{ position: 'relative', width: '400px', marginBottom: '20px' }}>
               <video ref={videoRef} autoPlay playsInline style={styles.video} />
-              
-              {/* カウントダウン実行中のみ大きな数字（0の時は📸）を表示 */}
               {captureCountdown !== null && (
                 <div style={styles.countdownOverlay}>
                   {captureCountdown > 0 ? captureCountdown : "📸"}
                 </div>
               )}
             </div>
-
             <canvas ref={canvasRef} width="640" height="480" style={{ display: 'none' }} />
-            
-            {/* ボタンの制御: カウントダウン中や錬成中は押せないようにする */}
             <button 
               style={{ 
                 ...styles.button, 
@@ -588,20 +549,17 @@ const handleGameOver = (syncData) => {
         return (
           <div style={styles.container}>
             <h2>マッチング待機</h2>
-            
             {!connection && (
               <div style={{ marginBottom: '20px' }}>
                 {role === "HOST" && (
                   <div>
                     <p style={{ fontSize: '20px', margin: '0' }}>あなたの部屋ID</p>
-                    {/* 6桁の数字を大きく、字間を開けて見やすく表示 */}
                     <p style={{ fontSize: '48px', color: 'blue', fontWeight: 'bold', letterSpacing: '8px', margin: '10px 0' }}>
                       {myPeerId || "取得中..."}
                     </p>
                     <p>このIDをClient（対戦相手）に教えてください。</p>
                   </div>
                 )}
-                
                 {role === "CLIENT" && (
                   <div style={{ padding: '20px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
                     <p style={{ fontSize: '18px', fontWeight: 'bold' }}>Hostの部屋ID（6桁の数字）を入力</p>
@@ -610,16 +568,8 @@ const handleGameOver = (syncData) => {
                       value={targetId} 
                       onChange={(e) => setTargetId(e.target.value)} 
                       placeholder="例: 123456" 
-                      maxLength={6} // 6文字までしか入力できないように制限
-                      style={{ 
-                        padding: '10px', 
-                        fontSize: '24px', 
-                        width: '180px', 
-                        textAlign: 'center', 
-                        letterSpacing: '4px',
-                        borderRadius: '5px',
-                        border: '2px solid #ccc'
-                      }} 
+                      maxLength={6} 
+                      style={{ padding: '10px', fontSize: '24px', width: '180px', textAlign: 'center', letterSpacing: '4px', borderRadius: '5px', border: '2px solid #ccc' }} 
                     />
                     <button style={{ ...styles.button, marginLeft: '10px', backgroundColor: '#4CAF50', color: 'white' }} onClick={connectToHost}>
                       接続
@@ -630,7 +580,6 @@ const handleGameOver = (syncData) => {
             )}
             
             <div style={styles.previewContainer}>
-              {/* 表示用のデータを事前に整理し、常に左右の枠を表示する */}
               {(() => {
                 const isHost = role === "HOST";
                 const hostData = isHost ? mySwordData : enemySwordData;
@@ -638,7 +587,6 @@ const handleGameOver = (syncData) => {
                 
                 return (
                   <>
-                    {/* 左側：ホストの剣 */}
                     <div style={styles.swordCard}>
                       <h3 style={{ margin: '0 0 10px 0', color: isHost ? '#000000' : '#ff4444' }}>
                         {isHost ? "あなた" : "対戦相手"}
@@ -663,10 +611,8 @@ const handleGameOver = (syncData) => {
                       )}
                     </div>
 
-                    {/* 中央：VSマーク（常に出しておく） */}
                     <div style={styles.vsText}>VS</div>
 
-                    {/* 右側：クライアントの剣 */}
                     <div style={styles.swordCard}>
                       <h3 style={{ margin: '0 0 10px 0', color: isHost ? '#FF4444' : '#000000' }}>
                         {!isHost ? "あなた" : "対戦相手"}
@@ -699,8 +645,6 @@ const handleGameOver = (syncData) => {
 
             {connection && (
               <div style={styles.connectedBox}>
-
-                {/* ▼【新規追加】ゲームモード選択UI */}
                 <div style={styles.modeBox}>
                   <h3 style={{ margin: '0 0 10px 0' }}>バトルモード</h3>
                   {role === "HOST" ? (
@@ -722,7 +666,6 @@ const handleGameOver = (syncData) => {
                     </div>
                   )}
                 </div>
-                {/* ▲ ここまで */}
 
                 {countdown !== null ? (
                   <h2 style={{ fontSize: '48px', color: 'red', margin: '0' }}>{countdown > 0 ? countdown : "START!"}</h2>
@@ -758,8 +701,6 @@ const handleGameOver = (syncData) => {
         return (
           <div style={{ ...styles.container, position: 'relative' }}>
             <div style={{ ...styles.unityContainer, position: 'relative' }}>
-              
-              {/* ▼【新規追加】お互いのロードが完了するまで画面をロックするオーバーレイ */}
               {(!isLoaded || !isEnemyUnityLoaded) && (
                 <div style={styles.loadingOverlay}>
                   <div style={styles.loadingSpinner}></div>
@@ -768,7 +709,6 @@ const handleGameOver = (syncData) => {
                   </p>
                 </div>
               )}
-              
               <Unity unityProvider={unityProvider} style={{ width: '100%', height: '100%' }} />
             </div>
           </div>
@@ -806,10 +746,10 @@ const styles = {
   container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
   button: { padding: '10px 20px', margin: '10px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px', fontWeight: 'bold', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' },
   connectedBox: { marginTop: '10px', padding: '10px 20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
-  modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' }, // 追加
+  modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' },
   video: { width: '400px', borderRadius: '8px', backgroundColor: '#000', display: 'block', transform: 'scaleX(-1)' },
   unityContainer: { width: '800px', height: '450px', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555' },
-readyBox: (isReady) => ({
+  readyBox: (isReady) => ({
     padding: '10px 20px', border: `2px solid ${isReady ? '#4CAF50' : '#9e9e9e'}`, backgroundColor: isReady ? '#e8f5e9' : '#f5f5f5', borderRadius: '8px', fontWeight: 'bold', minWidth: '100px'
   }),
   errorMessage: { padding: '15px 25px', backgroundColor: '#ffdddd', color: '#cc0000', borderRadius: '8px', marginBottom: '20px', fontWeight: 'bold', border: '1px solid #cc0000' },
@@ -828,14 +768,13 @@ readyBox: (isReady) => ({
     fontWeight: 'bold',
     color: 'rgba(255, 255, 255, 0.7)',
     textShadow: '0 0 20px red, 2px 2px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000',
-    pointerEvents: 'none', // クリック等の操作を邪魔しないようにする
+    pointerEvents: 'none',
     zIndex: 10
   },
-  // styles オブジェクトの最後に追加してください
   loadingOverlay: {
     position: 'absolute',
     top: 0, left: 0, width: '100%', height: '100%',
-    backgroundColor: 'rgba(0, 0, 0, 0.9)', // ほぼ真っ黒にして裏を隠す
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
     zIndex: 100
   },
