@@ -342,7 +342,7 @@ export default function PoseSwordWeb() {
 
     peer.on('error', (err) => {
       if (err.type === 'peer-unavailable') {
-        setSystemMessage("入力されたIDの部屋が見つかりません。");
+        setSystemMessage("入力されたIDのロビーが見つかりません。");
       } else {
         setSystemMessage("通信エラーが発生しました。");
       }
@@ -356,7 +356,7 @@ export default function PoseSwordWeb() {
 
     // 1. 空欄チェック
     if (!targetId.trim()) {
-      setSystemMessage("部屋IDを入力してください。");
+      setSystemMessage("ロビーIDを入力してください。");
       return;
     }
 
@@ -369,7 +369,7 @@ export default function PoseSwordWeb() {
 
     // 3. 桁数チェック（6桁未満の場合）
     if (targetId.length < 6) {
-      setSystemMessage("部屋IDは6桁の数字で入力してください。");
+      setSystemMessage("ロビーIDは6桁の数字で入力してください。");
       return;
     }
 
@@ -401,7 +401,7 @@ export default function PoseSwordWeb() {
             isRejectedRef.current = true;
             setConnection(null);
             setStep("CLIENT_WAIT");
-            setSystemMessage("この部屋はすでに満員（対戦中）です。");
+            setSystemMessage("このロビーはすでに満員（対戦中）です。");
           }
           break;
 
@@ -436,7 +436,7 @@ export default function PoseSwordWeb() {
           break;
 
         case "LEAVE":
-          resetToTitle("相手が部屋を退出しました。"); 
+          resetToTitle("相手がロビーを退出しました。"); 
           break;
         case "INPUT":
           try { sendMessageRef.current('GameManager', 'ReceiveInput', JSON.stringify(data)); } catch(e) {}
@@ -569,7 +569,7 @@ export default function PoseSwordWeb() {
                 
                 {!mySwordData && (
                   <p style={{ color: '#888', fontSize: '14px', margin: '0 0 -10px 0', fontWeight: 'bold' }}>
-                    ※遊ぶには、先に剣を錬成してください
+                    対戦するには、先に剣を錬成してください
                   </p>
                 )}
 
@@ -581,7 +581,7 @@ export default function PoseSwordWeb() {
                     onClick={handleCreateRoom}
                     disabled={!mySwordData}
                   >
-                    部屋を作る
+                    ロビーを作成
                   </button>
                 </div>
 
@@ -593,7 +593,7 @@ export default function PoseSwordWeb() {
                     onClick={handleJoinRoom}
                     disabled={!mySwordData}
                   >
-                    部屋に入る
+                    ロビーに入る
                   </button>
                 </div>
               </div>
@@ -837,7 +837,7 @@ export default function PoseSwordWeb() {
               {/* ▼ ここを変更：className="glass" を追加し、スタイルのborder等を削除 */}
               <div className="glass" style={{ margin: '20px 0', padding: '30px', width: '100%', maxWidth: '500px', boxSizing: 'border-box' }}>
                 
-                <p style={{ fontSize: '18px', margin: '0', color: '#555', fontWeight: 'bold' }}>あなたの部屋ID</p>
+                <p style={{ fontSize: '18px', margin: '0', color: '#555', fontWeight: 'bold' }}>あなたのロビーID</p>
                 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', margin: '20px 0' }}>
                   <p style={{ 
@@ -905,7 +905,7 @@ export default function PoseSwordWeb() {
               {/* ▼ ボックスを.glass（直角すりガラス）に変更 */}
               <div className="glass">
                 <p style={{ fontSize: '18px', fontWeight: 'bold', color: '#000', margin: '0 0 20px 0' }}>
-                  Hostの部屋ID（6桁の数字）を入力
+                  HostのロビーID（6桁の数字）を入力
                 </p>
                 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
@@ -1117,7 +1117,7 @@ export default function PoseSwordWeb() {
           </div>
         );
 
-      case "RESULT":
+case "RESULT":
         return (
           <div style={styles.container}>
             {matchResult.winnerImageSrc && (
@@ -1146,19 +1146,39 @@ export default function PoseSwordWeb() {
                 <p style={{ fontSize: '20px', margin: '10px 0' }}>受けたダメージ: <strong>{matchResult.damageTaken}</strong></p>
               </div>
               
+              {/* ▼ ボタン群を墨ボタン形式に変更 */}
               <div style={{ marginTop: '40px', display: 'flex', gap: '20px' }}>
-                <button style={{ ...styles.button, backgroundColor: 'orange', color: 'white', padding: '15px 30px' }} onClick={() => {
-                  try { sendMessage('GameManager', 'ResetMatch', ''); } catch(e) {}
-                  setIsReady(false);
-                  setIsEnemyUnityLoaded(false);
-                  if (connRef.current) connRef.current.send({ type: "SYNC_STATE", isReady: false });
-                  setStep("LOBBY");
-                }}>
-                  ロビーに戻る
-                </button>
-                <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white', padding: '15px 30px' }} onClick={handleLeave}>
-                  退出する
-                </button>
+                
+                {/* 1. ロビーに戻るボタン（緑系の墨ボタン） */}
+                <div className="ink-btn-container">
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    style={{ '--btn-color': '#4CAF50' }}
+                    onClick={() => {
+                      try { sendMessage('GameManager', 'ResetMatch', ''); } catch(e) {}
+                      setIsReady(false);
+                      setIsEnemyUnityLoaded(false);
+                      if (connRef.current) connRef.current.send({ type: "SYNC_STATE", isReady: false });
+                      setStep("LOBBY");
+                    }}
+                  >
+                    ロビーに戻る
+                  </button>
+                </div>
+
+                {/* 2. 退出するボタン（グレー系の墨ボタン） */}
+                <div className="ink-btn-container">
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    style={{ '--btn-color': '#666666' }}
+                    onClick={handleLeave}
+                  >
+                    退出する
+                  </button>
+                </div>
+
               </div>
             </div>
           </div>
