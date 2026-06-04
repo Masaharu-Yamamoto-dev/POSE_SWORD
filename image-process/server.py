@@ -108,7 +108,7 @@ def cutout(req: CutoutRequest, x_api_key: str = Header(None)):
     sword_adj = random.choice(SWORD_NAMES)
     sword_suffix = random.choice(["ソード", "カリバー", "刀", "ブレード"])
     if req.userName:
-        sword_name = f"{req.userName}の{sword_adj}{sword_suffix}"
+        sword_name = f"{sword_adj}{req.userName}{sword_suffix}"
     else:
         sword_name = f"{sword_adj}{sword_suffix}"
 
