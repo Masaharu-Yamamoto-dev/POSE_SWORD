@@ -489,7 +489,12 @@ export default function PoseSwordWeb() {
 
   const executeCaptureAndCraft = () => {
     setStep("CRAFTING_API");
+    const video = videoRef.current;
     const canvas = canvasRef.current;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
     const context = canvas.getContext('2d');
     
     context.save();
