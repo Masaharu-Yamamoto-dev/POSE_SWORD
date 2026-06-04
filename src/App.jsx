@@ -927,8 +927,8 @@ export default function PoseSwordWeb() {
 
       case "PLAYING":
         return (
-          <div style={{ ...styles.container, position: 'relative' }}>
-            <div style={{ ...styles.unityContainer, position: 'relative' }}>
+          <div style={{ ...styles.container, padding: 0, position: 'relative', width: '100%', height: '100vh', justifyContent: 'center' }}>
+            <div style={{ ...styles.unityContainer, position: 'relative', width: '100%', maxHeight: '100vh' }}>
               {(!isLoaded || !isEnemyUnityLoaded) && (
                 <div style={styles.loadingOverlay}>
                   <div style={styles.loadingSpinner}></div>
@@ -1006,7 +1006,7 @@ const styles = {
   connectedBox: { marginTop: '10px', padding: '20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
   modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' },
   video: { width: '400px', borderRadius: '8px', backgroundColor: '#000', display: 'block', transform: 'scaleX(-1)' },
-  unityContainer: { width: '800px', height: '450px', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555' },
+  unityContainer: { width: '100%', maxWidth: '100vw', aspectRatio: '16 / 9', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555', boxSizing: 'border-box' },
   readyBox: (isReady) => ({ padding: '10px 20px', border: `2px solid ${isReady ? '#4CAF50' : '#9e9e9e'}`, backgroundColor: isReady ? '#e8f5e9' : '#f5f5f5', borderRadius: '8px', fontWeight: 'bold', minWidth: '100px' }),
   errorMessage: { padding: '15px 25px', backgroundColor: '#ffdddd', color: '#cc0000', borderRadius: '8px', fontWeight: 'bold', border: '1px solid #cc0000' }, // marginを削除しインラインで制御
   previewContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', margin: '20px 0', width: '100%', maxWidth: '800px' },
