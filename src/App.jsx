@@ -866,8 +866,17 @@ export default function PoseSwordWeb() {
                 ) : (
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '10px 0 20px 0' }}>
-                      <div style={styles.readyBox(isReady)}>自分: {isReady ? "準備OK!" : "準備中..."}</div>
-                      <div style={styles.readyBox(isEnemyReady)}>相手: {isEnemyReady ? "準備OK!" : "準備中..."}</div>
+                      {role === "HOST" ? (
+                        <>
+                          <div style={styles.readyBox(isReady)}>自分: {isReady ? "準備OK!" : "準備中..."}</div>
+                          <div style={styles.readyBox(isEnemyReady)}>相手: {isEnemyReady ? "準備OK!" : "準備中..."}</div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={styles.readyBox(isEnemyReady)}>相手: {isEnemyReady ? "準備OK!" : "準備中..."}</div>
+                          <div style={styles.readyBox(isReady)}>自分: {isReady ? "準備OK!" : "準備中..."}</div>
+                        </>
+                      )}
                     </div>
                     
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '15px' }}>
