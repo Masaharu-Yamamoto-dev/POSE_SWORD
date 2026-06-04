@@ -720,7 +720,7 @@ public static bool matchEnded = false;
 
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "超必殺・竜巻!!", new Color(1f, 0.8f, 0.2f));
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f));
         }
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
@@ -774,7 +774,7 @@ public static bool matchEnded = false;
 
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬りダッシュ!!", new Color(0.5f, 1f, 1f));
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f));
         }
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）
