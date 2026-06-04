@@ -40,8 +40,8 @@ export default function PoseSwordWeb() {
   useEffect(() => { enemySwordRef.current = enemySwordData; }, [enemySwordData]);
 
   // ゲームモードの管理 ("1" = 独楽, "0" = 剣)
-  const [gameMode, setGameMode] = useState("1");
-  const gameModeRef = useRef("1");
+  const [gameMode, setGameMode] = useState("0");
+  const gameModeRef = useRef("0");
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
 
   // 相手のUnity(WebGL)のロードが完了したかを管理するフラグ
