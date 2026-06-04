@@ -550,7 +550,7 @@ export default function PoseSwordWeb() {
             )}
             
             <div style={styles.contentWrapper}>
-              <img src="/logo-oreblade.png" alt="オレブレード" style={{ maxWidth: '500px', marginBottom: '40px' }} />
+              <img src="/logo.png" alt="オレブレード" style={{ maxWidth: '800px', marginBottom: '40px' }} />
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '300px' }}>
                 {/* 1. 剣を錬成するボタン */}
