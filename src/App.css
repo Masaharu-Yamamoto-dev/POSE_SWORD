@@ -182,3 +182,125 @@
     border-right-color: var(--border);
   }
 }
+.ink-btn-container {
+  position: relative;
+  display: block;
+  width: 100%;
+  z-index: 1; /* 重なりの基準 */
+}
+
+.ink-hover-effect {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 500px;  /* 墨の大きさを固定 */
+  height: 200px;
+  object-fit: contain;
+  
+  /* 墨を真っ黒なシルエットにする */
+  filter: brightness(0); 
+  
+  pointer-events: none;
+  clip-path: inset(0 100% 0 0); /* 初期状態は右から100%隠す */
+  transition: clip-path 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
+  
+  /* ボタンの文字より奥に配置 */
+  z-index: -1; 
+}
+
+/* ホバー時に墨が左から右へ現れる */
+.ink-btn-container:not(.disabled):hover .ink-hover-effect {
+  clip-path: inset(0 0 0 0);
+}
+
+.sharp-button {
+  position: relative;
+  z-index: 2; /* 墨より手前に配置 */
+  font-family: 'Kurobara', serif;
+  font-size: 26px;
+  font-weight: bold;
+  background-color: transparent;
+  border: none;
+  outline: none;
+  
+  /* 通常時は黒文字 */
+  color: var(--btn-color, #000);
+  
+  /* ホバー時の文字色変化をフワッとさせる */
+  transition: color 0.15s ease-out; 
+  
+  padding: 15px 20px;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+  width: 100%;
+  box-sizing: border-box;
+
+  white-space: nowrap;
+}
+
+/* ホバー時に文字色を白にする */
+.ink-btn-container:not(.disabled):hover .sharp-button {
+  color: #fff;
+}
+
+/* 剣を錬成する前の「押せないボタン」のスタイル */
+.ink-btn-container.disabled .sharp-button,
+.sharp-button:disabled {
+  color: #aaa;
+  cursor: not-allowed;
+  background-color: transparent;
+}
+
+
+/* --- グラスモーフィズムパネル --- */
+.glass {
+  background-color: rgba(188, 188, 188, 0.1);
+  backdrop-filter: blur(4px); /* 2pxだと弱いので少し強めにするのがおすすめ */
+  -webkit-backdrop-filter: blur(4px);
+  
+  /* 角丸をゼロにして「鋭いガラス板」にする */
+  border-radius: 0px; 
+  
+  /* ガラスのエッジが光を反射しているような細いフチをつける */
+  border: 1px solid rgba(255, 255, 255, 0.3); 
+  border-top: 1px solid rgba(255, 255, 255, 0.5); /* 上だけ少し明るくすると立体的になる */
+  
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1); /* 影を少し落として浮遊感を出す */
+}
+
+/* 1. 全体レイアウト */
+.client-wait-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh; /* 必要に応じて調整してください */
+}
+
+.content-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+}
+
+.lobby-title {
+  letter-spacing: 0.1em;
+}
+
+/* 2. 和風すりガラスボックス（鋭角） */
+.glass {
+  margin: 20px 0;
+  padding: 30px;
+  width: 100%;
+  max-width: 500px;
+  box-sizing: border-box;
+  background-color: rgba(72, 97, 8, 0.1);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border-radius: 0px; 
+  border: 1px solid rgba(255, 255, 255, 0.3); 
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}

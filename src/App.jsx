@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Peer } from 'peerjs';
 import { Unity, useUnityContext } from 'react-unity-webgl';
+import './App.css';
 
 // STUN + TURN サーバー設定
 const PEER_ICE_CONFIG = {
@@ -332,6 +333,7 @@ export default function PoseSwordWeb() {
 
   const handleJoinRoom = () => {
     setSystemMessage("");
+    setTargetId("");
     isRejectedRef.current = false;
     setRole("CLIENT"); 
     setStep("CLIENT_WAIT");
@@ -350,6 +352,27 @@ export default function PoseSwordWeb() {
   };
 
   const connectToHost = () => {
+    setSystemMessage(""); // 一旦メッセージをクリア
+
+    // 1. 空欄チェック
+    if (!targetId.trim()) {
+      setSystemMessage("部屋IDを入力してください。");
+      return;
+    }
+
+    // 2. 半角数字以外のチェック（正規表現で数字だけか判定）
+    const isOnlyNumbers = /^\d+$/.test(targetId);
+    if (!isOnlyNumbers) {
+      setSystemMessage("IDが不適切です。半角数字のみで入力してください。");
+      return;
+    }
+
+    // 3. 桁数チェック（6桁未満の場合）
+    if (targetId.length < 6) {
+      setSystemMessage("部屋IDは6桁の数字で入力してください。");
+      return;
+    }
+
     setSystemMessage("接続中..."); 
     if (!peerRef.current || !targetId) return;
     const conn = peerRef.current.connect(targetId);
@@ -525,12 +548,17 @@ export default function PoseSwordWeb() {
               <img src="/logo-oreblade.png" alt="オレブレード" style={{ maxWidth: '500px', marginBottom: '40px' }} />
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '300px' }}>
-                <button 
-                  style={{ ...styles.button, backgroundColor: '#ff9800', color: 'white', padding: '15px' }} 
-                  onClick={() => goToCrafting("TITLE")}
-                >
-                  {mySwordData ? "⚔️ 剣を再錬成する" : "⚔️ 剣を錬成する"}
-                </button>
+                {/* 1. 剣を錬成するボタン */}
+                <div className="ink-btn-container">
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    style={{ '--btn-color': '#4CAF50' }}
+                    onClick={() => goToCrafting("TITLE")}
+                  >
+                    {mySwordData ? "⚔️ 剣を再錬成する" : "⚔️ 剣を錬成する"}
+                  </button>
+                </div>
                 
                 <div style={{ borderTop: '2px solid #ddd', margin: '10px 0' }}></div>
                 
@@ -539,20 +567,30 @@ export default function PoseSwordWeb() {
                     ※遊ぶには、先に剣を錬成してください
                   </p>
                 )}
-                <button 
-                  style={{ ...styles.button, backgroundColor: mySwordData ? '#4CAF50' : '#ccc', color: mySwordData ? 'white' : '#666', cursor: mySwordData ? 'pointer' : 'not-allowed' }} 
-                  onClick={handleCreateRoom}
-                  disabled={!mySwordData}
-                >
-                  部屋を作る (Host)
-                </button>
-                <button 
-                  style={{ ...styles.button, backgroundColor: mySwordData ? '#2196F3' : '#ccc', color: mySwordData ? 'white' : '#666', cursor: mySwordData ? 'pointer' : 'not-allowed' }} 
-                  onClick={handleJoinRoom}
-                  disabled={!mySwordData}
-                >
-                  部屋に入る (Client)
-                </button>
+
+                {/* 2. 部屋を作るボタン */}
+                <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    onClick={handleCreateRoom}
+                    disabled={!mySwordData}
+                  >
+                    部屋を作る
+                  </button>
+                </div>
+
+                {/* 3. 部屋に入るボタン */}
+                <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    onClick={handleJoinRoom}
+                    disabled={!mySwordData}
+                  >
+                    部屋に入る
+                  </button>
+                </div>
               </div>
 
               {/* ▼【変更】エラーメッセージ領域の高さを固定（レイアウトずれ防止） */}
@@ -585,39 +623,57 @@ export default function PoseSwordWeb() {
                 style={styles.input}
               />
               
+              {/* 1. 名前だけ変更して戻るボタン（幅制限の300pxを解除） */}
               {mySwordData && (
                 <div style={{ marginTop: '20px' }}>
-                  <button 
-                    style={{ ...styles.button, backgroundColor: isNameUnchangedOrEmpty ? 'gray' : '#2196F3', color: 'white', padding: '10px 30px' }} 
-                    onClick={() => {
-                      const newFullName = mySwordData.name.replace(mySwordData.baseName, userName);
-                      setMySwordData({ ...mySwordData, baseName: userName, name: newFullName });
-                      setStep(craftReturnStep);
-                    }}
-                    disabled={isNameUnchangedOrEmpty}
-                  >
-                    名前だけ変更して戻る
-                  </button>
+                  <div className={`ink-btn-container ${isNameUnchangedOrEmpty ? 'disabled' : ''}`}>
+                    <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                    <button 
+                      className="sharp-button"
+                      style={{ '--btn-color': '#2196F3' }}
+                      onClick={() => {
+                        const newFullName = mySwordData.name.replace(mySwordData.baseName, userName);
+                        setMySwordData({ ...mySwordData, baseName: userName, name: newFullName });
+                        setStep(craftReturnStep);
+                      }}
+                      disabled={isNameUnchangedOrEmpty}
+                    >
+                      名前だけ変更して戻る
+                    </button>
+                  </div>
                 </div>
               )}
 
+              {/* キャンセルと次へのボタン群（横並びに戻し、幅制限を解除） */}
               <div style={{ marginTop: '20px', display: 'flex', gap: '15px' }}>
-                <button 
-                  style={{ ...styles.button, backgroundColor: '#888', color: 'white' }} 
-                  onClick={() => {
-                    setUserName(mySwordData ? mySwordData.baseName : "");
-                    setStep(craftReturnStep);
-                  }}
-                >
-                  キャンセル（戻る）
-                </button>
-                <button 
-                  style={{ ...styles.button, backgroundColor: !userName.trim() ? 'gray' : '#4CAF50', color: 'white' }} 
-                  onClick={() => setStep("CRAFT_POSE")}
-                  disabled={!userName.trim()}
-                >
-                  {mySwordData ? "新しくポーズを撮り直す" : "次へ（撮影へ）"}
-                </button>
+                
+                {/* 2. キャンセル（戻る）ボタン */}
+                <div className="ink-btn-container" style={{ flex: 1 }}>
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    onClick={() => {
+                      setUserName(mySwordData ? mySwordData.baseName : "");
+                      setStep(craftReturnStep);
+                    }}
+                  >
+                    キャンセル
+                  </button>
+                </div>
+
+                {/* 3. 次へ（撮影へ） / 新しくポーズを撮り直すボタン */}
+                <div className={`ink-btn-container ${!userName.trim() ? 'disabled' : ''}`} style={{ flex: 1 }}>
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                  style={{ '--btn-color': '#4CAF50' }}
+                    className="sharp-button"
+                    onClick={() => setStep("CRAFT_POSE")}
+                    disabled={!userName.trim()}
+                  >
+                    {mySwordData ? "ポーズを撮り直す" : "ポーズを撮影する"}
+                  </button>
+                </div>
+
               </div>
             </div>
           </div>
@@ -638,20 +694,36 @@ export default function PoseSwordWeb() {
               </div>
               <canvas ref={canvasRef} width="640" height="480" style={{ display: 'none' }} />
               
-              <button 
-                style={{ ...styles.button, backgroundColor: captureCountdown !== null ? 'gray' : 'orange', padding: '15px 30px' }} 
-                onClick={startCaptureCountdown} 
-                disabled={captureCountdown !== null}
-              >
-                {captureCountdown !== null ? "ポーズをとって！" : "撮影する！"}
-              </button>
-              <button 
-                style={{ ...styles.button, backgroundColor: '#e0e0e0', color: '#333', marginTop: '20px' }} 
-                onClick={() => setStep("NAME_INPUT")}
-                disabled={captureCountdown !== null}
-              >
-                名前入力に戻る
-              </button>
+              {/* ▼ ボタン群をまとめるコンテナ（幅を300pxに固定し、縦に並べる） */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px' }}>
+                
+                {/* 1. 撮影する / ポーズをとって！ ボタン（オレンジ） */}
+                <div className={`ink-btn-container ${captureCountdown !== null ? 'disabled' : ''}`}>
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    style={{ '--btn-color': '#ff9800' }} /* 撮影のオレンジ色 */
+                    onClick={startCaptureCountdown} 
+                    disabled={captureCountdown !== null}
+                  >
+                    {captureCountdown !== null ? "ポーズをとれ！" : "撮影する！"}
+                  </button>
+                </div>
+
+                {/* 2. 名前入力に戻る ボタン（グレー） */}
+                <div className={`ink-btn-container ${captureCountdown !== null ? 'disabled' : ''}`}>
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    style={{ '--btn-color': '#666666' }} /* 戻るアクションのグレー */
+                    onClick={() => setStep("NAME_INPUT")}
+                    disabled={captureCountdown !== null}
+                  >
+                    {captureCountdown !== null ? "" : "戻る"}
+                  </button>
+                </div>
+
+              </div>
             </div>
           </div>
         );
@@ -660,17 +732,30 @@ export default function PoseSwordWeb() {
         return (
           <div style={styles.container}>
             <div style={styles.contentWrapper}>
-              <h2>錬成中...</h2>
+              <h2 style={{ fontFamily: "'Kurobara Gothic', sans-serif", letterSpacing: '0.1em' }}>錬成中...</h2>
+              
               {capturedImage && (
-                <div style={{ marginBottom: '20px', borderRadius: '8px', overflow: 'hidden', border: '4px solid #ddd', width: '320px' }}>
+                <div style={{ marginBottom: '20px', borderRadius: '0', overflow: 'hidden',  width: '320px' }}>
                   <img src={capturedImage} alt="Captured Pose" style={{ width: '100%', display: 'block' }} />
                 </div>
               )}
               
-              <div style={{ margin: '10px 0', fontSize: '60px', animation: 'spin 3s linear infinite' }}>
+              <div style={{ margin: '20px 0', fontSize: '60px', animation: 'spin 3s linear infinite' }}>
                 ⚙️
               </div>
-              <p style={{ fontSize: '18px', fontWeight: 'bold' }}>剣を錬成中...</p>
+              
+              {/* ▼ フォントを黒薔薇に変更、色を黒に指定、マージンで位置を調整 */}
+              <p style={{ 
+                marginTop: '50px', 
+                fontSize: '24px', 
+                fontWeight: 'bold', 
+                color: '#000', 
+                fontFamily: "'Kurobara Gothic', sans-serif",
+                letterSpacing: '0.05em' 
+              }}>
+                剣を錬成中...
+              </p>
+              
               <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
             </div>
           </div>
@@ -680,30 +765,59 @@ export default function PoseSwordWeb() {
         return (
           <div style={styles.container}>
             <div style={styles.contentWrapper}>
-              <h2>錬成完了！</h2>
+              <h1 style={{ 
+                fontSize: '48px', 
+                color: '#000', 
+                margin: '20px 0', 
+                letterSpacing: '0.05em',
+                fontFamily: "'Kurobara Gothic', sans-serif" 
+              }}>
+                錬成完了！
+              </h1>
+              
               {mySwordData && (
-                <div style={{...styles.swordCard, maxWidth: '300px', margin: '20px 0'}}>
-                  <img src={mySwordData.imageSrc} alt="My Sword" style={styles.previewImage} />
-                  <p style={styles.swordName}>{mySwordData.name}</p>
-                  <div style={styles.statsBox}>
-                    <span>HP: {mySwordData.hp}</span>
-                    <span>攻撃: {mySwordData.attack}</span>
-                    <span>重さ: {mySwordData.weight}</span>
+                <div style={{ margin: '20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={styles.swordCard}>
+                    {mySwordData.imageSrc ? (
+                      <img src={mySwordData.imageSrc} alt="My Sword" style={styles.previewImage} />
+                    ) : (
+                      <div style={styles.previewImage}>画像受信中...</div>
+                    )}
+                    <p style={{ ...styles.swordName, color: '#000' }}>{mySwordData.name}</p>
+                    <div style={styles.statsBox}>
+                      HP:{mySwordData.hp} 攻撃:{mySwordData.attack} 重さ:{mySwordData.weight}
+                    </div>
                   </div>
                 </div>
               )}
-              <div style={{ marginTop: '20px' }}>
-                <button 
-                  style={{ ...styles.button, backgroundColor: '#4CAF50', color: 'white', padding: '15px 30px' }} 
-                  onClick={() => setStep(craftReturnStep)}
-                >
-                  {craftReturnStep === "TITLE" ? "タイトルに戻る" : "ロビー（または待機画面）に戻る"}
-                </button>
-              </div>
-              <div style={{ marginTop: '10px' }}>
-                <button style={{ ...styles.button, backgroundColor: 'transparent', border: '1px solid #ccc', color: '#333' }} onClick={() => goToCrafting(craftReturnStep)}>
-                  作り直す
-                </button>
+              
+              {/* ボタン群（幅300px・縦並び） */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px', marginTop: '10px' }}>
+                
+                {/* 1. 対戦へ進むボタン */}
+                <div className="ink-btn-container">
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    style={{ '--btn-color': '#4CAF50' }}
+                    onClick={() => setStep(craftReturnStep)}
+                  >
+                    {craftReturnStep === "TITLE" ? "タイトルに戻って対戦だ！" : "ロビーに戻って対戦だ！"}
+                  </button>
+                </div>
+
+                {/* 2. 剣を再錬成するボタン */}
+                <div className="ink-btn-container">
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    style={{ '--btn-color': '#000' }}
+                    onClick={() => goToCrafting(craftReturnStep)}
+                  >
+                    剣を再錬成する
+                  </button>
+                </div>
+
               </div>
             </div>
           </div>
@@ -713,18 +827,40 @@ export default function PoseSwordWeb() {
         return (
           <div style={styles.container}>
             <div style={styles.contentWrapper}>
-              <h2>ロビーID表示</h2>
-              <div style={{ margin: '20px 0', padding: '30px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-                <p style={{ fontSize: '18px', margin: '0' }}>あなたの部屋ID</p>
+              <h2 style={{ letterSpacing: '0.1em' }}>ロビーID表示</h2>
+              
+              {/* ▼ ここを変更：className="glass" を追加し、スタイルのborder等を削除 */}
+              <div className="glass" style={{ margin: '20px 0', padding: '30px', width: '100%', maxWidth: '500px', boxSizing: 'border-box' }}>
                 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', margin: '15px 0' }}>
-                  <p style={{ fontSize: '48px', color: 'blue', fontWeight: 'bold', letterSpacing: '8px', margin: '0' }}>
+                <p style={{ fontSize: '18px', margin: '0', color: '#555', fontWeight: 'bold' }}>あなたの部屋ID</p>
+                
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', margin: '20px 0' }}>
+                  <p style={{ 
+                    fontSize: '48px', 
+                    color: 'blue', 
+                    fontFamily: 'sans-serif', 
+                    fontWeight: 'bold', 
+                    letterSpacing: '8px', 
+                    margin: '0' 
+                  }}>
                     {myPeerId || "取得中..."}
                   </p>
                   
                   {myPeerId && (
                     <button 
-                      style={{ ...styles.button, padding: '8px 16px', fontSize: '16px', backgroundColor: isCopied ? '#4CAF50' : '#e0e0e0', color: isCopied ? 'white' : '#333' }} 
+                      style={{ 
+                        padding: '10px 16px', 
+                        fontSize: '16px', 
+                        backgroundColor: isCopied ? '#4CAF50' : '#e0e0e0', 
+                        color: isCopied ? '#fff' : '#333',
+                        border: 'none', 
+                        borderRadius: '0', 
+                        cursor: 'pointer',
+                        fontFamily: 'sans-serif',
+                        fontWeight: 'bold',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                        transition: 'all 0.1s'
+                      }} 
                       onClick={handleCopyId}
                     >
                       {isCopied ? "✓ コピーしました" : "📋 コピー"}
@@ -732,11 +868,25 @@ export default function PoseSwordWeb() {
                   )}
                 </div>
                 
-                <p>このIDをClient（対戦相手）に教えてください。</p>
+                <p style={{ margin: '0', fontSize: '16px', fontWeight: 'bold', color: '#000' }}>
+                  このIDを対戦相手に教えてください。
+                </p>
               </div>
-              <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white', marginTop: '20px' }} onClick={handleLeave}>
-                タイトルに戻る
-              </button>
+
+              {/* タイトルに戻るボタン */}
+              <div style={{ width: '300px', marginTop: '50px' }}>
+                <div className="ink-btn-container">
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    style={{ '--btn-color': '#666666' }}
+                    onClick={handleLeave}
+                  >
+                    タイトルに戻る
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         );
@@ -745,20 +895,53 @@ export default function PoseSwordWeb() {
         return (
           <div style={styles.container}>
             <div style={styles.contentWrapper}>
-              <h2>ロビーID入力</h2>
-              <div style={{ margin: '20px 0', padding: '20px', backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-                <p style={{ fontSize: '18px', fontWeight: 'bold' }}>Hostの部屋ID（6桁の数字）を入力</p>
-                <input 
-                  type="text" 
-                  value={targetId} 
-                  onChange={(e) => setTargetId(e.target.value)} 
-                  placeholder="例: 123456" 
-                  maxLength={6}
-                  style={{ ...styles.input, letterSpacing: '4px', width: '180px' }} 
-                />
-                <button style={{ ...styles.button, marginLeft: '10px', backgroundColor: '#4CAF50', color: 'white' }} onClick={connectToHost}>
-                  接続
-                </button>
+              <h2 style={{ letterSpacing: '0.1em' }}>ロビーID入力</h2>
+              
+              {/* ▼ ボックスを.glass（直角すりガラス）に変更 */}
+              <div className="glass">
+                <p style={{ fontSize: '18px', fontWeight: 'bold', color: '#000', margin: '0 0 20px 0' }}>
+                  Hostの部屋ID（6桁の数字）を入力
+                </p>
+                
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+                  {/* ▼ 入力欄の角丸(styles.inputの初期値)をインラインで打ち消して直角化 */}
+                  <input 
+                    type="text" 
+                    value={targetId} 
+                    onChange={(e) => setTargetId(e.target.value)} 
+                    placeholder="例: 123456" 
+                    maxLength={6}
+                    style={{ 
+                      ...styles.input, 
+                      borderRadius: '0', 
+                      border: '2px solid #000',
+                      letterSpacing: '4px', 
+                      width: '180px',
+                      fontFamily: 'sans-serif', /* 数字が綺麗に見えるフォント */
+                      fontWeight: 'bold'
+                    }} 
+                  />
+                  
+                  {/* ▼【変更】接続ボタン：墨なし、ホストのコピーボタンと対になる直角の緑ボタン */}
+                  <button 
+                    style={{ 
+                      padding: '10px 20px', 
+                      fontSize: '18px', 
+                      backgroundColor: '#4CAF50', 
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '0',
+                      cursor: 'pointer',
+                      fontFamily: 'sans-serif',
+                      fontWeight: 'bold',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                      transition: 'background-color 0.1s'
+                    }} 
+                    onClick={connectToHost}
+                  >
+                    接続
+                  </button>
+                </div>
               </div>
 
               {/* エラーメッセージ領域の高さを固定 */}
@@ -770,99 +953,100 @@ export default function PoseSwordWeb() {
                 )}
               </div>
 
-              <button style={{ ...styles.button, backgroundColor: 'gray', color: 'white', marginTop: '10px' }} onClick={handleLeave}>
-                タイトルに戻る
-              </button>
+              {/* ▼ タイトルに戻るボタン（墨ホバーエフェクト版・幅300px） */}
+              <div style={{ width: '300px', marginTop: '10px' }}>
+                <div className="ink-btn-container">
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button 
+                    className="sharp-button"
+                    style={{ '--btn-color': '#666666' }}
+                    onClick={handleLeave}
+                  >
+                    タイトルに戻る
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         );
 
       case "LOBBY":
-        const isButtonsLocked = isReady || countdown !== null;
+        // 剣カードとボタンをレンダリングする補助関数
+        const renderPlayerSide = (targetRole) => {
+          const isMine = targetRole === role;
+          const data = isMine ? mySwordData : enemySwordData;
+
+          return (
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div style={styles.swordCard}>
+                <h3 style={{ margin: '0 0 10px 0', color: '#000' }}>
+                  {isMine ? "あなた" : "対戦相手"}
+                </h3>
+                {data ? (
+                  <>
+                    {data.imageSrc ? <img src={data.imageSrc} style={styles.previewImage} /> : <div style={styles.previewImage}>画像受信中...</div>}
+                    <p style={{ ...styles.swordName, color: '#000' }}>{data.name}</p>
+                    <div style={styles.statsBox}>HP:{data.hp} 攻撃:{data.attack} 重さ:{data.weight}</div>
+                  </>
+                ) : <div style={{ height: '200px' }}>未錬成</div>}
+              </div>
+
+              {/* 再錬成ボタン：自分のみ表示 */}
+              <div style={{ height: '80px', marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                {isMine && (
+                  <div className="ink-btn-container" style={{ width: '100%' }}>
+                    <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                    <button 
+                      className="sharp-button" 
+                      style={{ '--btn-color': '#000', fontSize: '18px', padding: '15px 20px' }} 
+                      onClick={() => goToCrafting("LOBBY")}
+                    >
+                      ⚔️ 剣を再錬成する
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        };
 
         return (
           <div style={styles.container}>
             <div style={styles.contentWrapper}>
               <h2>ロビー（対戦準備）</h2>
               
-              <div style={styles.previewContainer}>
-                {(() => {
-                  const isHost = role === "HOST";
-                  const hostData = isHost ? mySwordData : enemySwordData;
-                  const clientData = !isHost ? mySwordData : enemySwordData;
-                  
-                  return (
-                    <>
-                      <div style={styles.swordCard}>
-                        <h3 style={{ margin: '0 0 10px 0', color: isHost ? '#000000' : '#ff4444' }}>{isHost ? "あなた" : "対戦相手"}</h3>
-                        {hostData ? (
-                          <>
-                            {hostData.imageSrc
-                              ? <img src={hostData.imageSrc} alt="Host Sword" style={styles.previewImage} />
-                              : <div style={{ ...styles.previewImage, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: '13px' }}>画像受信中...</div>}
-                            <p style={styles.swordName}>{hostData.name}</p>
-                            <div style={styles.statsBox}>
-                              <span>HP: {hostData.hp}</span>
-                              <span>攻撃: {hostData.attack}</span>
-                              <span>重さ: {hostData.weight}</span>
-                            </div>
-                          </>
-                        ) : (
-                          <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p style={{ color: '#888', fontWeight: 'bold' }}>未錬成</p></div>
-                        )}
-                      </div>
-
-                      <div style={styles.vsText}>VS</div>
-
-                      <div style={styles.swordCard}>
-                        <h3 style={{ margin: '0 0 10px 0', color: isHost ? '#FF4444' : '#000000' }}>{!isHost ? "あなた" : "対戦相手"}</h3>
-                        {clientData ? (
-                          <>
-                            {clientData.imageSrc
-                              ? <img src={clientData.imageSrc} alt="Client Sword" style={styles.previewImage} />
-                              : <div style={{ ...styles.previewImage, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: '13px' }}>画像受信中...</div>}
-                            <p style={styles.swordName}>{clientData.name}</p>
-                            <div style={styles.statsBox}>
-                              <span>HP: {clientData.hp}</span>
-                              <span>攻撃: {clientData.attack}</span>
-                              <span>重さ: {clientData.weight}</span>
-                            </div>
-                          </>
-                        ) : (
-                          <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p style={{ color: '#888', fontWeight: 'bold' }}>データ受信中...</p></div>
-                        )}
-                      </div>
-                    </>
-                  );
-                })()}
+              {/* ▼ 左右を固定して配置 */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', width: '100%', maxWidth: '800px', margin: '20px 0' }}>
+                
+                {/* 左側：常にHOSTを表示 */}
+                <div style={{ flex: 1 }}>{renderPlayerSide("HOST")}</div>
+                
+                {/* 中央：VS */}
+                <div style={styles.vsText}>VS</div>
+                
+                {/* 右側：常にCLIENTを表示 */}
+                <div style={{ flex: 1 }}>{renderPlayerSide("CLIENT")}</div>
               </div>
 
               <div style={styles.connectedBox}>
                 <div style={styles.modeBox}>
-                  <h3 style={{ margin: '0 0 10px 0', color: isButtonsLocked ? '#999' : '#333' }}>バトルモード</h3>
+                  <h3 style={{ margin: '0 0 10px 0', color: '#333' }}>バトルモード</h3>
                   {role === "HOST" ? (
-                    <select
-                      value={gameMode}
-                      onChange={(e) => {
-                        const newMode = e.target.value;
-                        setGameMode(newMode);
-                        connection.send({ type: "SYNC_GAMEMODE", gameMode: newMode });
-                      }}
-                      style={{ padding: '8px', fontSize: '16px', borderRadius: '5px', cursor: isButtonsLocked ? 'not-allowed' : 'pointer', backgroundColor: isButtonsLocked ? '#f5f5f5' : '#fff', color: isButtonsLocked ? '#999' : '#000' }}
-                      disabled={isButtonsLocked}
-                    >
+                    <select value={gameMode} onChange={(e) => { setGameMode(e.target.value); connection.send({ type: "SYNC_GAMEMODE", gameMode: e.target.value }); }} 
+                      style={{ padding: '8px', fontSize: '16px', borderRadius: '0' }}>
                       <option value="1">🌀 独楽（見下ろし）モード</option>
                       <option value="0">⚔️ 剣（横視点・重力）モード</option>
                     </select>
                   ) : (
-                    <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#555' }}>
+                    <div style={{ fontSize: '18px', fontWeight: 'bold' }}>
                       {gameMode === "1" ? "🌀 独楽（見下ろし）モード" : "⚔️ 剣（横視点・重力）モード"}
                     </div>
                   )}
                 </div>
 
                 {countdown !== null ? (
-                  <h2 style={{ fontSize: '48px', color: 'red', margin: '0', animation: 'pulse 1s infinite' }}>{countdown > 0 ? countdown : "START!"}</h2>
+                  <h2 style={{ fontSize: '48px', color: 'red', animation: 'pulse 1s infinite' }}>{countdown > 0 ? countdown : "START!"}</h2>
                 ) : (
                   <div>
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '10px 0 20px 0' }}>
@@ -880,14 +1064,6 @@ export default function PoseSwordWeb() {
                     </div>
                     
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '15px' }}>
-                      <button 
-                        style={{ ...styles.button, backgroundColor: '#e0e0e0', color: isButtonsLocked ? '#aaa' : '#333', cursor: isButtonsLocked ? 'not-allowed' : 'pointer' }} 
-                        onClick={() => goToCrafting("LOBBY")}
-                        disabled={isButtonsLocked}
-                      >
-                        剣を再錬成する
-                      </button>
-
                       {!isReady ? (
                         <button
                           style={{ ...styles.button, backgroundColor: (mySwordData && enemySwordData) ? '#4CAF50' : 'gray', color: 'white' }}
@@ -899,10 +1075,7 @@ export default function PoseSwordWeb() {
                       ) : (
                         <button
                           style={{ ...styles.button, backgroundColor: countdown !== null ? 'gray' : '#f44336', color: 'white', cursor: countdown !== null ? 'not-allowed' : 'pointer' }}
-                          onClick={() => {
-                            setIsReady(false);
-                            if (connection) connection.send({ type: "SYNC_STATE", isReady: false });
-                          }}
+                          onClick={() => { setIsReady(false); connection.send({ type: "SYNC_STATE", isReady: false }); }}
                           disabled={countdown !== null} 
                         >
                           準備を取り消す
@@ -913,13 +1086,10 @@ export default function PoseSwordWeb() {
                 )}
               </div>
               
-              <button 
-                style={{ ...styles.button, backgroundColor: 'transparent', border: '1px solid gray', color: isButtonsLocked ? '#ccc' : 'gray', marginTop: '30px', cursor: isButtonsLocked ? 'not-allowed' : 'pointer' }} 
-                onClick={handleLeave}
-                disabled={isButtonsLocked} 
-              >
-                退出する
-              </button>
+              <div className="ink-btn-container" style={{ marginTop: '30px' }}>
+                <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                <button className="sharp-button" style={{ '--btn-color': '#000' }} onClick={handleLeave}>退出する</button>
+              </div>
             </div>
             <style>{`@keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }`}</style>
           </div>
@@ -996,12 +1166,12 @@ export default function PoseSwordWeb() {
 }
 
 const styles = {
-  container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%' },
+  container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%', fontFamily: 'Kurobara, serif' },
   contentWrapper: { zIndex: 1, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' },
   
   bgImageCenter: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', height: '100vh', opacity: 0.15, pointerEvents: 'none', zIndex: 0 },
 
-  button: { padding: '10px 20px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px', fontWeight: 'bold', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' },
+  button: { padding: '10px 20px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px', fontWeight: 'bold', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' ,fontFamily: 'Kurobara, serif'},
   input: { padding: '10px', fontSize: '20px', width: '250px', textAlign: 'center', borderRadius: '5px', border: '2px solid #ccc' },
   connectedBox: { marginTop: '10px', padding: '20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
   modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' },
@@ -1013,7 +1183,7 @@ const styles = {
   swordCard: { flex: 1, backgroundColor: '#fff', borderRadius: '12px', padding: '15px', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', border: '2px solid #e0e0e0' },
   previewImage: { width: '100%', height: '200px', objectFit: 'contain', backgroundColor: '#f0f0f0', borderRadius: '8px', marginBottom: '10px' },
   swordName: { fontSize: '20px', fontWeight: 'bold', margin: '5px 0' },
-  statsBox: { display: 'flex', justifyContent: 'center', gap: '10px', fontSize: '14px', fontWeight: 'bold', color: '#555', backgroundColor: '#f9f9f9', padding: '5px 10px', borderRadius: '5px', width: '100%' },
+  statsBox: { display: 'flex', justifyContent: 'center', gap: '10px', fontSize: '14px', fontWeight: 'bold', color: '#555', backgroundColor: '#f9f9f9', padding: '5px 10px', borderRadius: '5px', width: '100%'},
   vsText: { fontSize: '36px', fontWeight: '900', fontStyle: 'italic', color: '#ff9800', textShadow: '2px 2px 0px #000' },
   countdownOverlay: { 
     position: 'absolute',
