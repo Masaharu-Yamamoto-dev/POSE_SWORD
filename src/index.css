@@ -52,7 +52,7 @@
 
 @font-face {
   font-family: 'Kurobara';
-  src: url('/POSE_SWORD_Unity/Assets/TextMesh Pro/fonts/kurobara-gothic-heavy.ttf') format('truetype');
+  src: url('/kurobara-gothic-heavy.ttf') format('truetype');
   font-display: swap;
 }
 
