@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Runtime.InteropServices;
 
+// ▼ Web側の仕様書に完全一致させたJSONデータ構造
 [System.Serializable]
 public class SwordSyncData {
     public float x;
@@ -12,6 +13,7 @@ public class SwordSyncData {
     public float sp;
     public float centerX;
     public float centerY;
+    public int dashType; // ▼ 技の種類 (0:通常, 1:小ダッシュ, 2:竜巻, 3:大回転斬り)
 }
 
 [System.Serializable]
@@ -43,9 +45,9 @@ public class NetworkManager : MonoBehaviour
     public GameObject hostSword;
     public GameObject clientSword;
 
-    // SYNC送信の間引き（20fps）
+    [Header("30fps・ラグ対策設定")]
     private float syncTimer = 0f;
-    public float syncInterval = 0.05f;
+    private float syncInterval = 0.0333f; // ▼ タイマーの基準を 0.0333秒 (30fps) に設定！
 
     // CLIENT補間用ターゲット
     private Vector3 hostTargetPos;
@@ -53,6 +55,7 @@ public class NetworkManager : MonoBehaviour
     private Vector3 clientTargetPos;
     private Quaternion clientTargetRot;
     private bool isFirstSync = true;
+    private bool hasSyncTarget = false;
 
     void Awake()
     {
@@ -101,14 +104,14 @@ public class NetworkManager : MonoBehaviour
         #endif
     }
 
-    // HOST：タイマーで間引き（秒間20回）
+    // HOST：タイマーで正確に30fpsに間引いて送信
     void FixedUpdate()
     {
         if (!isHost || hostSword == null || clientSword == null) return;
 
         syncTimer += Time.fixedDeltaTime;
         if (syncTimer < syncInterval) return;
-        syncTimer -= syncInterval;
+        syncTimer -= syncInterval; // 溢れた時間を引くことで高精度な30fpsを維持
 
         SyncMessage sync = new SyncMessage
         {
@@ -118,7 +121,7 @@ public class NetworkManager : MonoBehaviour
         SendData("SYNC", JsonUtility.ToJson(sync));
     }
 
-    // CLIENT：毎フレームLerpで滑らかにターゲットへ追従
+    // CLIENT：30fps通信の隙間のコマを、毎フレームLerpでヌルヌル追従
     void Update()
     {
         if (isHost || !hasSyncTarget) return;
@@ -135,8 +138,6 @@ public class NetworkManager : MonoBehaviour
             clientSword.transform.rotation = Quaternion.Lerp(clientSword.transform.rotation, clientTargetRot, t);
         }
     }
-
-    private bool hasSyncTarget = false;
 
     SwordSyncData GetSyncData(GameObject obj)
     {
@@ -159,15 +160,14 @@ public class NetworkManager : MonoBehaviour
             isDashing = battle != null ? battle.isDashing : false,
             sp = battle != null ? battle.currentSp : 0f,
             centerX = cx,
-            centerY = cy
+            centerY = cy,
+            dashType = battle != null ? battle.currentDashType : 0
         };
     }
 
     public void ReceiveInput(string jsonString)
     {
-        Debug.Log($"🎮 ReceiveInput: {jsonString}");
         InputMessage msg = JsonUtility.FromJson<InputMessage>(jsonString);
-
         GameObject enemyObj = isHost ? clientSword : hostSword;
         if (enemyObj != null)
         {
@@ -175,19 +175,17 @@ public class NetworkManager : MonoBehaviour
             if (battle != null)
             {
                 battle.ExecuteRemoteAction(msg.action);
-                Debug.Log($"✅ 相手の剣がアクション（{msg.action}）を実行しました！");
             }
         }
     }
 
-    // Debug.Logを削除（WebGLで毎フレームconsole.logするとフレームが激落ちする）
     public void SyncTransform(string jsonString)
     {
         if (isHost) return;
 
         SyncMessage sync = JsonUtility.FromJson<SyncMessage>(jsonString);
 
-        // 初回のみ瞬時にスナップ（ゲーム開始時のワープ感を消す）
+        // 初回のみ瞬時にスナップ（位置ズレでの開幕フライング感を解消）
         if (isFirstSync)
         {
             if (hostSword != null)
@@ -207,7 +205,7 @@ public class NetworkManager : MonoBehaviour
             isFirstSync = false;
         }
 
-        // 座標・回転はターゲットを更新するだけ（実際の移動はUpdate()のLerpが担当）
+        // 座標・回転はターゲット（目的地）を更新するだけ
         if (hostSword != null)
             hostTargetPos = new Vector3(sync.hostSword.x, sync.hostSword.y, hostSword.transform.position.z);
         if (clientSword != null)
@@ -217,7 +215,7 @@ public class NetworkManager : MonoBehaviour
         clientTargetRot = Quaternion.Euler(0, 0, sync.clientSword.rotation);
         hasSyncTarget = true;
 
-        // HP・SP・状態は即時反映
+        // HP・SP・状態（位置以外）は即時反映
         ApplyNonPositionSync(hostSword, sync.hostSword);
         ApplyNonPositionSync(clientSword, sync.clientSword);
     }
@@ -244,18 +242,34 @@ public class NetworkManager : MonoBehaviour
         battle.currentSp = data.sp;
         battle.isDashing = data.isDashing;
 
+        // ▼ 技番号（dashType）に応じてホストと100%同じ必殺技カラーエフェクトに塗り分ける
         Transform blade = obj.transform.Find("Blade");
         if (blade != null)
         {
             SpriteRenderer sr = blade.GetComponent<SpriteRenderer>();
             if (sr != null)
-                sr.color = data.isDashing ? new Color(1f, 0.5f, 0.5f) : Color.white;
+            {
+                switch (data.dashType)
+                {
+                    case 1: // 独楽：通常小ダッシュ
+                        sr.color = new Color(1f, 0.5f, 0.5f); // 薄赤色
+                        break;
+                    case 2: // 独楽：超必殺・竜巻
+                        sr.color = new Color(1f, 0.8f, 0.2f); // オレンジ・金色
+                        break;
+                    case 3: // 剣：大回転斬りダッシュ
+                        sr.color = new Color(0.5f, 1f, 1f);   // 水色
+                        break;
+                    default: // 通常状態
+                        sr.color = Color.white;
+                        break;
+                }
+            }
         }
     }
 
     public void ResetMatch(string emptyMessage)
     {
-        Debug.Log("🔄 Webからの指示でシーンをリセットします！");
         if (AudioManager.Instance != null) AudioManager.Instance.ResetSoundEffects();
         Time.timeScale = 1f;
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
@@ -270,7 +284,5 @@ public class NetworkManager : MonoBehaviour
 
         if (swordStage != null) swordStage.SetActive(!SwordController.isKomaMode);
         if (komaStage != null) komaStage.SetActive(SwordController.isKomaMode);
-
-        Debug.Log(SwordController.isKomaMode ? "🌀 独楽モード・ステージへ移行" : "⚔️ 剣モード・ステージへ移行");
     }
 }

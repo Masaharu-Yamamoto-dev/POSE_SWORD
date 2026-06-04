@@ -38,10 +38,17 @@ export default function PoseSwordWeb() {
   const enemySwordRef = useRef(null);
   useEffect(() => { enemySwordRef.current = enemySwordData; }, [enemySwordData]);
 
+  // ゲームモードの管理 ("1" = 独楽, "0" = 剣)
   const [gameMode, setGameMode] = useState("1");
   const gameModeRef = useRef("1");
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
 
+  // 相手のUnity(WebGL)のロードが完了したかを管理するフラグ
+  const [isEnemyUnityLoaded, setIsEnemyUnityLoaded] = useState(false);
+  const enemyUnityLoadedRef = useRef(false);
+  useEffect(() => { enemyUnityLoadedRef.current = isEnemyUnityLoaded; }, [isEnemyUnityLoaded]);
+
+  // ▼【復活】消えてしまっていたユーザー名管理のステート
   const [userName, setUserName] = useState("");
 
   const [myPeerId, setMyPeerId] = useState("");
@@ -66,10 +73,10 @@ export default function PoseSwordWeb() {
   const [isCopied, setIsCopied] = useState(false);
 
   const { unityProvider, sendMessage, isLoaded } = useUnityContext({
-    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.loader.js",
-    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.data",
-    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.framework.js",
-    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.6/Build/ver2.6.wasm",
+    loaderUrl: "/POSE_SWORD_Unity/Builds/ver2.7/Build/ver2.7.loader.js",
+    dataUrl: "/POSE_SWORD_Unity/Builds/ver2.7/Build/ver2.7.data",
+    frameworkUrl: "/POSE_SWORD_Unity/Builds/ver2.7/Build/ver2.7.framework.js",
+    codeUrl: "/POSE_SWORD_Unity/Builds/ver2.7/Build/ver2.7.wasm",
   });
 
   const pendingBattleRef = useRef(null);
@@ -118,6 +125,8 @@ export default function PoseSwordWeb() {
       winnerImageSrc    
     });
     
+    console.log("🏁 決着！演出終了を待機します...");
+    
     setTimeout(() => {
       if (stepRef.current === "PLAYING") {
         setIsReady(false);
@@ -130,16 +139,28 @@ export default function PoseSwordWeb() {
   };
 
   useEffect(() => { handleGameOverRef.current = handleGameOver; });
-
+  
+  // 1. 自分のUnityロードが終わったら、通信相手に通知
   useEffect(() => {
-    if (isLoaded && pendingBattleRef.current !== null) {
+    if (step === "PLAYING" && isLoaded && connection) {
+      console.log("📡 自分のUnityロード完了。相手に通知します。");
+      connection.send({ type: "PEER_UNITY_LOADED" });
+    }
+  }, [step, isLoaded, connection]);
+
+  // 2. 両方のUnityロードが完全に揃ったら、同時に命令を撃ち込む！
+  useEffect(() => {
+    if (step === "PLAYING" && isLoaded && isEnemyUnityLoaded && pendingBattleRef.current !== null) {
       const { mode, startJson, gameModeStr } = pendingBattleRef.current;
       pendingBattleRef.current = null;
+      
+      console.log("🏆 両端末のUnityロードが完全同期！バトルを同時開幕します！");
+      
       sendMessage('GameManager', 'SetHostMode', mode);
       sendMessage('GameManager', 'SetGameMode', gameModeStr);
       sendMessage('GameManager', 'StartBattle', JSON.stringify(startJson));
     }
-  }, [step, isLoaded]);
+  }, [step, isLoaded, isEnemyUnityLoaded]);
 
   useEffect(() => {
     window.ReactApp = {
@@ -175,29 +196,6 @@ export default function PoseSwordWeb() {
     return () => { if (stream) stream.getTracks().forEach(track => track.stop()); };
   }, [step]);
 
-  useEffect(() => {
-    if (isReady && isEnemyReady && step === "LOBBY" && countdown === null) {
-      setCountdown(3);
-    }
-  }, [isReady, isEnemyReady, step, countdown]);
-
-  useEffect(() => {
-    if (countdown !== null) {
-      if (countdown > 0) {
-        const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-        return () => clearTimeout(timer);
-      } else {
-        setCountdown(null);
-        setIsReady(false);
-        setIsEnemyReady(false);
-        if (mySwordRef.current && enemySwordRef.current) {
-          launchUnityBattle(roleRef.current, mySwordRef.current, enemySwordRef.current);
-        } else {
-          alert("相手の剣データがまだ届いていません。");
-        }
-      }
-    }
-  }, [countdown]);
 
   useEffect(() => {
     if (!connection || !mySwordData) return;
@@ -205,10 +203,14 @@ export default function PoseSwordWeb() {
     const statsOnly = { name, hp, attack, weight };
     const fullData  = { name, hp, attack, weight, imageStr };
 
-    connection.send({ type: "EXCHANGE_SWORD", swordData: fullData });
+    const t1 = setTimeout(() => {
+      connection.send({ type: "EXCHANGE_SWORD", swordData: statsOnly });
+    }, 300);
 
-    const t1 = setTimeout(() => connection.send({ type: "EXCHANGE_SWORD", swordData: statsOnly }), 300);
-    const t2 = setTimeout(() => connection.send({ type: "EXCHANGE_SWORD", swordData: fullData }), 1000);
+    const t2 = setTimeout(() => {
+      connection.send({ type: "EXCHANGE_SWORD", swordData: fullData });
+    }, 1000);
+
     const retry = setInterval(() => {
       if (enemySwordRef.current?.imageSrc) { clearInterval(retry); return; }
       connection.send({ type: "EXCHANGE_SWORD", swordData: fullData });
@@ -224,7 +226,7 @@ export default function PoseSwordWeb() {
         return () => clearTimeout(timer);
       } else {
         setCaptureCountdown(null);
-        executeCaptureAndCraft();
+        executeCaptureAndCraft(); 
       }
     }
   }, [captureCountdown]);
@@ -245,6 +247,7 @@ export default function PoseSwordWeb() {
     setTargetId("");
     setIsReady(false);
     setIsEnemyReady(false);
+    setIsEnemyUnityLoaded(false);
     setCountdown(null);
     setRole(null);
     setSystemMessage(msg);
@@ -397,6 +400,12 @@ export default function PoseSwordWeb() {
           }
           setIsEnemyReady(data.isReady);
           break;
+
+        case "PEER_UNITY_LOADED":
+          console.log("📥 相手のUnityロード完了通知を受信しました！");
+          setIsEnemyUnityLoaded(true);
+          break;
+
         case "LEAVE":
           resetToTitle("相手が部屋を退出しました。"); 
           break;
@@ -430,7 +439,8 @@ export default function PoseSwordWeb() {
     const clientData = currentRole === "CLIENT" ? myData : enemyData;
     
     if (!hostData || !clientData) {
-      alert("両方の剣データが準備できていません。"); return;
+      alert("データの準備ができていません。");
+      return;
     }
     
     const toUnityData = (data) => ({ name: data.name, hp: data.hp, attack: data.attack, weight: data.weight, imageStr: data.imageStr });
@@ -902,8 +912,16 @@ export default function PoseSwordWeb() {
 
       case "PLAYING":
         return (
-          <div style={styles.container}>
-            <div style={styles.unityContainer}>
+          <div style={{ ...styles.container, position: 'relative' }}>
+            <div style={{ ...styles.unityContainer, position: 'relative' }}>
+              {(!isLoaded || !isEnemyUnityLoaded) && (
+                <div style={styles.loadingOverlay}>
+                  <div style={styles.loadingSpinner}></div>
+                  <p style={{ color: 'white', fontSize: '20px', fontWeight: 'bold', marginTop: '20px' }}>
+                    {!isLoaded ? "あなたのUnityを読み込み中..." : "対戦相手の読み込みを待っています..."}
+                  </p>
+                </div>
+              )}
               <Unity unityProvider={unityProvider} style={{ width: '100%', height: '100%' }} />
             </div>
           </div>
@@ -942,6 +960,7 @@ export default function PoseSwordWeb() {
                 <button style={{ ...styles.button, backgroundColor: 'orange', color: 'white', padding: '15px 30px' }} onClick={() => {
                   try { sendMessage('GameManager', 'ResetMatch', ''); } catch(e) {}
                   setIsReady(false);
+                  setIsEnemyUnityLoaded(false);
                   if (connRef.current) connRef.current.send({ type: "SYNC_STATE", isReady: false });
                   setStep("LOBBY");
                 }}>
@@ -981,5 +1000,30 @@ const styles = {
   swordName: { fontSize: '20px', fontWeight: 'bold', margin: '5px 0' },
   statsBox: { display: 'flex', justifyContent: 'center', gap: '10px', fontSize: '14px', fontWeight: 'bold', color: '#555', backgroundColor: '#f9f9f9', padding: '5px 10px', borderRadius: '5px', width: '100%' },
   vsText: { fontSize: '36px', fontWeight: '900', fontStyle: 'italic', color: '#ff9800', textShadow: '2px 2px 0px #000' },
-  countdownOverlay: { position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)', fontSize: '80px', fontWeight: 'bold', color: 'rgba(255, 255, 255, 0.7)', textShadow: '0 0 20px red, 2px 2px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000', pointerEvents: 'none', zIndex: 10 },
+  countdownOverlay: { 
+    position: 'absolute',
+    top: '20px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    fontSize: '80px',
+    fontWeight: 'bold',
+    color: 'rgba(255, 255, 255, 0.7)',
+    textShadow: '0 0 20px red, 2px 2px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000',
+    pointerEvents: 'none',
+    zIndex: 10
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, width: '100%', height: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    zIndex: 100
+  },
+  loadingSpinner: {
+    width: '50px', height: '50px',
+    border: '5px solid rgba(255,255,255,0.3)',
+    borderTop: '5px solid orange',
+    borderRadius: '50%',
+    animation: 'spin 1s linear infinite'
+  }
 };

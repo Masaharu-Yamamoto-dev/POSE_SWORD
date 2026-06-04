@@ -32,10 +32,10 @@ public ParticleSystem guardEffectPrefab;
 private SpriteRenderer spriteRenderer;    
 private SwordController controller;       
 
-// ▼追加：サウンド用の変数
 [Header("サウンド")]
-public AudioClip normalHitSound; // 通常ヒット音
-public AudioClip critHitSound;   // クリティカル・弱点音
+    public AudioClip normalHitSound; // 通常ヒット音
+    public AudioClip critHitSound;   // クリティカル・弱点音
+    public AudioClip defeatSound;    // 👈【新規追加】決着専用の音！
 private AudioSource audioSource; // 音を鳴らすスピーカー    
 public static bool matchEnded = false;
 
@@ -48,9 +48,13 @@ public static bool matchEnded = false;
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
  
     // 突進状態の管理用
+// 突進状態の管理用
     [HideInInspector] public bool isDashing = false;
-    [HideInInspector] public bool isDashShooting = false; // ▼【新規追加】発射したかどうか
-    private float dashDamageBonus = 1.0f; // 突進中の追加ダメージ倍率
+    [HideInInspector] public bool isDashShooting = false; 
+    private float dashDamageBonus = 1.0f; 
+
+    // ▼【新規追加】現在のダッシュ技の種類 (0:なし, 1:小ダッシュ, 2:竜巻, 3:大回転)
+    [HideInInspector] public int currentDashType = 0;
 
     // SwordBattle.cs の変数宣言エリアに追加
     // SwordBattle.cs の変数宣言エリアに追加
@@ -465,7 +469,7 @@ public static bool matchEnded = false;
             StopAllCoroutines();
             
             // 決着時は確定で派手なクリティカル音を鳴らす
-            if (critHitSound != null) audioSource.PlayOneShot(critHitSound);
+            if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
             
             // ド派手な決着演出コルーチンを開始
             StartCoroutine(DefeatRoutine());
@@ -558,23 +562,31 @@ public static bool matchEnded = false;
     {
         if (isDead || matchEnded) return;
 
-        if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+        // ❌ 修正前：一律で通常音が鳴っていた
+        // if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
 
-        // ▼【新規追加】通信相手の画面にもダメージ数値を出す
+        // ⭕ 修正後：通信に頼らず、届いたダメージの大きさで通常音とクリティカル音をスマートに分岐！
+        if (damage >= 100)
+        {
+            if (critHitSound != null) audioSource.PlayOneShot(critHitSound);
+        }
+        else
+        {
+            if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+        }
+
+        // ▼ 通信相手の画面にもダメージ数値を出す（ここはそのまま）
         if (damagePopupPrefab != null && damage > 0)
         {
-            // クライアント側は正確なhitPosが分からないので、剣の少し上にランダムにずらして出す
             Vector3 spawnPos = transform.position + (Vector3)Random.insideUnitCircle * 1.5f;
             GameObject popup = Instantiate(damagePopupPrefab, spawnPos, Quaternion.identity);
             DamagePopup popupScript = popup.GetComponent<DamagePopup>();
-            
-            // クライアント側は通信節約のためクリティカル判定を受け取っていないので、ダメージが20以上なら赤(Crit扱い)にする
             if (popupScript != null) popupScript.Setup(damage, damage >= 20);
         }
 
+        // ---（以下、カメラシェイクや決着音の既存コードがそのまま続きます）---
         if (damage >= 20)
         {
-            // 画面揺れとオーラ揺れをクライアントの画面でも発動！
             BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
             if (cam != null) cam.TriggerShake(0.1f, 0.3f);
 
@@ -582,6 +594,15 @@ public static bool matchEnded = false;
             {
                 BackgroundManager.Instance.TriggerImpact(damage * 0.1f);
             }
+        }
+
+        if (hp - damage <= 0)
+        {
+            matchEnded = true;
+            StopAllCoroutines();
+            if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
+            StartCoroutine(DefeatRoutine());
+            Debug.Log("🏆 クライアント側でも決着を検知！DefeatRoutineを開始します。");
         }
     }
     // ▼【新規追加】突進アクション
@@ -666,6 +687,7 @@ public static bool matchEnded = false;
     IEnumerator DashRoutine()
     {
         isDashing = true;
+        currentDashType = 1;
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.5f, 0.5f);
         
         float consumedSp = currentSp;
@@ -682,6 +704,7 @@ public static bool matchEnded = false;
         yield return new WaitForSeconds(0.2f);
 
         isDashing = false;
+        currentDashType = 0;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
@@ -689,6 +712,7 @@ public static bool matchEnded = false;
     IEnumerator TornadoDashRoutine()
     {
         isDashing = true;
+        currentDashType = 2;
         float consumedSp = currentSp;
         currentSp = 0f; 
 
@@ -732,6 +756,7 @@ public static bool matchEnded = false;
         }
 
         isDashing = false;
+        currentDashType = 0;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
@@ -739,6 +764,7 @@ public static bool matchEnded = false;
     IEnumerator SwordDashRoutine()
     {
         isDashing = true;
+        currentDashType = 3;
         isDashShooting = false; 
         
         if (spriteRenderer != null) spriteRenderer.color = new Color(0.5f, 1f, 1f); 
@@ -798,6 +824,7 @@ public static bool matchEnded = false;
         if (!isDashing) return;
 
         isDashing = false;
+        currentDashType = 0;
         isDashShooting = false; 
         
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
