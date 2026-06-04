@@ -163,6 +163,12 @@ export default function PoseSwordWeb() {
   }, [step, isLoaded, isEnemyUnityLoaded]);
 
   useEffect(() => {
+  if (isReady && isEnemyReady && step === "LOBBY") {
+    launchUnityBattle(role, mySwordData, enemySwordData);
+  }
+}, [isReady, isEnemyReady]);
+
+  useEffect(() => {
     window.ReactApp = {
       receiveFromUnity: (type, jsonString) => {
         const data = JSON.parse(jsonString);
