@@ -50,6 +50,17 @@
   }
 }
 
+@font-face {
+  font-family: 'Kurobara';
+  src: url('/POSE_SWORD_Unity/Assets/TextMesh Pro/fonts/kurobara-gothic-heavy.ttf') format('truetype');
+  font-display: swap;
+}
+
+/* 基本設定 */
+body {
+  font-family: 'Kurobara', sans-serif; /* 全体に適用する場合 */
+}
+
 body {
   margin: 0;
 }
@@ -99,7 +110,6 @@ code,
 .counter {
   font-family: var(--mono);
   display: inline-flex;
-  border-radius: 4px;
   color: var(--text-h);
 }
 
@@ -109,3 +119,4 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
