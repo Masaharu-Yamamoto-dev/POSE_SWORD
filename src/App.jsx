@@ -905,7 +905,7 @@ export default function PoseSwordWeb() {
               {/* ▼ ボックスを.glass（直角すりガラス）に変更 */}
               <div className="glass">
                 <p style={{ fontSize: '18px', fontWeight: 'bold', color: '#000', margin: '0 0 20px 0' }}>
-                  HostのロビーID（6桁の数字）を入力
+                  ロビーID（6桁の数字）を入力
                 </p>
                 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
