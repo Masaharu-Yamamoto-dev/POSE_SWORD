@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-# MediaPipe Tasks 用のポーズモデル(lite, 数MB)。初回に自動ダウンロードする。
+# MediaPipe Tasks用のポーズモデル(lite, 数MB)。初回に自動ダウンロードする。
 POSE_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
     "pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
