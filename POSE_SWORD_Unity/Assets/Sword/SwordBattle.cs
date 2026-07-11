@@ -117,6 +117,11 @@ public static bool matchEnded = false;
             if (delayHpBar.value - hpBar.value < 0.5f) delayHpBar.value = hpBar.value;
         }
 
+        if (Input.GetMouseButtonDown(0))
+    {
+        Debug.Log($"クリック検出 / Round={isRoundStarted}, Dead={isDead}, Ended={matchEnded}, Local={(controller != null && controller.isLocalControlled)}");
+    }
+
         if (!isRoundStarted || isDead || matchEnded) return;
 
         currentSp += passiveSpFill * Time.deltaTime;
