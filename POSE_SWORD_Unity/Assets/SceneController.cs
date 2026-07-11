@@ -61,6 +61,7 @@ public class SceneController : MonoBehaviour
 
     public void StartBattle(string jsonString)
     {
+        Debug.Log("🚩 StartBattle が呼ばれた");
         Debug.Log("⚔️ Webからバトル開始データを受信しました！");
         
         BattleStartData data = JsonUtility.FromJson<BattleStartData>(jsonString);
@@ -128,7 +129,8 @@ public class SceneController : MonoBehaviour
 
         // ーーー 【カウント0：GO!】 操作解禁、ゲームスタート！ ーーー
         if (countdownText != null) countdownText.text = "GO!";
-        SwordBattle.isRoundStarted = true; 
+        SwordBattle.isRoundStarted = true;
+        Debug.Log("🟢 isRoundStarted を true にした！");   // ← この行を追加 
 
         yield return new WaitForSeconds(1.0f);
         if (countdownText != null) countdownText.gameObject.SetActive(false);

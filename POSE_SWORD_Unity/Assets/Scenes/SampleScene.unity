@@ -2737,8 +2737,8 @@ MonoBehaviour:
   komaRightPosition: {x: 8, y: 11.5, z: 0}
   countdownText: {fileID: 1937249877}
   countdownZoomSize: 5.5
-  debugBattleJsonFile: {fileID: 0}
-  autoTestOnStart: 0
+  debugBattleJsonFile: {fileID: 4900000, guid: 254d0f529720c38468dbf25e1ce767b3, type: 3}
+  autoTestOnStart: 1
 --- !u!114 &618030781
 MonoBehaviour:
   m_ObjectHideFlags: 0

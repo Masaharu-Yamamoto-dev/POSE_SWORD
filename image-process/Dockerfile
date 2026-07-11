@@ -19,8 +19,12 @@ WORKDIR /code
 COPY ./requirements.txt /code/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. 全ファイルをコピー
+# 4. rembg モデルをビルド時に事前ダウンロード（起動時のダウンロードを回避）
+RUN python -c "from rembg import new_session; new_session('u2net')"
+
+# 5. 全ファイルをコピー
 COPY . .
 
-# 5. API起動（Spacesはポート 7860 を必須とする仕様です）
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "7860"]
+# 6. API起動（Cloud Run は PORT 環境変数でポートを指定する）
+#    --workers 2 : CPU バウンドな画像処理を並列化するため複数プロセスで起動
+CMD uvicorn server:app --host 0.0.0.0 --port ${PORT:-8080} --workers 2
