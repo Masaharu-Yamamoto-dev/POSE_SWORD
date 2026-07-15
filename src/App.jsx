@@ -550,9 +550,9 @@ export default function PoseSwordWeb() {
             )}
             
             <div style={styles.contentWrapper}>
-              <img src="/logo.png" alt="オレブレード" style={{ maxWidth: '800px', marginBottom: '40px' }} />
+              <img src="/logo.png" alt="オレブレード" style={{ width: '90%', maxWidth: '800px', marginBottom: '40px', objectFit: 'contain' }} />
               
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '300px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', maxWidth: '300px' }}>
                 {/* 1. 剣を錬成するボタン */}
                 <div className="ink-btn-container">
                   <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
@@ -599,7 +599,7 @@ export default function PoseSwordWeb() {
               </div>
 
               {/* ▼【変更】エラーメッセージ領域の高さを固定（レイアウトずれ防止） */}
-              <div style={{ height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '30px' }}>
+              <div style={{ height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '30px', width: '90%' }}>
                 {systemMessage && (
                   <div style={{ ...styles.errorMessage, margin: '0' }}>
                     ⚠️ {systemMessage}
@@ -650,7 +650,7 @@ export default function PoseSwordWeb() {
               )}
 
               {/* キャンセルと次へのボタン群（横並びに戻し、幅制限を解除） */}
-              <div style={{ marginTop: '20px', display: 'flex', gap: '15px' }}>
+              <div style={{ marginTop: '20px', display: 'flex', gap: '4%', width: '100%', maxWidth: '400px' }}>
                 
                 {/* 2. キャンセル（戻る）ボタン */}
                 <div className="ink-btn-container" style={{ flex: 1 }}>
@@ -841,12 +841,13 @@ export default function PoseSwordWeb() {
                 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', margin: '20px 0' }}>
                   <p style={{ 
-                    fontSize: '48px', 
+                    fontSize: 'clamp(28px, 8vw, 48px)',
                     color: 'blue', 
                     fontFamily: 'sans-serif', 
                     fontWeight: 'bold', 
                     letterSpacing: '8px', 
-                    margin: '0' 
+                    margin: '0',
+                    wordBreak: 'break-all'
                   }}>
                     {myPeerId || "取得中..."}
                   </p>
@@ -1022,16 +1023,16 @@ export default function PoseSwordWeb() {
               <h2>ロビー（対戦準備）</h2>
               
               {/* ▼ 左右を固定して配置 */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', width: '100%', maxWidth: '800px', margin: '20px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '2%', width: '100%', maxWidth: '800px', margin: '20px 0' }}>
                 
                 {/* 左側：常にHOSTを表示 */}
-                <div style={{ flex: 1 }}>{renderPlayerSide("HOST")}</div>
+                <div style={{ width: '45%' }}>{renderPlayerSide("HOST")}</div>
                 
                 {/* 中央：VS */}
-                <div style={styles.vsText}>VS</div>
+                <div style={{ width: '10%', textAlign: 'center' }}><span style={styles.vsText}>VS</span></div>
                 
                 {/* 右側：常にCLIENTを表示 */}
-                <div style={{ flex: 1 }}>{renderPlayerSide("CLIENT")}</div>
+                <div style={{ width: '45%' }}>{renderPlayerSide("CLIENT")}</div>
               </div>
 
               <div style={styles.connectedBox}>
@@ -1130,7 +1131,7 @@ case "RESULT":
             
             <div style={styles.contentWrapper}>
               <h2 style={{ 
-                fontSize: '70px', 
+                fontSize: 'clamp(40px, 10vw, 70px)', 
                 fontWeight: '900', 
                 fontStyle: 'italic', 
                 margin: '0 0 20px 0', 
@@ -1141,16 +1142,16 @@ case "RESULT":
               </h2>
 
               <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: '40px', borderRadius: '15px', boxShadow: '0 8px 20px rgba(0,0,0,0.2)', border: `4px solid ${matchResult.iWon ? '#d32f2f' : '#1976d2'}` }}>
-                <h3 style={{ fontSize: '32px', color: '#333', margin: '0 0 25px 0' }}>勝者: {matchResult.winnerName}</h3>
+                <h3 style={{ fontSize: 'clamp(20px, 5vw, 32px)', color: '#333', margin: '0 0 25px 0' }}>勝者: {matchResult.winnerName}</h3>
                 <p style={{ fontSize: '20px', margin: '10px 0' }}>与えたダメージ: <strong>{matchResult.damageDealt}</strong></p>
                 <p style={{ fontSize: '20px', margin: '10px 0' }}>受けたダメージ: <strong>{matchResult.damageTaken}</strong></p>
               </div>
               
               {/* ▼ ボタン群を墨ボタン形式に変更 */}
-              <div style={{ marginTop: '40px', display: 'flex', gap: '20px' }}>
+              <div style={{ marginTop: '40px', display: 'flex', gap: '5%', width: '100%', maxWidth: '500px' }}>
                 
                 {/* 1. ロビーに戻るボタン（緑系の墨ボタン） */}
-                <div className="ink-btn-container">
+                <div className="ink-btn-container" style={{ flex: 1 }}>
                   <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
                   <button 
                     className="sharp-button"
@@ -1168,7 +1169,7 @@ case "RESULT":
                 </div>
 
                 {/* 2. 退出するボタン（グレー系の墨ボタン） */}
-                <div className="ink-btn-container">
+                <div className="ink-btn-container" style={{ flex: 1 }}>
                   <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
                   <button 
                     className="sharp-button"
@@ -1191,25 +1192,25 @@ case "RESULT":
 }
 
 const styles = {
-  container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%', fontFamily: 'Kurobara, serif' },
+  container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%', fontFamily: 'Kurobara, serif', boxSizing: 'border-box', overflowX: 'hidden' },
   contentWrapper: { zIndex: 1, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' },
   
   bgImageCenter: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', height: '100vh', opacity: 0.15, pointerEvents: 'none', zIndex: 0 },
 
   button: { padding: '10px 20px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px', fontWeight: 'bold', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' ,fontFamily: 'Kurobara, serif'},
-  input: { padding: '10px', fontSize: '20px', width: '250px', textAlign: 'center', borderRadius: '5px', border: '2px solid #ccc' },
+  input: { padding: '10px', fontSize: '20px', width: '100%', maxWidth: '250px', textAlign: 'center', borderRadius: '5px', border: '2px solid #ccc', boxSizing: 'border-box' },
   connectedBox: { marginTop: '10px', padding: '20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
   modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' },
-  video: { width: '400px', borderRadius: '8px', backgroundColor: '#000', display: 'block', transform: 'scaleX(-1)' },
+  video: { width: '100%', maxWidth: '400px', height: 'auto', borderRadius: '8px', backgroundColor: '#000', display: 'block', transform: 'scaleX(-1)' },
   unityContainer: { width: '100%', maxWidth: '100vw', aspectRatio: '16 / 9', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555', boxSizing: 'border-box' },
   readyBox: (isReady) => ({ padding: '10px 20px', border: `2px solid ${isReady ? '#4CAF50' : '#9e9e9e'}`, backgroundColor: isReady ? '#e8f5e9' : '#f5f5f5', borderRadius: '8px', fontWeight: 'bold', minWidth: '100px' }),
   errorMessage: { padding: '15px 25px', backgroundColor: '#ffdddd', color: '#cc0000', borderRadius: '8px', fontWeight: 'bold', border: '1px solid #cc0000' }, // marginを削除しインラインで制御
   previewContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', margin: '20px 0', width: '100%', maxWidth: '800px' },
-  swordCard: { flex: 1, backgroundColor: '#fff', borderRadius: '12px', padding: '15px', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', border: '2px solid #e0e0e0' },
-  previewImage: { width: '100%', height: '200px', objectFit: 'contain', backgroundColor: '#f0f0f0', borderRadius: '8px', marginBottom: '10px' },
-  swordName: { fontSize: '20px', fontWeight: 'bold', margin: '5px 0' },
-  statsBox: { display: 'flex', justifyContent: 'center', gap: '10px', fontSize: '14px', fontWeight: 'bold', color: '#555', backgroundColor: '#f9f9f9', padding: '5px 10px', borderRadius: '5px', width: '100%'},
-  vsText: { fontSize: '36px', fontWeight: '900', fontStyle: 'italic', color: '#ff9800', textShadow: '2px 2px 0px #000' },
+  swordCard: { width: '100%', backgroundColor: '#fff', borderRadius: '12px', padding: '10px', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', border: '2px solid #e0e0e0', boxSizing: 'border-box' },
+  previewImage: { width: '100%', maxHeight: '200px', objectFit: 'contain', backgroundColor: '#f0f0f0', borderRadius: '8px', marginBottom: '10px' },
+  swordName: { fontSize: 'clamp(14px, 3.5vw, 20px)', fontWeight: 'bold', margin: '5px 0' },
+  statsBox: { display: 'flex', justifyContent: 'center', gap: '5px', fontSize: 'clamp(10px, 2.5vw, 14px)', fontWeight: 'bold', color: '#555', backgroundColor: '#f9f9f9', padding: '5px', borderRadius: '5px', width: '100%', boxSizing: 'border-box', flexWrap: 'wrap' },
+  vsText: { fontSize: 'clamp(16px, 5vw, 36px)', fontWeight: '900', fontStyle: 'italic', color: '#ff9800', textShadow: '2px 2px 0px #000' },
   countdownOverlay: { 
     position: 'absolute',
     top: '20px',
