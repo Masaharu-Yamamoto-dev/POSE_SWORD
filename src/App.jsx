@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Peer } from 'peerjs';
 import { Unity, useUnityContext } from 'react-unity-webgl';
 import './App.css';
+import { styles } from './styles';
+
+import TitleScreen from './screens/TitleScreen';
 
 // STUN + TURN サーバー設定
 const PEER_ICE_CONFIG = {
@@ -544,71 +547,13 @@ export default function PoseSwordWeb() {
     switch (step) {
       case "TITLE":
         return (
-          <div style={styles.container}>
-            {mySwordData?.imageSrc && (
-              <img src={mySwordData.imageSrc} alt="Background Sword" style={styles.bgImageCenter} />
-            )}
-            
-            <div style={styles.contentWrapper}>
-              <img src="/logo.png" alt="オレブレード" style={{ width: '90%', maxWidth: '800px', marginBottom: '40px', objectFit: 'contain' }} />
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', maxWidth: '300px' }}>
-                {/* 1. 剣を錬成するボタン */}
-                <div className="ink-btn-container">
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    style={{ '--btn-color': '#4CAF50' }}
-                    onClick={() => goToCrafting("TITLE")}
-                  >
-                    {mySwordData ? "⚔️ 剣を再錬成する" : "⚔️ 剣を錬成する"}
-                  </button>
-                </div>
-                
-                <div style={{ borderTop: '2px solid #ddd', margin: '10px 0' }}></div>
-                
-                {!mySwordData && (
-                  <p style={{ color: '#888', fontSize: '14px', margin: '0 0 -10px 0', fontWeight: 'bold' }}>
-                    対戦するには、先に剣を錬成してください
-                  </p>
-                )}
-
-                {/* 2. 部屋を作るボタン */}
-                <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    onClick={handleCreateRoom}
-                    disabled={!mySwordData}
-                  >
-                    ロビーを作成
-                  </button>
-                </div>
-
-                {/* 3. 部屋に入るボタン */}
-                <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    onClick={handleJoinRoom}
-                    disabled={!mySwordData}
-                  >
-                    ロビーに入る
-                  </button>
-                </div>
-              </div>
-
-              {/* ▼【変更】エラーメッセージ領域の高さを固定（レイアウトずれ防止） */}
-              <div style={{ height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '30px', width: '90%' }}>
-                {systemMessage && (
-                  <div style={{ ...styles.errorMessage, margin: '0' }}>
-                    ⚠️ {systemMessage}
-                  </div>
-                )}
-              </div>
-
-            </div>
-          </div>
+          <TitleScreen 
+            mySwordData={mySwordData}
+            systemMessage={systemMessage}
+            goToCrafting={goToCrafting}
+            handleCreateRoom={handleCreateRoom}
+            handleJoinRoom={handleJoinRoom}
+          />
         );
 
       case "NAME_INPUT":
@@ -921,9 +866,9 @@ export default function PoseSwordWeb() {
                       ...styles.input, 
                       borderRadius: '0', 
                       border: '2px solid #000',
-                      letterSpacing: '4px', 
+                      letterSpacing: '4px',
                       width: '180px',
-                      fontFamily: 'sans-serif', /* 数字が綺麗に見えるフォント */
+                      fontFamily: 'sans-serif',
                       fontWeight: 'bold'
                     }} 
                   />
@@ -931,7 +876,7 @@ export default function PoseSwordWeb() {
                   {/* ▼【変更】接続ボタン：墨なし、ホストのコピーボタンと対になる直角の緑ボタン */}
                   <button 
                     style={{ 
-                      padding: '10px 20px', 
+                      padding: '10px 20px',
                       fontSize: '18px', 
                       backgroundColor: '#4CAF50', 
                       color: 'white',
@@ -1191,50 +1136,3 @@ case "RESULT":
   return <div style={{ fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#f5f5f5', minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>{renderScreen()}</div>;
 }
 
-const styles = {
-  container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%', fontFamily: 'Kurobara, serif', boxSizing: 'border-box', overflowX: 'hidden' },
-  contentWrapper: { zIndex: 1, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' },
-  
-  bgImageCenter: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', height: '100vh', opacity: 0.15, pointerEvents: 'none', zIndex: 0 },
-
-  button: { padding: '10px 20px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px', fontWeight: 'bold', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' ,fontFamily: 'Kurobara, serif'},
-  input: { padding: '10px', fontSize: '20px', width: '100%', maxWidth: '250px', textAlign: 'center', borderRadius: '5px', border: '2px solid #ccc', boxSizing: 'border-box' },
-  connectedBox: { marginTop: '10px', padding: '20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
-  modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' },
-  video: { width: '100%', maxWidth: '400px', height: 'auto', borderRadius: '8px', backgroundColor: '#000', display: 'block', transform: 'scaleX(-1)' },
-  unityContainer: { width: '100%', maxWidth: '100vw', aspectRatio: '16 / 9', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555', boxSizing: 'border-box' },
-  readyBox: (isReady) => ({ padding: '10px 20px', border: `2px solid ${isReady ? '#4CAF50' : '#9e9e9e'}`, backgroundColor: isReady ? '#e8f5e9' : '#f5f5f5', borderRadius: '8px', fontWeight: 'bold', minWidth: '100px' }),
-  errorMessage: { padding: '15px 25px', backgroundColor: '#ffdddd', color: '#cc0000', borderRadius: '8px', fontWeight: 'bold', border: '1px solid #cc0000' }, // marginを削除しインラインで制御
-  previewContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', margin: '20px 0', width: '100%', maxWidth: '800px' },
-  swordCard: { width: '100%', backgroundColor: '#fff', borderRadius: '12px', padding: '10px', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', border: '2px solid #e0e0e0', boxSizing: 'border-box' },
-  previewImage: { width: '100%', maxHeight: '200px', objectFit: 'contain', backgroundColor: '#f0f0f0', borderRadius: '8px', marginBottom: '10px' },
-  swordName: { fontSize: 'clamp(14px, 3.5vw, 20px)', fontWeight: 'bold', margin: '5px 0' },
-  statsBox: { display: 'flex', justifyContent: 'center', gap: '5px', fontSize: 'clamp(10px, 2.5vw, 14px)', fontWeight: 'bold', color: '#555', backgroundColor: '#f9f9f9', padding: '5px', borderRadius: '5px', width: '100%', boxSizing: 'border-box', flexWrap: 'wrap' },
-  vsText: { fontSize: 'clamp(16px, 5vw, 36px)', fontWeight: '900', fontStyle: 'italic', color: '#ff9800', textShadow: '2px 2px 0px #000' },
-  countdownOverlay: { 
-    position: 'absolute',
-    top: '20px',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    fontSize: '80px',
-    fontWeight: 'bold',
-    color: 'rgba(255, 255, 255, 0.7)',
-    textShadow: '0 0 20px red, 2px 2px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000',
-    pointerEvents: 'none',
-    zIndex: 10
-  },
-  loadingOverlay: {
-    position: 'absolute',
-    top: 0, left: 0, width: '100%', height: '100%',
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    zIndex: 100
-  },
-  loadingSpinner: {
-    width: '50px', height: '50px',
-    border: '5px solid rgba(255,255,255,0.3)',
-    borderTop: '5px solid orange',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite'
-  }
-};
