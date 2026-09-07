@@ -70,6 +70,16 @@ export class HostRoom {
     this.resetReady();
   }
 
+  setCapacity(capacity) {
+    if (this.phase !== 'LOBBY' || ![2, 4].includes(capacity) || this.connections.size + 1 > capacity) {
+      throw new Error('参加者と接続待ちの人数より少ない定員には変更できません。');
+    }
+    if (capacity === this.capacity) return;
+    this.capacity = capacity;
+    this.players.sort((a, b) => a.slotIndex - b.slotIndex).forEach((p, i) => { p.slotIndex = i; });
+    this.resetReady();
+  }
+
   updateSword(playerId, sword) {
     if (this.phase !== 'LOBBY' || !this.get(playerId)) throw new Error('武器を変更できません。');
     this.get(playerId).swordData = validateSword(sword);

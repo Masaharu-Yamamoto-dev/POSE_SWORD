@@ -157,3 +157,20 @@ test('invalid join does not occupy a permanent player seat', () => {
   }
   assert.equal(room.snapshot().players.length, 4);
 });
+
+test('capacity changes count reserved seats, clear ready states and compact vacant slots', () => {
+  const room = fullRoom();
+  assert.throws(() => room.setCapacity(2));
+  room.removeConnection('peer-1'); room.removeConnection('peer-2');
+  room.reserve('pending');
+  assert.throws(() => room.setCapacity(2));
+  room.removeConnection('pending');
+  room.setReady('p0', true);
+  room.setCapacity(2);
+  assert.deepEqual(room.snapshot().players.map(p => p.slotIndex), [0, 1]);
+  assert.equal(room.snapshot().players[1].playerId, 'p3');
+  assert.ok(room.snapshot().players.every(p => !p.ready));
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  room.prepare();
+  assert.throws(() => room.setCapacity(4));
+});

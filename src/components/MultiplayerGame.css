@@ -21,5 +21,6 @@
 .mp-status, .mp-loading { position: absolute; left: 10%; width: 80%; top: 45%; color: white; background: #000a; padding: 12px; box-sizing: border-box; pointer-events: none; }
 .mp-results table { border-collapse: collapse; width: 100%; background: white; margin-bottom: 20px; }
 .mp-results th, .mp-results td { padding: 10px 6px; border-bottom: 1px solid #ccc; }
+.mp-result-image { display: block; width: 48px; height: 48px; object-fit: contain; margin: 0 auto 4px; }
 .mp-game footer { margin-top: 20px; }
 @media (max-width: 650px) { .mp-game { padding: 10px; }.mp-roster { grid-template-columns: repeat(2,minmax(0,1fr)); }.mp-results { font-size: 12px; } }

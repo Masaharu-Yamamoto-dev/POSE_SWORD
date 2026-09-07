@@ -10,7 +10,7 @@ const withoutImages = room => ({ ...room, players: room.players.map(p => {
 // Transport adapter for PeerJS DataConnection. Time is injected so barriers,
 // disconnects and retransmission can be tested without browser timers.
 export class RoomSession {
-  constructor({ isHost = false, roomEpoch = '', sword, now = () => performance.now(),
+  constructor({ isHost = false, roomEpoch = '', capacity = 4, sword, now = () => performance.now(),
     onChange = () => {}, onUnity = () => {} }) {
     this.isHost = isHost;
     this.epoch = roomEpoch;
@@ -18,11 +18,12 @@ export class RoomSession {
     this.now = now;
     this.onChange = onChange;
     this.onUnity = onUnity;
-    this.host = isHost ? new HostRoom({ roomEpoch, hostSword: sword }) : null;
+    this.host = isHost ? new HostRoom({ roomEpoch, capacity, hostSword: sword }) : null;
     this.localPlayerId = isHost ? 'p0' : null;
     this.links = new Map();
     this.room = this.host?.snapshot() ?? null;
     this.result = null;
+    this.resultPlayers = [];
     this.sync = null;
     this.closed = false;
     this.error = '';
@@ -34,7 +35,7 @@ export class RoomSession {
 
   view() {
     return { room: this.room, localPlayerId: this.localPlayerId, isHost: this.isHost,
-      result: this.result, sync: this.sync, closed: this.closed, error: this.error,
+      result: this.result, resultPlayers: this.resultPlayers, sync: this.sync, closed: this.closed, error: this.error,
       canStart: !this.closed && !!this.host?.canStart() &&
         [...this.links.values()].every(l => l.playerId && l.assetAck === this.assetVersion) };
   }
@@ -51,7 +52,7 @@ export class RoomSession {
 
   attach(conn) {
     if (this.closed) { conn.close(); return; }
-    const link = { conn, lastSeen: this.now(), playerId: null, assetAck: -1, resultAck: null, lastResult: 0 };
+    const link = { conn, attachedAt: this.now(), lastSeen: this.now(), playerId: null, assetAck: -1, resultAck: null, lastResult: 0 };
     if (this.isHost && !this.host.reserve(conn.peer)) {
       const reject = () => { this.send(link, 'REJECT', { reason: '部屋が満員、または対戦中です。' }); conn.close(); };
       if (conn.open) reject(); else conn.on('open', reject);
@@ -78,7 +79,7 @@ export class RoomSession {
   }
 
   receive(link, message) {
-    if (this.closed || !message || typeof message !== 'object') return;
+    if (this.closed || this.links.get(link.conn.peer) !== link || !message || typeof message !== 'object') return;
     if (message.protocolVersion !== PROTOCOL_VERSION) {
       this.send(link, 'REJECT', { reason: 'ゲームのバージョンが異なります。再読み込みしてください。' });
       link.conn.close(); return;
@@ -158,6 +159,7 @@ export class RoomSession {
       case 'RESULT':
         if (m.matchId !== this.room?.matchId || !['PLAYING', 'RESULT'].includes(this.room.phase)) return;
         if (!this.result) {
+          this.resultPlayers = structuredClone(this.room.players);
           this.result = this.payload(m); this.command('FinishMultiplayer', this.result);
         }
         this.send(link, 'RESULT_ACK', { matchId: m.matchId }); break;
@@ -183,12 +185,13 @@ export class RoomSession {
     else this.sendToHost('READY', { ready, readyVersion: this.room?.readyVersion });
   }
   setGameMode(mode) { if (!this.closed && this.isHost) { this.host.setGameMode(mode); this.publish(); } }
+  setCapacity(capacity) { if (!this.closed && this.isHost) { this.host.setCapacity(capacity); this.publish(); } }
   sendToHost(type, data) { const link = this.links.values().next().value; if (link) this.send(link, type, data); }
 
   prepare() {
     if (!this.view().canStart) throw new Error('全員の準備と武器データの受信を待ってください。');
     this.host.prepare(); this.publish();
-    const spawnSlots = [0, 1, 2, 3];
+    const spawnSlots = Array.from({ length: this.room.capacity }, (_, i) => i);
     for (let i = spawnSlots.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1)); [spawnSlots[i], spawnSlots[j]] = [spawnSlots[j], spawnSlots[i]];
     }
@@ -200,7 +203,7 @@ export class RoomSession {
 
   initialize(config) {
     this.initializing = config.matchId;
-    this.result = null; this.sync = null; this.sequence = 0; this.error = '';
+    this.result = null; this.resultPlayers = []; this.sync = null; this.sequence = 0; this.error = '';
     this.command('InitializeMultiplayer', { ...config, localPlayerId: this.localPlayerId, isHost: this.isHost });
     this.notify();
   }
@@ -231,6 +234,7 @@ export class RoomSession {
       if (!Number.isSafeInteger(data.tick) || data.tick <= (this.sync?.tick ?? -1)) return;
       this.sync = data; this.broadcast('SYNC', data); this.notify();
     } else if (this.isHost && type === 'RESULT' && this.host.finish(data.matchId)) {
+      this.resultPlayers = structuredClone(this.room.players);
       this.result = data; this.publish(); this.broadcast('RESULT', data); this.notify();
     }
   }
@@ -271,7 +275,9 @@ export class RoomSession {
     const now = this.now();
     if (this.isHost && this.room.phase === 'LOADING' && now >= this.loadDeadline) this.abort('読み込みが時間内に完了しませんでした。');
     for (const link of [...this.links.values()]) {
-      if (now - link.lastSeen >= 10000) { this.disconnected(link); link.conn.close(); continue; }
+      if (now - link.lastSeen >= 10000 || (!link.playerId && now - link.attachedAt >= 10000)) {
+        this.disconnected(link); link.conn.close(); continue;
+      }
       if (link.pendingSync && link.conn.bufferSize === 0) {
         const sync = link.pendingSync; link.pendingSync = null;
         if (sync.matchId === this.room?.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) this.send(link, 'SYNC', this.payload(sync));

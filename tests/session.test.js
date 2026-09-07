@@ -195,3 +195,50 @@ test('a delayed ready message from before a mode change cannot ready the player 
   const playerId = s.guests[0].view().localPlayerId;
   assert.equal(s.host.view().room.players.find(p => p.playerId === playerId).ready, false);
 });
+
+test('two players use the shared initialization barrier, spawns and rematch', () => {
+  const s = setup();
+  s.links[0][0].close(); s.links[1][0].close(); s.net.flush();
+  s.guests = [s.guests[2]];
+  s.host.setCapacity(2); s.net.flush();
+  assert.equal(s.guests[0].view().room.capacity, 2);
+  const first = start(s);
+  const config = s.commands[0].find(c => c.method === 'InitializeMultiplayer').data;
+  assert.deepEqual(config.players.map(p => p.slotIndex), [0, 1]);
+  assert.deepEqual(config.players.map(p => p.spawnIndex).sort(), [0, 1]);
+  s.host.unityEvent('RESULT', { matchId: first, winnerId: 'p3', standings: [] }); s.net.flush();
+  [s.host, ...s.guests].forEach(p => p.returnToLobby()); s.net.flush();
+  assert.notEqual(start(s), first);
+});
+
+test('packets queued on a disconnected transport cannot abort the surviving match', () => {
+  const s = setup(); const matchId = start(s);
+  s.links[0][1].send({ type: 'LOAD_FAILED', protocolVersion: 2, roomEpoch: 'epoch', matchId });
+  s.host.disconnected(s.host.links.get('peer-1'));
+  s.net.flush();
+  assert.equal(s.host.view().room.phase, 'PLAYING');
+  assert.equal(s.commands[0].filter(c => c.method === 'StopMultiplayer').length, 0);
+});
+
+test('result identities and images survive a player leaving the room', () => {
+  const s = setup(); const matchId = start(s);
+  const result = { matchId, winnerId: 'p0', standings: [] };
+  s.host.unityEvent('RESULT', result); s.net.flush();
+  s.links[0][0].close(); s.net.flush();
+  for (const session of [s.host, s.guests[1]]) {
+    assert.equal(session.view().room.players.some(p => p.playerId === 'p1'), false);
+    assert.equal(session.view().resultPlayers.find(p => p.playerId === 'p1').swordData.imageStr, sword.imageStr);
+  }
+});
+
+test('heartbeat traffic cannot hold an uncompleted handshake seat forever', () => {
+  const s = setup(); s.links[0][0].close(); s.net.flush();
+  const [a, b] = s.net.link('never-joins'); s.host.attach(a);
+  for (let i = 0; i < 10; i++) {
+    s.advance(1000);
+    b.send({ type: 'PONG', protocolVersion: 2, roomEpoch: 'epoch' });
+    s.guests.slice(1).forEach(g => g.pump()); s.net.flush(); s.host.pump(); s.net.flush();
+  }
+  assert.equal(a.open, false);
+  assert.equal(s.host.host.reserve('replacement'), true);
+});
