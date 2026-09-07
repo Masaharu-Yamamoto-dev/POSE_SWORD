@@ -5,6 +5,9 @@ using System;
 
 public class SwordGenerator : MonoBehaviour
 {
+    public bool LastGenerationSucceeded { get; private set; }
+    private Sprite generatedSprite;
+    private Texture2D generatedTexture;
     [Header("テスト用のJSONファイル")]
     public TextAsset dummyJsonFile;
 
@@ -34,6 +37,7 @@ public class SwordGenerator : MonoBehaviour
 
     public void GenerateSwordFromJson(string jsonString)
     {
+        LastGenerationSucceeded = false;
         if (string.IsNullOrEmpty(jsonString)) 
         {
             Debug.LogError("❌ SwordGenerator: jsonStringが空です！");
@@ -108,6 +112,7 @@ public class SwordGenerator : MonoBehaviour
                 bool isLoaded = tex.LoadImage(imageBytes); 
                 if (!isLoaded)
                 {
+                    Destroy(tex);
                     Debug.LogError("❌ 画像データの読み込みに失敗しました！");
                     return;
                 }
@@ -137,11 +142,17 @@ public class SwordGenerator : MonoBehaviour
                     // コライダーの再生成（スケール変更後に実行するのがベストです）
                     if (bladeCollider != null)
                     {
+                        bladeCollider.enabled = false;
                         Destroy(bladeCollider);
                         bladeCollider = targetSpriteRenderer.gameObject.AddComponent<PolygonCollider2D>();
                         Debug.Log("✅ PolygonCollider2D を再生成しました");
                     }
                 }
+                if (generatedSprite != null) Destroy(generatedSprite);
+                if (generatedTexture != null) Destroy(generatedTexture);
+                generatedSprite = newSprite;
+                generatedTexture = tex;
+                LastGenerationSucceeded = true;
 
                 // 独楽モードかどうかで、柄の表示/非表示を切り替える
                 if (handleObject != null)
@@ -155,5 +166,11 @@ public class SwordGenerator : MonoBehaviour
                 Debug.LogError($"❌ 画像の読み込みに失敗: {e.Message}");
             }
         }
+    }
+
+    void OnDestroy()
+    {
+        if (generatedSprite != null) Destroy(generatedSprite);
+        if (generatedTexture != null) Destroy(generatedTexture);
     }
 }

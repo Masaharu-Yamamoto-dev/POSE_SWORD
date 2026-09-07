@@ -9,6 +9,7 @@ import LobbyScreen from './screens/LobbyScreen';
 import ResultScreen from './screens/ResultScreen';
 import { NameInputScreen, CraftPoseScreen, CraftingApiScreen, CraftCompleteScreen } from './screens/CraftingScreens';
 import SwordListScreen from './screens/SwordListScreen';
+import MultiplayerGame from './components/MultiplayerGame.jsx';
 
 const PEER_ICE_CONFIG = {
   config: {
@@ -506,8 +507,10 @@ export default function PoseSwordWeb() {
 
   const renderScreen = () => {
     switch (step) {
+      case "MULTIPLAYER":
+        return <MultiplayerGame sword={mySwordData} peerOptions={PEER_ICE_CONFIG} onExit={() => setStep("TITLE")} />;
       case "TITLE":
-        return <TitleScreen mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} />;
+        return <TitleScreen onStartMultiplayer={() => setStep("MULTIPLAYER")} mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} />;
       
       case "NAME_INPUT":
         return <NameInputScreen userName={userName} setUserName={setUserName} mySwordData={mySwordData} setMySwordData={setMySwordData} setStep={setStep} craftReturnStep={craftReturnStep} handleCancel={handleCancelCrafting}/>;

@@ -1,0 +1,6 @@
+{
+  "name": "PoseSword.MatchRules.Tests",
+  "references": ["PoseSword.MatchRules"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

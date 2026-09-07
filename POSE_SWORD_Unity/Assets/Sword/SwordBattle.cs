@@ -5,6 +5,9 @@ using TMPro;
 
 public class SwordBattle : MonoBehaviour
 {
+    public MultiplayerManager MultiplayerOwner { get; private set; }
+    public string PlayerId { get; private set; }
+    public bool IsAlive { get { return !isDead && hp > 0; } }
     [Header("ステータス")]
     public string swordName = "ダミー剣";
     public int hp = 100;
@@ -70,8 +73,19 @@ public static bool matchEnded = false;
 
     void Start()
     {   
+        if (MultiplayerOwner != null) return;
         matchEnded = false;
         isRoundStarted = false; // ★開始時は一回 false にする
+        InitializeComponents();
+
+        maxHp = hp;
+        UpdateUI();
+        lastPosition = transform.position;
+        currentCenterPosition = transform.position;
+    }
+
+    void InitializeComponents()
+    {
         rb = GetComponent<Rigidbody2D>();
         controller = GetComponent<SwordController>();
         Transform blade = transform.Find("Blade");
@@ -80,12 +94,66 @@ public static bool matchEnded = false;
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
 
-        maxHp = hp;
-        UpdateUI();
-        lastPosition = transform.position;
-        
-        // ▼【新規追加】初期値は通常の座標にしておく
-        currentCenterPosition = transform.position;
+    }
+
+    public void ConfigureMultiplayer(MultiplayerManager owner, string playerId)
+    {
+        MultiplayerOwner = owner; PlayerId = playerId;
+        InitializeComponents(); StopAllCoroutines();
+        enabled = true; isDead = false; isDashing = false; isDashShooting = false;
+        currentDashType = 0; currentSp = 0;
+        controller.enabled = true;
+        foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = true;
+        rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0;
+        lastPosition = transform.position; currentCenterPosition = transform.position;
+    }
+
+    public void ExecuteMultiplayerAction(bool right)
+    {
+        if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
+        string action = PoseSword.Multiplayer.BattlePolicies.Action(SwordController.isKomaMode, currentSp,
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing, right);
+        switch (action)
+        {
+            case "Tornado": StartCoroutine(TornadoDashRoutine()); break;
+            case "KomaDash": StartCoroutine(DashRoutine()); break;
+            case "SwordDash": StartCoroutine(SwordDashRoutine()); break;
+            case "JumpRight": controller.NetworkJump(true); break;
+            case "JumpLeft": controller.NetworkJump(false); break;
+        }
+    }
+
+    public void ApplyMultiplayerHealth(int health)
+    {
+        if (MultiplayerOwner == null || isDead) return;
+        int damage = Mathf.Max(0, hp - health);
+        if (damage > 0)
+        {
+            PlayClientDamageEffect(damage);
+            if (MultiplayerOwner.IsHost) currentSp = Mathf.Min(maxSp, currentSp + 100f * damage / maxHp * damageSpMultiplier);
+        }
+        hp = Mathf.Clamp(health, 0, maxHp); UpdateUI();
+        if (hp > 0) return;
+        isDead = true; isDashing = false; currentDashType = 0;
+        StopAllCoroutines(); controller.enabled = false; controller.isLocalControlled = false;
+        rb.simulated = false;
+        foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = false;
+        if (spriteRenderer != null) spriteRenderer.color = new Color(.2f, .2f, .2f);
+        if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
+        StartCoroutine(HideEliminatedSword());
+    }
+    IEnumerator HideEliminatedSword()
+    {
+        yield return new WaitForSecondsRealtime(.8f);
+        gameObject.SetActive(false);
+    }
+
+    public void ApplyMultiplayerVisuals(float sp, bool dashing, int dashType)
+    {
+        if (!IsAlive) return;
+        currentSp = Mathf.Clamp(sp, 0, maxSp); isDashing = dashing; currentDashType = dashType;
+        if (spriteRenderer != null) spriteRenderer.color = dashType == 1 ? new Color(1, .5f, .5f) :
+            dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) : Color.white;
     }
 
     void FixedUpdate()
@@ -117,14 +185,14 @@ public static bool matchEnded = false;
             if (delayHpBar.value - hpBar.value < 0.5f) delayHpBar.value = hpBar.value;
         }
 
-        if (Input.GetMouseButtonDown(0))
+        if (MultiplayerOwner == null && Input.GetMouseButtonDown(0))
     {
         Debug.Log($"クリック検出 / Round={isRoundStarted}, Dead={isDead}, Ended={matchEnded}, Local={(controller != null && controller.isLocalControlled)}");
     }
 
         if (!isRoundStarted || isDead || matchEnded) return;
 
-        currentSp += passiveSpFill * Time.deltaTime;
+        if (MultiplayerOwner == null || MultiplayerOwner.IsHost) currentSp += passiveSpFill * Time.deltaTime;
         currentSp = Mathf.Clamp(currentSp, 0f, maxSp);
 
         if (spGaugeBar != null)
@@ -179,6 +247,7 @@ public static bool matchEnded = false;
 
     void OnCollisionEnter2D(Collision2D collision)
     {
+        if (MultiplayerOwner != null && (!MultiplayerOwner.IsHost || !MultiplayerOwner.IsPlaying)) return;
         if (isDead) return;
         bool wasDashing = isDashing;
         
@@ -397,7 +466,9 @@ public static bool matchEnded = false;
                     }
                 }
                     // ▼変更：TakeDamageの結果（倒したかどうか）を受け取る
-                    bool killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
+                    bool killedTarget = false;
+                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage);
+                    else killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
 
                     // ▼追加：もし自分が勝者になったなら、弾き飛ぶのをキャンセル！
                     if (killedTarget)
@@ -442,6 +513,7 @@ public static bool matchEnded = false;
     // ▼変更：void から bool に変更
     public bool TakeDamage(int damage, Vector2 hitPos, bool isCrit, bool isWeakPoint)
     {
+        if (MultiplayerOwner != null) return false; // HP is committed once per physics step by MatchRules.
         if (isDead) return false; // 変更
         if (isDashing)
         {
@@ -601,7 +673,7 @@ public static bool matchEnded = false;
             }
         }
 
-        if (hp - damage <= 0)
+        if (MultiplayerOwner == null && hp - damage <= 0)
         {
             matchEnded = true;
             StopAllCoroutines();
@@ -615,6 +687,7 @@ public static bool matchEnded = false;
     // ▼【変更】自分のアクションを実行しつつ、その名前をWebに送る！
     public void TryAction(bool clickedRight = true)
     {
+        if (MultiplayerOwner != null) { MultiplayerOwner.SubmitLocalInput(clickedRight); return; }
         if (isDead || matchEnded || isDashing) return;
 
         string actionName = ""; // ★Webに送る用のアクション名
@@ -723,7 +796,7 @@ public static bool matchEnded = false;
 
         Debug.Log($"🌪️ 独楽モード：超必殺【竜巻】発動！ (消費SP: {consumedSp:F0})");
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
+        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
         {
             CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f));
         }
@@ -777,7 +850,7 @@ public static bool matchEnded = false;
         currentSp = 0f;
         dashDamageBonus = 5.0f; 
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
+        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
         {
             CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f));
         }

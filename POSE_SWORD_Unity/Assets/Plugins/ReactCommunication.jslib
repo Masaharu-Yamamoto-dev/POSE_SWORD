@@ -4,7 +4,9 @@ mergeInto(LibraryManager.library, {
     var type = UTF8ToString(typePtr);
     var jsonString = UTF8ToString(jsonStringPtr);
     
-    if (window.ReactApp && window.ReactApp.receiveFromUnity) {
+    if (type.indexOf("MP_") === 0 && window.MultiplayerApp && window.MultiplayerApp.receiveFromUnity) {
+      window.MultiplayerApp.receiveFromUnity(type, jsonString);
+    } else if (window.ReactApp && window.ReactApp.receiveFromUnity) {
       window.ReactApp.receiveFromUnity(type, jsonString);
     }
   }
