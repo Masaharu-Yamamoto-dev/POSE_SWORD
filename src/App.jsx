@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Peer } from 'peerjs';
 import { Unity, useUnityContext } from 'react-unity-webgl';
 import './App.css';
+import MultiplayerGame from './components/MultiplayerGame.jsx';
 
 // STUN + TURN サーバー設定
 const PEER_ICE_CONFIG = {
@@ -542,6 +543,8 @@ export default function PoseSwordWeb() {
 
   const renderScreen = () => {
     switch (step) {
+      case "MULTIPLAYER":
+        return <MultiplayerGame sword={mySwordData} peerOptions={PEER_ICE_CONFIG} onExit={() => setStep("TITLE")} />;
       case "TITLE":
         return (
           <div style={styles.container}>
@@ -595,6 +598,9 @@ export default function PoseSwordWeb() {
                   >
                     ロビーに入る
                   </button>
+                </div>
+                <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
+                  <button className="sharp-button" disabled={!mySwordData} onClick={() => setStep("MULTIPLAYER")}>4人個人戦</button>
                 </div>
               </div>
 

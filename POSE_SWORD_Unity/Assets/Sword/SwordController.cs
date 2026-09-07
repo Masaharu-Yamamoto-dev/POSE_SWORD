@@ -18,6 +18,7 @@ public class SwordController : MonoBehaviour
     // 【追加1】上部の変数宣言のところ
     [Header("操作権限")]
     public bool isLocalControlled = true;
+    [HideInInspector] public MultiplayerManager multiplayer;
 
     [Header("モード設定")]
     public static bool isKomaMode = false; // 全体で共有するモードフラグ
@@ -37,7 +38,7 @@ public class SwordController : MonoBehaviour
     {
         // Unityエディタで実行している時だけ、インスペクタのチェックを反映する
 #if UNITY_EDITOR
-        isKomaMode = testKomaMode;
+        if (multiplayer == null) isKomaMode = testKomaMode;
 #endif
         // 開始時に重力と摩擦をセット
         ApplyPhysicsMode();
@@ -55,6 +56,7 @@ public class SwordController : MonoBehaviour
 
     void FixedUpdate()
     {
+        if (multiplayer != null && (!multiplayer.IsHost || !multiplayer.IsPlaying)) return;
         // 独楽モードで、自分に操作権限がある時だけ自動で動かす
         if (isKomaMode && swordRigidbody != null && swordRigidbody.bodyType == RigidbodyType2D.Dynamic)
         {

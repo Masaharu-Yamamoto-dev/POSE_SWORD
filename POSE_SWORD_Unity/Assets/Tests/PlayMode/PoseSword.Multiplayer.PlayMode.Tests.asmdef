@@ -1,0 +1,5 @@
+{
+  "name": "PoseSword.Multiplayer.PlayMode.Tests",
+  "references": [],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

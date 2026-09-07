@@ -11,6 +11,12 @@ public class BattleStartData
 
 public class SceneController : MonoBehaviour
 {
+    void Awake()
+    {
+        // The serialized two-player scene remains the source of the sword template.
+        if (GetComponent<MultiplayerManager>() == null) gameObject.AddComponent<MultiplayerManager>();
+    }
+
     [Header("剣の錬成装置")]
     public SwordGenerator hostGenerator;   
     public SwordGenerator clientGenerator; 

@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:rules": "bash scripts/test-match-rules.sh",
+    "check:unity": "python3 scripts/check-unity-scripts.py",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
