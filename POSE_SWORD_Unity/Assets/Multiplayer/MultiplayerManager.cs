@@ -86,7 +86,7 @@ public class MultiplayerManager : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogError("Multiplayer initialization failed: " + e.Message);
+            Debug.LogError("Multiplayer initialization failed: " + e);
             string matchId = config.matchId;
             StopCurrent();
             Emit("LOAD_FAILED", new MultiplayerCommand { matchId = matchId });
@@ -95,10 +95,10 @@ public class MultiplayerManager : MonoBehaviour
 
     void ValidateConfig()
     {
-        if (config.players == null || config.players.Length != 4 || !new[] { "0", "1" }.Contains(config.gameMode) ||
+        if (config.players == null || !new[] { 2, 4 }.Contains(config.players.Length) || !new[] { "0", "1" }.Contains(config.gameMode) ||
             !config.players.Any(p => p != null && p.playerId == config.localPlayerId) ||
             config.players.Any(p => p == null || p.swordData == null || string.IsNullOrEmpty(p.playerId)) ||
-            config.players.Select(p => p.playerId).Distinct().Count() != 4 ||
+            config.players.Select(p => p.playerId).Distinct().Count() != config.players.Length ||
             config.players.Select(p => p.slotIndex).OrderBy(i => i).Where((slot, i) => slot != i).Any() ||
             config.players.Select(p => p.spawnIndex).OrderBy(i => i).Where((slot, i) => slot != i).Any())
             throw new ArgumentException("Invalid multiplayer roster.");
@@ -152,6 +152,7 @@ public class MultiplayerManager : MonoBehaviour
 
     Vector3 SpawnPosition(int slot)
     {
+        if (config.players.Length == 2) return new Vector3(slot == 0 ? -8 : 8, 0, 0);
         if (config.gameMode == "0") return new Vector3(-15 + slot * 10, 0, 0);
         return new Vector3(slot % 2 == 0 ? -8 : 8, slot < 2 ? -6 : 6, 0);
     }
@@ -305,7 +306,9 @@ public class MultiplayerManager : MonoBehaviour
     {
         var sync = JsonUtility.FromJson<MultiplayerSync>(json);
         if (config == null || IsHost || sync == null || sync.matchId != config.matchId || sync.tick <= receivedTick || phase == "RESULT") return;
-        if (sync.players == null || sync.players.Length != 4 || sync.players.Any(p => p == null || p.playerId == null || !swords.ContainsKey(p.playerId))) return;
+        if (sync.players == null || sync.players.Length != config.players.Length ||
+            sync.players.Any(p => p == null || p.playerId == null || !swords.ContainsKey(p.playerId)) ||
+            sync.players.Select(p => p.playerId).Distinct().Count() != config.players.Length) return;
         phase = sync.phase; SwordBattle.isRoundStarted = IsPlaying;
         foreach (var data in sync.players)
         {

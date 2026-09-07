@@ -103,7 +103,7 @@ export default function MultiplayerGame({ sword, peerOptions, onExit }) {
   const myState = view?.sync?.players?.find(p => p.playerId === view.localPlayerId);
 
   return <main className="mp-game">
-    <header><h1>4人個人戦</h1>{roomId && <span>ルームID：<strong>{roomId}</strong></span>}</header>
+    <header><h1>個人戦（2人／4人）</h1>{roomId && <span>ルームID：<strong>{roomId}</strong></span>}</header>
     {(error || view?.error) && <p role="alert" className="mp-error">{error || view.error}</p>}
     {!room && !view?.closed && <section className="mp-entry">
       <p>4人がそれぞれの端末で参加し、最後まで残った1人が勝利します。</p>
@@ -114,12 +114,15 @@ export default function MultiplayerGame({ sword, peerOptions, onExit }) {
     </section>}
     {room && !active && !resultVisible && !view.closed && <>
       <div className="mp-options">
+        <label>人数 <select value={room.capacity} disabled={!view.isHost || room.phase !== 'LOBBY'} onChange={e => {
+          try { session.setCapacity(Number(e.target.value)); setError(''); } catch (err) { setError(err.message); }
+        }}><option value={2}>2人</option><option value={4}>4人</option></select></label>
         <label>モード <select value={room.gameMode} disabled={!view.isHost || room.phase !== 'LOBBY'} onChange={e => session.setGameMode(e.target.value)}>
           <option value="0">剣</option><option value="1">独楽</option>
         </select></label>
         <button onClick={() => navigator.clipboard.writeText(roomId).catch(() => setError('ルームIDを選択してコピーしてください。'))}>IDをコピー</button>
       </div>
-      <div className="mp-roster">{Array.from({ length: 4 }, (_, slot) => {
+      <div className="mp-roster">{Array.from({ length: room.capacity }, (_, slot) => {
         const player = room.players.find(p => p.slotIndex === slot);
         return <article key={slot} style={{ borderColor: colors[slot] }}>
           <h2>P{slot + 1} {player?.playerId === view.localPlayerId ? 'あなた' : ''}{player?.playerId === 'p0' ? '（ホスト）' : ''}</h2>
@@ -132,7 +135,7 @@ export default function MultiplayerGame({ sword, peerOptions, onExit }) {
         <button disabled={room.phase !== 'LOBBY'} onClick={() => session.setReady(!me?.ready)}>{me?.ready ? '準備を取り消す' : '準備完了'}</button>
         {view.isHost && <button disabled={!view.canStart} onClick={() => { try { session.prepare(); } catch (e) { setError(e.message); } }}>全員で対戦開始</button>}
       </div>
-      <p>4人全員の準備が揃うと、ホストが対戦を開始できます。</p>
+      <p>{room.capacity}人全員の準備が揃うと、ホストが対戦を開始できます。</p>
     </>}
     {hasCanvas && <section className="mp-arena" style={{ display: active ? 'block' : 'none' }}>
       <BattleCanvas bridge={bridge} session={session} />
@@ -144,7 +147,7 @@ export default function MultiplayerGame({ sword, peerOptions, onExit }) {
           <span>HP {state?.hp ?? p.swordData.hp} / SP {Math.floor(state?.sp ?? 0)}{state?.hp === 0 ? ' — 脱落' : ''}</span>
         </div>;
       })}</div>
-      {room?.phase === 'LOADING' && <p className="mp-status">読み込み待ち：{room.players.filter(p => !p.loaded).map(p => `P${p.slotIndex + 1}`).join('・')}</p>}
+      {room?.phase === 'LOADING' && <p className="mp-status">読み込み待ち：{room.players.filter(p => !p.loaded).map(p => `P${p.slotIndex + 1} ${p.swordData.name}`).join('・')}</p>}
       {room?.phase === 'COUNTDOWN' && <p className="mp-status">{Math.ceil(view?.sync?.countdownRemaining ?? 3)}</p>}
       {myState?.hp === 0 && <p className="mp-status">観戦中</p>}
     </section>}
@@ -152,7 +155,10 @@ export default function MultiplayerGame({ sword, peerOptions, onExit }) {
       <h2>{view.result.draw ? '引き分け' : view.result.winnerId === view.localPlayerId ? 'あなたの勝利！' : '試合終了'}</h2>
       <table><thead><tr><th>順位</th><th>プレイヤー</th><th>与ダメージ</th><th>被ダメージ</th><th>撃破</th></tr></thead>
         <tbody>{[...view.result.standings].sort((a, b) => a.rank - b.rank).map(score => <tr key={score.playerId}>
-          <td>{score.rank}位</td><td>{room.players.find(p => p.playerId === score.playerId)?.swordData.name ?? score.playerId}{score.eliminationReason === 'DISCONNECTED' ? '（切断）' : ''}</td>
+          <td>{score.rank}位</td><td>{(() => {
+            const player = view.resultPlayers.find(p => p.playerId === score.playerId);
+            return player ? <><img className="mp-result-image" src={imageSource(player.swordData)} alt="" />P{player.slotIndex + 1} {player.swordData.name}</> : score.playerId;
+          })()}{score.eliminationReason === 'DISCONNECTED' ? '（切断）' : ''}</td>
           <td>{score.damageDealt}</td><td>{score.damageTaken}</td><td>{score.kills}</td>
         </tr>)}</tbody></table>
       {!view.closed && <button onClick={() => session.returnToLobby()}>ロビーに戻る</button>}
