@@ -260,6 +260,12 @@ public class NetworkManager : MonoBehaviour
                     case 3: // 剣：大回転斬りダッシュ
                         sr.color = new Color(0.5f, 1f, 1f);   // 水色
                         break;
+                    case 4: // 剣：巨大化一回転
+                        sr.color = new Color(1f, 0.3f, 0.3f); // 赤色
+                        break;
+                    case 5: // 剣：分身突進
+                        sr.color = new Color(0.3f, 0.6f, 1f); // 青色
+                        break;
                     default: // 通常状態
                         sr.color = Color.white;
                         break;

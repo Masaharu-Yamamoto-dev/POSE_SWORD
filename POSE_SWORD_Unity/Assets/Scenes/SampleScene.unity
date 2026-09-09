@@ -1079,6 +1079,7 @@ MonoBehaviour:
   swordName: "\u30C0\u30DF\u30FC\u5263"
   hp: 200
   attack: 10
+  handleId: 0
   hpBar: {fileID: 929529342}
   delayHpBar: {fileID: 1522675176}
   nameText: {fileID: 852906881}
@@ -1100,6 +1101,15 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
+  giantSpinScale: 6
+  giantSpinDamageMultiplier: 8
+  cloneCount: 3
+  cloneSpawnMinRadius: 2
+  cloneSpawnMaxRadius: 4
+  cloneDashSpeed: 35
+  cloneDamageMultiplier: 3
+  cloneLifeTime: 3
+  cloneSpawnStagger: 0.08
   isDashing: 0
   isDashShooting: 0
   currentDashType: 0
@@ -1170,7 +1180,7 @@ MonoBehaviour:
   komaSpinTorque: 1000
   komaHomingForce: 500
   maxKomaSpinSpeed: 2000
-  testKomaMode: 1
+  testKomaMode: 0
 --- !u!82 &287059455
 AudioSource:
   m_ObjectHideFlags: 0
@@ -1994,7 +2004,7 @@ MonoBehaviour:
   komaSpinTorque: 1000
   komaHomingForce: 500
   maxKomaSpinSpeed: 2000
-  testKomaMode: 1
+  testKomaMode: 0
 --- !u!114 &503523103
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2010,6 +2020,7 @@ MonoBehaviour:
   swordName: "\u30C0\u30DF\u30FC\u5263"
   hp: 200
   attack: 10
+  handleId: 0
   hpBar: {fileID: 2089335308}
   delayHpBar: {fileID: 1722956000}
   nameText: {fileID: 1566579566}
@@ -2031,6 +2042,15 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
+  giantSpinScale: 3
+  giantSpinDamageMultiplier: 8
+  cloneCount: 3
+  cloneSpawnMinRadius: 2
+  cloneSpawnMaxRadius: 4
+  cloneDashSpeed: 35
+  cloneDamageMultiplier: 3
+  cloneLifeTime: 3
+  cloneSpawnStagger: 0.08
   isDashing: 0
   isDashShooting: 0
   currentDashType: 0
@@ -2737,7 +2757,7 @@ MonoBehaviour:
   komaRightPosition: {x: 8, y: 11.5, z: 0}
   countdownText: {fileID: 1937249877}
   countdownZoomSize: 5.5
-  debugBattleJsonFile: {fileID: 0}
+  debugBattleJsonFile: {fileID: 4900000, guid: 254d0f529720c38468dbf25e1ce767b3, type: 3}
   autoTestOnStart: 1
 --- !u!114 &618030781
 MonoBehaviour:
@@ -4174,7 +4194,7 @@ MonoBehaviour:
   swordBattle: {fileID: 503523103}
   handleObject: {fileID: 473435595}
   targetBladeWidth: 1.5
-  generateOnStart: 1
+  generateOnStart: 0
 --- !u!1 &990760267
 GameObject:
   m_ObjectHideFlags: 0
@@ -4211,7 +4231,7 @@ MonoBehaviour:
   swordBattle: {fileID: 287059451}
   handleObject: {fileID: 1711303185}
   targetBladeWidth: 1.5
-  generateOnStart: 1
+  generateOnStart: 0
 --- !u!4 &990760269
 Transform:
   m_ObjectHideFlags: 0
@@ -6186,7 +6206,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1495552347
 Transform:
   m_ObjectHideFlags: 0

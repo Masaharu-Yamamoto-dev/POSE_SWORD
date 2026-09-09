@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 
 public class SwordBattle : MonoBehaviour
@@ -8,8 +9,9 @@ public class SwordBattle : MonoBehaviour
     [Header("ステータス")]
     public string swordName = "ダミー剣";
     public int hp = 100;
-    private int maxHp; 
+    private int maxHp;
     public int attack = 10;
+    public int handleId = 0; // 必殺技の種類（JSONのhandleIdが未指定なら0＝デフォルトの必殺技）
 
     [Header("UI設定")]
     public Slider hpBar;        // 手前の緑ゲージ
@@ -46,14 +48,24 @@ public static bool matchEnded = false;
     public float maxSp = 100f;         // SPの最大値
     public float passiveSpFill = 5f;   // 1秒間に自動で溜まる量
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
- 
+    public float giantSpinScale = 6f; // 巨大化一回転（handleId:1）の拡大率
+    public float giantSpinDamageMultiplier = 8f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
+    public int cloneCount = 3; // 分身突進（handleId:2）の分身数
+    public float cloneSpawnMinRadius = 2f; // 分身の出現位置：自分からの最小距離
+    public float cloneSpawnMaxRadius = 4f; // 分身の出現位置：自分からの最大距離
+    public float cloneDashSpeed = 35f; // 分身の突進速度
+    public float cloneDamageMultiplier = 3f; // 分身1体が命中した時のダメージ倍率（attackへの倍率）
+    public float cloneLifeTime = 3f; // 何にも当たらなかった場合に分身が自動的に消えるまでの秒数
+    public float cloneSpawnStagger = 0.08f; // 分身が1体ずつ出現する間隔（秒）
+
     // 突進状態の管理用
 // 突進状態の管理用
     [HideInInspector] public bool isDashing = false;
-    [HideInInspector] public bool isDashShooting = false; 
-    private float dashDamageBonus = 1.0f; 
+    [HideInInspector] public bool isDashShooting = false;
+    private float dashDamageBonus = 1.0f;
+    private bool hasHitDuringGiantSpin = false;
 
-    // ▼【新規追加】現在のダッシュ技の種類 (0:なし, 1:小ダッシュ, 2:竜巻, 3:大回転)
+    // ▼【新規追加】現在のダッシュ技の種類 (0:なし, 1:小ダッシュ, 2:竜巻, 3:大回転, 4:巨大化一回転, 5:分身突進)
     [HideInInspector] public int currentDashType = 0;
 
     // SwordBattle.cs の変数宣言エリアに追加
@@ -144,12 +156,13 @@ public static bool matchEnded = false;
     }
 
     // ▼追加：SwordGeneratorから正しいタイミングで呼ばれる初期化関数
-    public void SetupStatus(string newName, int newHp, int newAttack)
+    public void SetupStatus(string newName, int newHp, int newAttack, int newHandleId = 0)
     {
         swordName = newName;
         hp = newHp;
         maxHp = newHp;
         attack = newAttack;
+        handleId = newHandleId;
         UpdateUI();
     }
 
@@ -618,7 +631,7 @@ public static bool matchEnded = false;
         {
             if (currentSp >= 70f)
             {
-                StartCoroutine(TornadoDashRoutine());
+                StartCoroutine(UltimateRoutine());
                 actionName = "Tornado";
             }
             else if (currentSp >= 20f)
@@ -631,7 +644,7 @@ public static bool matchEnded = false;
         {
             if (currentSp >= maxSp)
             {
-                StartCoroutine(SwordDashRoutine());
+                StartCoroutine(UltimateRoutine());
                 actionName = "SwordDash";
             }
             else if (controller != null)
@@ -660,7 +673,7 @@ public static bool matchEnded = false;
         if (actionName == "Tornado")
         {
             currentSp = 0f; // 強制消費
-            StartCoroutine(TornadoDashRoutine());
+            StartCoroutine(UltimateRoutine());
         }
         else if (actionName == "KomaDash")
         {
@@ -670,7 +683,7 @@ public static bool matchEnded = false;
         else if (actionName == "SwordDash")
         {
             currentSp = 0f;
-            StartCoroutine(SwordDashRoutine());
+            StartCoroutine(UltimateRoutine());
         }
         else if (actionName == "JumpRight")
         {
@@ -706,6 +719,28 @@ public static bool matchEnded = false;
         isDashing = false;
         currentDashType = 0;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】剣ごとのhandleId（JSON由来）に応じて必殺技の中身を振り分ける
+    // 未対応のhandleId（未指定＝0を含む）は既存のデフォルト必殺技にフォールバック
+    IEnumerator UltimateRoutine()
+    {
+        switch (handleId)
+        {
+            // ▼ 新しい必殺技を追加する場合はここにcaseを足す
+            case 1: // 剣モード：巨大化して一回転。当たると大ダメージ
+                yield return StartCoroutine(GiantSpinRoutine());
+                break;
+            case 2: // 剣モード：分身を3体出現させ、相手へホーミング突進させる
+                yield return StartCoroutine(CloneRushRoutine());
+                break;
+            default:
+                if (SwordController.isKomaMode)
+                    yield return StartCoroutine(TornadoDashRoutine());
+                else
+                    yield return StartCoroutine(SwordDashRoutine());
+                break;
+        }
     }
 
     // ▼【修正】独楽モード：超必殺「竜巻」
@@ -758,6 +793,252 @@ public static bool matchEnded = false;
         isDashing = false;
         currentDashType = 0;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】剣モード必殺技（handleId:1）：巨大化して一回転。当たると大ダメージ
+    IEnumerator GiantSpinRoutine()
+    {
+        isDashing = true;
+        currentDashType = 4;
+        currentSp = 0f;
+        hasHitDuringGiantSpin = false;
+
+        if (CutinManager.Instance != null && spriteRenderer != null)
+        {
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f));
+        }
+
+        if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.3f, 0.3f);
+
+        Vector3 originalScale = transform.localScale;
+        transform.localScale = originalScale * giantSpinScale;
+
+        // 壁にも相手の剣にも物理的に引っかからず回転できるよう、回転中は当たり判定をトリガー化する
+        // （ダメージはOnTriggerEnter2D側で判定する）
+        Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
+        bool[] originalTriggerStates = new bool[myColliders.Length];
+        for (int i = 0; i < myColliders.Length; i++)
+        {
+            originalTriggerStates[i] = myColliders[i].isTrigger;
+            myColliders[i].isTrigger = true;
+        }
+
+        bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
+        float originalGravityScale = 0f;
+
+        if (controlsPhysics)
+        {
+            // 回転中は床に落ちていかないよう、重力も一時的に切る
+            originalGravityScale = rb.gravityScale;
+            rb.gravityScale = 0f;
+            rb.linearVelocity = Vector2.zero;
+        }
+
+        // 敵がいる方向に振りかぶるように回転方向を決める
+        float spinDir = 1f;
+        if (controller != null && controller.enemyTarget != null)
+        {
+            float dx = controller.enemyTarget.position.x - transform.position.x;
+            if (Mathf.Abs(dx) > 0.01f)
+            {
+                spinDir = Mathf.Sign(dx) * -1f;
+            }
+        }
+
+        float angularSpeed = 1080f * spinDir; // 度/秒
+        float duration = 360f / Mathf.Abs(angularSpeed); // ちょうど一回転分の時間
+
+        if (controlsPhysics)
+        {
+            rb.angularVelocity = angularSpeed;
+        }
+
+        yield return new WaitForSeconds(duration);
+
+        if (controlsPhysics)
+        {
+            rb.angularVelocity = 0f;
+            rb.gravityScale = originalGravityScale;
+        }
+
+        for (int i = 0; i < myColliders.Length; i++)
+        {
+            if (myColliders[i] != null) myColliders[i].isTrigger = originalTriggerStates[i];
+        }
+
+        transform.localScale = originalScale;
+        isDashing = false;
+        currentDashType = 0;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】剣モード必殺技（handleId:2）：分身を3体出現させ、相手へホーミング突進させる
+    IEnumerator CloneRushRoutine()
+    {
+        isDashing = true;
+        currentDashType = 5;
+        currentSp = 0f;
+
+        Color cloneColor = new Color(0.3f, 0.6f, 1f);
+
+        if (CutinManager.Instance != null && spriteRenderer != null)
+        {
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "影武者突撃!!", cloneColor);
+        }
+
+        if (spriteRenderer != null) spriteRenderer.color = cloneColor;
+
+        // ▼【重要】実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行う。
+        // Client側の見た目再生（Kinematicコピー）では分身は出すが、ダメージは与えない。
+        bool isAuthoritative = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
+        int cloneDamage = Mathf.Max(Mathf.RoundToInt(attack * cloneDamageMultiplier), 1);
+
+        Vector3 enemyPos = (controller != null && controller.enemyTarget != null)
+            ? controller.enemyTarget.position
+            : transform.position + transform.right;
+
+        Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
+        List<Collider2D> spawnedColliders = new List<Collider2D>();
+        const float cloneColliderRadius = 0.6f;
+        float sectorSize = 360f / cloneCount; // 各分身の出現方向を等間隔に散らすための区画角度
+
+        for (int i = 0; i < cloneCount; i++)
+        {
+            // ▼【重要】画面端など出現位置の確保が難しい状況で1体の生成に失敗しても、
+            // 残りの分身の生成や末尾の状態リセットが必ず実行されるようにtry/catchで保護する
+            try
+            {
+                float baseAngle = i * sectorSize;
+                Vector3 spawnPos = FindCloneSpawnPosition(cloneColliderRadius, baseAngle, sectorSize);
+
+                GameObject cloneObj = new GameObject("SwordClone");
+                cloneObj.transform.position = spawnPos;
+                cloneObj.transform.rotation = transform.rotation;
+
+                if (spriteRenderer != null)
+                {
+                    SpriteRenderer sr = cloneObj.AddComponent<SpriteRenderer>();
+                    sr.sprite = spriteRenderer.sprite;
+                    sr.color = cloneColor;
+                    sr.sortingLayerID = spriteRenderer.sortingLayerID;
+                    sr.sortingOrder = spriteRenderer.sortingOrder;
+                }
+
+                CircleCollider2D cloneCollider = cloneObj.AddComponent<CircleCollider2D>();
+                cloneCollider.radius = cloneColliderRadius;
+
+                Rigidbody2D cloneRb = cloneObj.AddComponent<Rigidbody2D>();
+                cloneRb.gravityScale = 0f;
+
+                Vector2 dirToEnemy = ((Vector2)enemyPos - (Vector2)spawnPos).normalized;
+                cloneRb.linearVelocity = dirToEnemy * cloneDashSpeed;
+
+                SwordCloneProjectile clone = cloneObj.AddComponent<SwordCloneProjectile>();
+                clone.Setup(this, isAuthoritative, cloneDamage, cloneLifeTime);
+
+                // 自分自身や他の分身とは当たらないようにする
+                foreach (Collider2D myCol in myColliders)
+                {
+                    Physics2D.IgnoreCollision(cloneCollider, myCol, true);
+                }
+                foreach (Collider2D otherCloneCollider in spawnedColliders)
+                {
+                    Physics2D.IgnoreCollision(cloneCollider, otherCloneCollider, true);
+                }
+
+                // ▼【保険】それでも壁と重なった状態で出現してしまった場合、出現直後に消えないよう
+                // 重なっている壁（相手の剣ではないコライダー）とは衝突しないようにする
+                foreach (Collider2D overlapped in Physics2D.OverlapCircleAll(spawnPos, cloneColliderRadius))
+                {
+                    if (overlapped.GetComponentInParent<SwordBattle>() == null)
+                    {
+                        Physics2D.IgnoreCollision(cloneCollider, overlapped, true);
+                    }
+                }
+                spawnedColliders.Add(cloneCollider);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ 分身の生成に失敗しました（{i + 1}体目）: {e}");
+            }
+
+            // 出現タイミングを1体ずつずらす（最後の1体の後は待たない）
+            if (i < cloneCount - 1 && cloneSpawnStagger > 0f)
+            {
+                yield return new WaitForSeconds(cloneSpawnStagger);
+            }
+        }
+
+        yield return new WaitForSeconds(0.3f);
+
+        isDashing = false;
+        currentDashType = 0;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】分身の出現位置を決める。baseAngleを中心とした区画(sectorSize)内でランダムな方向・距離を選び、
+    // 壁・床と重なる場合は区画内で角度をずらしながら数回試行する。分身ごとに区画をずらすことで位置が偏らないようにする。
+    // 見つからなければ最後に試した場所を返す（呼び出し側でIgnoreCollisionの保険をかける）
+    // 画面端など、割り当てられた方向(baseAngle)がずっと壁で塞がっている場合に備え、
+    // 後半の試行では区画に関係なく全方位からも探す
+    private Vector3 FindCloneSpawnPosition(float colliderRadius, float baseAngle, float sectorSize)
+    {
+        const int attemptCount = 8;
+        const int sectorAttempts = 3; // 最初の数回は割り当てられた方向を優先して探す
+
+        Vector3 candidate = transform.position;
+        for (int attempt = 0; attempt < attemptCount; attempt++)
+        {
+            float angle = attempt < sectorAttempts
+                ? baseAngle + Random.Range(-sectorSize * 0.5f, sectorSize * 0.5f)
+                : Random.Range(0f, 360f); // 割り当てられた区画が塞がっている場合は全方位から探す
+
+            // 半径も塞がっている場合に備え、徐々に自分に近い側も試す
+            float minRadius = Mathf.Lerp(cloneSpawnMinRadius, 0.5f, (float)attempt / (attemptCount - 1));
+            float radius = Random.Range(Mathf.Min(minRadius, cloneSpawnMaxRadius), cloneSpawnMaxRadius);
+
+            Vector2 dir = new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad));
+            candidate = transform.position + (Vector3)(dir * radius);
+
+            bool blockedByWall = false;
+            foreach (Collider2D overlapped in Physics2D.OverlapCircleAll(candidate, colliderRadius))
+            {
+                if (overlapped.GetComponentInParent<SwordBattle>() == null)
+                {
+                    blockedByWall = true;
+                    break;
+                }
+            }
+
+            if (!blockedByWall) return candidate;
+        }
+        return candidate;
+    }
+
+    // ▼【新規追加】巨大化一回転（currentDashType 4）専用のダメージ判定
+    // （回転中は当たり判定をトリガー化しているためOnCollisionEnter2Dではなくこちらで処理する）
+    void OnTriggerEnter2D(Collider2D other)
+    {
+        if (isDead || matchEnded) return;
+        if (currentDashType != 4 || hasHitDuringGiantSpin) return;
+
+        // ▼【重要】トリガー判定はKinematic同士でも発火してしまう。
+        // 他の必殺技と同様、実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行い、
+        // Client側の見た目再生（Kinematicコピー）では二重計算しない。HP等はHostからのSYNCで同期される。
+        if (rb == null || rb.bodyType != RigidbodyType2D.Dynamic) return;
+
+        SwordBattle target = other.GetComponentInParent<SwordBattle>();
+        if (target == null || target == this) return;
+
+        hasHitDuringGiantSpin = true;
+
+        bool isWeakPoint = other.CompareTag("Handle");
+        int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier);
+        if (isWeakPoint) damage *= 2;
+        damage = Mathf.Max(damage, 1);
+
+        Vector2 hitPoint = other.ClosestPoint(transform.position);
+        target.TakeDamage(damage, hitPoint, true, isWeakPoint);
     }
 
     // ▼【修正】剣モード専用「一直線ジャンプダッシュ」

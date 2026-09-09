@@ -73,7 +73,7 @@ public class SwordGenerator : MonoBehaviour
             float actualWeight = Mathf.Lerp(7f, 25f, weightRatio);
             
             // HPはそのまま、攻撃力は変換した値をセット
-            swordBattle.SetupStatus(data.name, data.hp, actualAttack);
+            swordBattle.SetupStatus(data.name, data.hp, actualAttack, data.handleId);
 
             if (swordRigidbody != null)
             {
