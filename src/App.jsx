@@ -2,6 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Peer } from 'peerjs';
 import { Unity, useUnityContext } from 'react-unity-webgl';
 import './App.css';
+import { styles } from './styles';
+
+import TitleScreen from './screens/TitleScreen';
+import LobbyScreen from './screens/LobbyScreen';
+import ResultScreen from './screens/ResultScreen';
 
 // STUN + TURN サーバー設定
 const PEER_ICE_CONFIG = {
@@ -20,6 +25,8 @@ export default function PoseSwordWeb() {
   const [step, setStep] = useState("TITLE");
   const stepRef = useRef(step);
   useEffect(() => { stepRef.current = step; }, [step]);
+
+  const [titleMode, setTitleMode] = useState("DEFAULT");
 
   const [craftReturnStep, setCraftReturnStep] = useState("TITLE");
 
@@ -49,14 +56,12 @@ export default function PoseSwordWeb() {
   const enemyUnityLoadedRef = useRef(false);
   useEffect(() => { enemyUnityLoadedRef.current = isEnemyUnityLoaded; }, [isEnemyUnityLoaded]);
 
-  // ▼【復活】消えてしまっていたユーザー名管理のステート
   const [userName, setUserName] = useState("");
 
   const [myPeerId, setMyPeerId] = useState("");
   const [targetId, setTargetId] = useState("");
   const peerRef = useRef(null);
 
-  // ▼【追加】部屋が満員で弾かれたかどうかのフラグ
   const isRejectedRef = useRef(false);
 
   const [captureCountdown, setCaptureCountdown] = useState(null);
@@ -141,7 +146,6 @@ export default function PoseSwordWeb() {
 
   useEffect(() => { handleGameOverRef.current = handleGameOver; });
   
-  // 1. 自分のUnityロードが終わったら、通信相手に通知
   useEffect(() => {
     if (step === "PLAYING" && isLoaded && connection) {
       console.log("📡 自分のUnityロード完了。相手に通知します。");
@@ -149,7 +153,6 @@ export default function PoseSwordWeb() {
     }
   }, [step, isLoaded, connection]);
 
-  // 2. 両方のUnityロードが完全に揃ったら、同時に命令を撃ち込む！
   useEffect(() => {
     if (step === "PLAYING" && isLoaded && isEnemyUnityLoaded && pendingBattleRef.current !== null) {
       const { mode, startJson, gameModeStr } = pendingBattleRef.current;
@@ -223,7 +226,7 @@ export default function PoseSwordWeb() {
       connection.send({ type: "EXCHANGE_SWORD", swordData: fullData });
     }, 2000);
 
-    return () => { clearTimeout(t1); clearTimeout(t2); clearInterval(retry); };
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(retry); };
   }, [connection, mySwordData]);
 
   useEffect(() => {
@@ -258,6 +261,7 @@ export default function PoseSwordWeb() {
     setCountdown(null);
     setRole(null);
     setSystemMessage(msg);
+    setTitleMode("DEFAULT");
     setGameMode("1");
     setStep("TITLE");
   };
@@ -281,7 +285,6 @@ export default function PoseSwordWeb() {
     setSystemMessage("");
     isRejectedRef.current = false;
     setRole("HOST"); 
-    setStep("HOST_WAIT");
 
     const attemptCreatePeer = (retriesLeft) => {
       const hostId = Math.floor(100000 + Math.random() * 900000).toString();
@@ -290,8 +293,9 @@ export default function PoseSwordWeb() {
       peer.on('open', (id) => {
         setMyPeerId(id);
         peerRef.current = peer;
+        setStep("LOBBY");
+
         peer.on('connection', (incomingConn) => { 
-          //既に接続中（満員）の場合は弾く
           if (connRef.current) {
             incomingConn.on('open', () => {
               incomingConn.send({ type: "ROOM_FULL" });
@@ -303,16 +307,8 @@ export default function PoseSwordWeb() {
           incomingConn.on('open', () => {
             setConnection(incomingConn); 
             setupConnection(incomingConn);
-
             incomingConn.send({ type: "ROOM_ACCEPTED" });
-
-            setStep((prev) => {
-                if (["NAME_INPUT", "CRAFT_POSE", "CRAFTING_API", "CRAFT_COMPLETE"].includes(prev)) {
-                    setCraftReturnStep("LOBBY");
-                    return prev; 
-                }
-                return "LOBBY"; 
-            });
+            incomingConn.send({ type: "SYNC_GAMEMODE", gameMode: gameModeRef.current });
           });
         });
       });
@@ -336,7 +332,8 @@ export default function PoseSwordWeb() {
     setTargetId("");
     isRejectedRef.current = false;
     setRole("CLIENT"); 
-    setStep("CLIENT_WAIT");
+    setTitleMode("JOIN_INPUT");
+
     const peer = new Peer(PEER_ICE_CONFIG);
     peer.on('open', (id) => setMyPeerId(id));
 
@@ -351,23 +348,30 @@ export default function PoseSwordWeb() {
     peerRef.current = peer;
   };
 
-  const connectToHost = () => {
-    setSystemMessage(""); // 一旦メッセージをクリア
+  const handleCancelJoin = () => {
+    setTitleMode("DEFAULT");
+    setSystemMessage("");
+    setRole(null);
+    if (peerRef.current) {
+      peerRef.current.destroy();
+      peerRef.current = null;
+    }
+  };
 
-    // 1. 空欄チェック
+  const connectToHost = () => {
+    setSystemMessage(""); 
+
     if (!targetId.trim()) {
       setSystemMessage("ロビーIDを入力してください。");
       return;
     }
 
-    // 2. 半角数字以外のチェック（正規表現で数字だけか判定）
     const isOnlyNumbers = /^\d+$/.test(targetId);
     if (!isOnlyNumbers) {
       setSystemMessage("IDが不適切です。半角数字のみで入力してください。");
       return;
     }
 
-    // 3. 桁数チェック（6桁未満の場合）
     if (targetId.length < 6) {
       setSystemMessage("ロビーIDは6桁の数字で入力してください。");
       return;
@@ -386,8 +390,6 @@ export default function PoseSwordWeb() {
     conn.on('data', (data) => {
       const currentRole = roleRef.current;
       switch (data.type) {
-
-        //ホストから入室許可が出た時だけロビーへ遷移
         case "ROOM_ACCEPTED":
           if (currentRole === "CLIENT") {
             setSystemMessage("");
@@ -395,12 +397,11 @@ export default function PoseSwordWeb() {
           }
           break;
 
-        // 満員通知を受け取った場合の処理
         case "ROOM_FULL":
           if (currentRole === "CLIENT") {
             isRejectedRef.current = true;
             setConnection(null);
-            setStep("CLIENT_WAIT");
+            setTitleMode("JOIN_INPUT");
             setSystemMessage("このロビーはすでに満員（対戦中）です。");
           }
           break;
@@ -454,7 +455,6 @@ export default function PoseSwordWeb() {
     });
 
     conn.on('close', () => {
-      // 満員で弾かれただけの切断なら、タイトルに戻さない
       if (isRejectedRef.current) {
         isRejectedRef.current = false;
       } else if (peerRef.current && stepRef.current !== "TITLE") {
@@ -544,71 +544,18 @@ export default function PoseSwordWeb() {
     switch (step) {
       case "TITLE":
         return (
-          <div style={styles.container}>
-            {mySwordData?.imageSrc && (
-              <img src={mySwordData.imageSrc} alt="Background Sword" style={styles.bgImageCenter} />
-            )}
-            
-            <div style={styles.contentWrapper}>
-              <img src="/logo.png" alt="オレブレード" style={{ width: '90%', maxWidth: '800px', marginBottom: '40px', objectFit: 'contain' }} />
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', maxWidth: '300px' }}>
-                {/* 1. 剣を錬成するボタン */}
-                <div className="ink-btn-container">
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    style={{ '--btn-color': '#4CAF50' }}
-                    onClick={() => goToCrafting("TITLE")}
-                  >
-                    {mySwordData ? "⚔️ 剣を再錬成する" : "⚔️ 剣を錬成する"}
-                  </button>
-                </div>
-                
-                <div style={{ borderTop: '2px solid #ddd', margin: '10px 0' }}></div>
-                
-                {!mySwordData && (
-                  <p style={{ color: '#888', fontSize: '14px', margin: '0 0 -10px 0', fontWeight: 'bold' }}>
-                    対戦するには、先に剣を錬成してください
-                  </p>
-                )}
-
-                {/* 2. 部屋を作るボタン */}
-                <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    onClick={handleCreateRoom}
-                    disabled={!mySwordData}
-                  >
-                    ロビーを作成
-                  </button>
-                </div>
-
-                {/* 3. 部屋に入るボタン */}
-                <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    onClick={handleJoinRoom}
-                    disabled={!mySwordData}
-                  >
-                    ロビーに入る
-                  </button>
-                </div>
-              </div>
-
-              {/* ▼【変更】エラーメッセージ領域の高さを固定（レイアウトずれ防止） */}
-              <div style={{ height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '30px', width: '90%' }}>
-                {systemMessage && (
-                  <div style={{ ...styles.errorMessage, margin: '0' }}>
-                    ⚠️ {systemMessage}
-                  </div>
-                )}
-              </div>
-
-            </div>
-          </div>
+          <TitleScreen 
+            mySwordData={mySwordData}
+            titleMode={titleMode}
+            targetId={targetId}
+            setTargetId={setTargetId}
+            systemMessage={systemMessage}
+            goToCrafting={goToCrafting}
+            handleCreateRoom={handleCreateRoom}
+            handleJoinRoom={handleJoinRoom}
+            handleCancelJoin={handleCancelJoin} 
+            connectToHost={connectToHost}
+          />
         );
 
       case "NAME_INPUT":
@@ -628,7 +575,6 @@ export default function PoseSwordWeb() {
                 style={styles.input}
               />
               
-              {/* 1. 名前だけ変更して戻るボタン（幅制限の300pxを解除） */}
               {mySwordData && (
                 <div style={{ marginTop: '20px' }}>
                   <div className={`ink-btn-container ${isNameUnchangedOrEmpty ? 'disabled' : ''}`}>
@@ -649,10 +595,7 @@ export default function PoseSwordWeb() {
                 </div>
               )}
 
-              {/* キャンセルと次へのボタン群（横並びに戻し、幅制限を解除） */}
               <div style={{ marginTop: '20px', display: 'flex', gap: '4%', width: '100%', maxWidth: '400px' }}>
-                
-                {/* 2. キャンセル（戻る）ボタン */}
                 <div className="ink-btn-container" style={{ flex: 1 }}>
                   <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
                   <button 
@@ -666,7 +609,6 @@ export default function PoseSwordWeb() {
                   </button>
                 </div>
 
-                {/* 3. 次へ（撮影へ） / 新しくポーズを撮り直すボタン */}
                 <div className={`ink-btn-container ${!userName.trim() ? 'disabled' : ''}`} style={{ flex: 1 }}>
                   <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
                   <button 
@@ -699,15 +641,12 @@ export default function PoseSwordWeb() {
               </div>
               <canvas ref={canvasRef} width="640" height="480" style={{ display: 'none' }} />
               
-              {/* ▼ ボタン群をまとめるコンテナ（幅を300pxに固定し、縦に並べる） */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px' }}>
-                
-                {/* 1. 撮影する / ポーズをとって！ ボタン（オレンジ） */}
                 <div className={`ink-btn-container ${captureCountdown !== null ? 'disabled' : ''}`}>
                   <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
                   <button 
                     className="sharp-button"
-                    style={{ '--btn-color': '#ff9800' }} /* 撮影のオレンジ色 */
+                    style={{ '--btn-color': '#ff9800' }}
                     onClick={startCaptureCountdown} 
                     disabled={captureCountdown !== null}
                   >
@@ -715,12 +654,11 @@ export default function PoseSwordWeb() {
                   </button>
                 </div>
 
-                {/* 2. 名前入力に戻る ボタン（グレー） */}
                 <div className={`ink-btn-container ${captureCountdown !== null ? 'disabled' : ''}`}>
                   <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
                   <button 
                     className="sharp-button"
-                    style={{ '--btn-color': '#666666' }} /* 戻るアクションのグレー */
+                    style={{ '--btn-color': '#666666' }}
                     onClick={() => setStep("NAME_INPUT")}
                     disabled={captureCountdown !== null}
                   >
@@ -749,7 +687,6 @@ export default function PoseSwordWeb() {
                 ⚙️
               </div>
               
-              {/* ▼ フォントを黒薔薇に変更、色を黒に指定、マージンで位置を調整 */}
               <p style={{ 
                 marginTop: '50px', 
                 fontSize: '24px', 
@@ -796,10 +733,7 @@ export default function PoseSwordWeb() {
                 </div>
               )}
               
-              {/* ボタン群（幅300px・縦並び） */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px', marginTop: '10px' }}>
-                
-                {/* 1. 対戦へ進むボタン */}
                 <div className="ink-btn-container">
                   <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
                   <button 
@@ -811,7 +745,6 @@ export default function PoseSwordWeb() {
                   </button>
                 </div>
 
-                {/* 2. 剣を再錬成するボタン */}
                 <div className="ink-btn-container">
                   <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
                   <button 
@@ -828,277 +761,26 @@ export default function PoseSwordWeb() {
           </div>
         );
 
-      case "HOST_WAIT":
-        return (
-          <div style={styles.container}>
-            <div style={styles.contentWrapper}>
-              <h2 style={{ letterSpacing: '0.1em' }}>ロビーID表示</h2>
-              
-              {/* ▼ ここを変更：className="glass" を追加し、スタイルのborder等を削除 */}
-              <div className="glass" style={{ margin: '20px 0', padding: '30px', width: '100%', maxWidth: '500px', boxSizing: 'border-box' }}>
-                
-                <p style={{ fontSize: '18px', margin: '0', color: '#555', fontWeight: 'bold' }}>あなたのロビーID</p>
-                
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', margin: '20px 0' }}>
-                  <p style={{ 
-                    fontSize: 'clamp(28px, 8vw, 48px)',
-                    color: 'blue', 
-                    fontFamily: 'sans-serif', 
-                    fontWeight: 'bold', 
-                    letterSpacing: '8px', 
-                    margin: '0',
-                    wordBreak: 'break-all'
-                  }}>
-                    {myPeerId || "取得中..."}
-                  </p>
-                  
-                  {myPeerId && (
-                    <button 
-                      style={{ 
-                        padding: '10px 16px', 
-                        fontSize: '16px', 
-                        backgroundColor: isCopied ? '#4CAF50' : '#e0e0e0', 
-                        color: isCopied ? '#fff' : '#333',
-                        border: 'none', 
-                        borderRadius: '0', 
-                        cursor: 'pointer',
-                        fontFamily: 'sans-serif',
-                        fontWeight: 'bold',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                        transition: 'all 0.1s'
-                      }} 
-                      onClick={handleCopyId}
-                    >
-                      {isCopied ? "✓ コピーしました" : "📋 コピー"}
-                    </button>
-                  )}
-                </div>
-                
-                <p style={{ margin: '0', fontSize: '16px', fontWeight: 'bold', color: '#000' }}>
-                  このIDを対戦相手に教えてください。
-                </p>
-              </div>
-
-              {/* タイトルに戻るボタン */}
-              <div style={{ width: '300px', marginTop: '50px' }}>
-                <div className="ink-btn-container">
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    style={{ '--btn-color': '#666666' }}
-                    onClick={handleLeave}
-                  >
-                    タイトルに戻る
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        );
-
-      case "CLIENT_WAIT":
-        return (
-          <div style={styles.container}>
-            <div style={styles.contentWrapper}>
-              <h2 style={{ letterSpacing: '0.1em' }}>ロビーID入力</h2>
-              
-              {/* ▼ ボックスを.glass（直角すりガラス）に変更 */}
-              <div className="glass">
-                <p style={{ fontSize: '18px', fontWeight: 'bold', color: '#000', margin: '0 0 20px 0' }}>
-                  ロビーID（6桁の数字）を入力
-                </p>
-                
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
-                  {/* ▼ 入力欄の角丸(styles.inputの初期値)をインラインで打ち消して直角化 */}
-                  <input 
-                    type="text" 
-                    value={targetId} 
-                    onChange={(e) => setTargetId(e.target.value)} 
-                    placeholder="例: 123456" 
-                    maxLength={6}
-                    style={{ 
-                      ...styles.input, 
-                      borderRadius: '0', 
-                      border: '2px solid #000',
-                      letterSpacing: '4px', 
-                      width: '180px',
-                      fontFamily: 'sans-serif', /* 数字が綺麗に見えるフォント */
-                      fontWeight: 'bold'
-                    }} 
-                  />
-                  
-                  {/* ▼【変更】接続ボタン：墨なし、ホストのコピーボタンと対になる直角の緑ボタン */}
-                  <button 
-                    style={{ 
-                      padding: '10px 20px', 
-                      fontSize: '18px', 
-                      backgroundColor: '#4CAF50', 
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '0',
-                      cursor: 'pointer',
-                      fontFamily: 'sans-serif',
-                      fontWeight: 'bold',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                      transition: 'background-color 0.1s'
-                    }} 
-                    onClick={connectToHost}
-                  >
-                    接続
-                  </button>
-                </div>
-              </div>
-
-              {/* エラーメッセージ領域の高さを固定 */}
-              <div style={{ height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {systemMessage && (
-                  <div style={{ ...styles.errorMessage, margin: '0' }}>
-                    ⚠️ {systemMessage}
-                  </div>
-                )}
-              </div>
-
-              {/* ▼ タイトルに戻るボタン（墨ホバーエフェクト版・幅300px） */}
-              <div style={{ width: '300px', marginTop: '10px' }}>
-                <div className="ink-btn-container">
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    style={{ '--btn-color': '#666666' }}
-                    onClick={handleLeave}
-                  >
-                    タイトルに戻る
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        );
-
       case "LOBBY":
-        // 剣カードとボタンをレンダリングする補助関数
-        const renderPlayerSide = (targetRole) => {
-          const isMine = targetRole === role;
-          const data = isMine ? mySwordData : enemySwordData;
-
-          return (
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <div style={styles.swordCard}>
-                <h3 style={{ margin: '0 0 10px 0', color: '#000' }}>
-                  {isMine ? "あなた" : "対戦相手"}
-                </h3>
-                {data ? (
-                  <>
-                    {data.imageSrc ? <img src={data.imageSrc} style={styles.previewImage} /> : <div style={styles.previewImage}>画像受信中...</div>}
-                    <p style={{ ...styles.swordName, color: '#000' }}>{data.name}</p>
-                    <div style={styles.statsBox}>HP:{data.hp} 攻撃:{data.attack} 重さ:{data.weight}</div>
-                  </>
-                ) : <div style={{ height: '200px' }}>未錬成</div>}
-              </div>
-
-              {/* 再錬成ボタン：自分のみ表示 */}
-              <div style={{ height: '80px', marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                {isMine && (
-                  <div className="ink-btn-container" style={{ width: '100%' }}>
-                    <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                    <button 
-                      className="sharp-button" 
-                      style={{ '--btn-color': '#000', fontSize: '18px', padding: '15px 20px' }} 
-                      onClick={() => goToCrafting("LOBBY")}
-                    >
-                      ⚔️ 剣を再錬成する
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        };
-
         return (
-          <div style={styles.container}>
-            <div style={styles.contentWrapper}>
-              <h2>ロビー（対戦準備）</h2>
-              
-              {/* ▼ 左右を固定して配置 */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '2%', width: '100%', maxWidth: '800px', margin: '20px 0' }}>
-                
-                {/* 左側：常にHOSTを表示 */}
-                <div style={{ width: '45%' }}>{renderPlayerSide("HOST")}</div>
-                
-                {/* 中央：VS */}
-                <div style={{ width: '10%', textAlign: 'center' }}><span style={styles.vsText}>VS</span></div>
-                
-                {/* 右側：常にCLIENTを表示 */}
-                <div style={{ width: '45%' }}>{renderPlayerSide("CLIENT")}</div>
-              </div>
-
-              <div style={styles.connectedBox}>
-                <div style={styles.modeBox}>
-                  <h3 style={{ margin: '0 0 10px 0', color: '#333' }}>バトルモード</h3>
-                  {role === "HOST" ? (
-                    <select value={gameMode} onChange={(e) => { setGameMode(e.target.value); connection.send({ type: "SYNC_GAMEMODE", gameMode: e.target.value }); }} 
-                      style={{ padding: '8px', fontSize: '16px', borderRadius: '0' }}>
-                      <option value="1">🌀 独楽（見下ろし）モード</option>
-                      <option value="0">⚔️ 剣（横視点・重力）モード</option>
-                    </select>
-                  ) : (
-                    <div style={{ fontSize: '18px', fontWeight: 'bold' }}>
-                      {gameMode === "1" ? "🌀 独楽（見下ろし）モード" : "⚔️ 剣（横視点・重力）モード"}
-                    </div>
-                  )}
-                </div>
-
-                {countdown !== null ? (
-                  <h2 style={{ fontSize: '48px', color: 'red', animation: 'pulse 1s infinite' }}>{countdown > 0 ? countdown : "START!"}</h2>
-                ) : (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '10px 0 20px 0' }}>
-                      {role === "HOST" ? (
-                        <>
-                          <div style={styles.readyBox(isReady)}>自分: {isReady ? "準備OK!" : "準備中..."}</div>
-                          <div style={styles.readyBox(isEnemyReady)}>相手: {isEnemyReady ? "準備OK!" : "準備中..."}</div>
-                        </>
-                      ) : (
-                        <>
-                          <div style={styles.readyBox(isEnemyReady)}>相手: {isEnemyReady ? "準備OK!" : "準備中..."}</div>
-                          <div style={styles.readyBox(isReady)}>自分: {isReady ? "準備OK!" : "準備中..."}</div>
-                        </>
-                      )}
-                    </div>
-                    
-                    <div style={{ display: 'flex', justifyContent: 'center', gap: '15px' }}>
-                      {!isReady ? (
-                        <button
-                          style={{ ...styles.button, backgroundColor: (mySwordData && enemySwordData) ? '#4CAF50' : 'gray', color: 'white' }}
-                          onClick={handleReady}
-                          disabled={!mySwordData || !enemySwordData}
-                        >
-                          {mySwordData && enemySwordData ? "準備完了（バトルへ）" : "剣のデータが不足しています"}
-                        </button>
-                      ) : (
-                        <button
-                          style={{ ...styles.button, backgroundColor: countdown !== null ? 'gray' : '#f44336', color: 'white', cursor: countdown !== null ? 'not-allowed' : 'pointer' }}
-                          onClick={() => { setIsReady(false); connection.send({ type: "SYNC_STATE", isReady: false }); }}
-                          disabled={countdown !== null} 
-                        >
-                          準備を取り消す
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              <div className="ink-btn-container" style={{ marginTop: '30px' }}>
-                <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                <button className="sharp-button" style={{ '--btn-color': '#000' }} onClick={handleLeave}>退出する</button>
-              </div>
-            </div>
-            <style>{`@keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }`}</style>
-          </div>
+          <LobbyScreen 
+            role={role}
+            mySwordData={mySwordData}
+            enemySwordData={enemySwordData}
+            connection={connection}
+            myPeerId={myPeerId}
+            isCopied={isCopied}
+            handleCopyId={handleCopyId}
+            gameMode={gameMode}
+            setGameMode={setGameMode}
+            countdown={countdown}
+            isReady={isReady}
+            setIsReady={setIsReady}
+            isEnemyReady={isEnemyReady}
+            handleReady={handleReady}
+            goToCrafting={goToCrafting}
+            handleLeave={handleLeave}
+          />
         );
 
       case "PLAYING":
@@ -1118,123 +800,21 @@ export default function PoseSwordWeb() {
           </div>
         );
 
-case "RESULT":
+      case "RESULT":
         return (
-          <div style={styles.container}>
-            {matchResult.winnerImageSrc && (
-              <img 
-                src={matchResult.winnerImageSrc} 
-                alt="Winner Background" 
-                style={styles.bgImageCenter} 
-              />
-            )}
-            
-            <div style={styles.contentWrapper}>
-              <h2 style={{ 
-                fontSize: 'clamp(40px, 10vw, 70px)', 
-                fontWeight: '900', 
-                fontStyle: 'italic', 
-                margin: '0 0 20px 0', 
-                color: matchResult.iWon ? '#d32f2f' : '#1976d2', 
-                textShadow: '2px 2px 0px #fff, -2px -2px 0px #fff, 2px -2px 0px #fff, -2px 2px 0px #fff, 4px 4px 10px rgba(0,0,0,0.3)' 
-              }}>
-                {matchResult.iWon ? "YOU WIN!!" : "YOU LOSE..."}
-              </h2>
-
-              <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: '40px', borderRadius: '15px', boxShadow: '0 8px 20px rgba(0,0,0,0.2)', border: `4px solid ${matchResult.iWon ? '#d32f2f' : '#1976d2'}` }}>
-                <h3 style={{ fontSize: 'clamp(20px, 5vw, 32px)', color: '#333', margin: '0 0 25px 0' }}>勝者: {matchResult.winnerName}</h3>
-                <p style={{ fontSize: '20px', margin: '10px 0' }}>与えたダメージ: <strong>{matchResult.damageDealt}</strong></p>
-                <p style={{ fontSize: '20px', margin: '10px 0' }}>受けたダメージ: <strong>{matchResult.damageTaken}</strong></p>
-              </div>
-              
-              {/* ▼ ボタン群を墨ボタン形式に変更 */}
-              <div style={{ marginTop: '40px', display: 'flex', gap: '5%', width: '100%', maxWidth: '500px' }}>
-                
-                {/* 1. ロビーに戻るボタン（緑系の墨ボタン） */}
-                <div className="ink-btn-container" style={{ flex: 1 }}>
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    style={{ '--btn-color': '#4CAF50' }}
-                    onClick={() => {
-                      try { sendMessage('GameManager', 'ResetMatch', ''); } catch(e) {}
-                      setIsReady(false);
-                      setIsEnemyUnityLoaded(false);
-                      if (connRef.current) connRef.current.send({ type: "SYNC_STATE", isReady: false });
-                      setStep("LOBBY");
-                    }}
-                  >
-                    ロビーに戻る
-                  </button>
-                </div>
-
-                {/* 2. 退出するボタン（グレー系の墨ボタン） */}
-                <div className="ink-btn-container" style={{ flex: 1 }}>
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    style={{ '--btn-color': '#666666' }}
-                    onClick={handleLeave}
-                  >
-                    退出する
-                  </button>
-                </div>
-
-              </div>
-            </div>
-          </div>
+          <ResultScreen 
+            matchResult={matchResult}
+            sendMessage={sendMessage}
+            setIsReady={setIsReady}
+            setIsEnemyUnityLoaded={setIsEnemyUnityLoaded}
+            connRef={connRef}
+            setStep={setStep}
+            handleLeave={handleLeave}
+          />
         );
       default: return <div>Error</div>;
     }
   };
 
-  return <div style={{ fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#f5f5f5', minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>{renderScreen()}</div>;
+  return <div style={{ fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#f5f5f5', minHeight: '100vh', position: 'relative', overflowY: 'auto', boxSizing: 'border-box' }}>{renderScreen()}</div>;
 }
-
-const styles = {
-  container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%', fontFamily: 'Kurobara, serif', boxSizing: 'border-box', overflowX: 'hidden' },
-  contentWrapper: { zIndex: 1, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' },
-  
-  bgImageCenter: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', height: '100vh', opacity: 0.15, pointerEvents: 'none', zIndex: 0 },
-
-  button: { padding: '10px 20px', fontSize: '18px', cursor: 'pointer', borderRadius: '5px', fontWeight: 'bold', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' ,fontFamily: 'Kurobara, serif'},
-  input: { padding: '10px', fontSize: '20px', width: '100%', maxWidth: '250px', textAlign: 'center', borderRadius: '5px', border: '2px solid #ccc', boxSizing: 'border-box' },
-  connectedBox: { marginTop: '10px', padding: '20px', backgroundColor: '#ffffff', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' },
-  modeBox: { marginBottom: '20px', padding: '15px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #cce7ff' },
-  video: { width: '100%', maxWidth: '400px', height: 'auto', borderRadius: '8px', backgroundColor: '#000', display: 'block', transform: 'scaleX(-1)' },
-  unityContainer: { width: '100%', maxWidth: '100vw', aspectRatio: '16 / 9', backgroundColor: '#222', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid #555', boxSizing: 'border-box' },
-  readyBox: (isReady) => ({ padding: '10px 20px', border: `2px solid ${isReady ? '#4CAF50' : '#9e9e9e'}`, backgroundColor: isReady ? '#e8f5e9' : '#f5f5f5', borderRadius: '8px', fontWeight: 'bold', minWidth: '100px' }),
-  errorMessage: { padding: '15px 25px', backgroundColor: '#ffdddd', color: '#cc0000', borderRadius: '8px', fontWeight: 'bold', border: '1px solid #cc0000' }, // marginを削除しインラインで制御
-  previewContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', margin: '20px 0', width: '100%', maxWidth: '800px' },
-  swordCard: { width: '100%', backgroundColor: '#fff', borderRadius: '12px', padding: '10px', boxShadow: '0 4px 10px rgba(0,0,0,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', border: '2px solid #e0e0e0', boxSizing: 'border-box' },
-  previewImage: { width: '100%', maxHeight: '200px', objectFit: 'contain', backgroundColor: '#f0f0f0', borderRadius: '8px', marginBottom: '10px' },
-  swordName: { fontSize: 'clamp(14px, 3.5vw, 20px)', fontWeight: 'bold', margin: '5px 0' },
-  statsBox: { display: 'flex', justifyContent: 'center', gap: '5px', fontSize: 'clamp(10px, 2.5vw, 14px)', fontWeight: 'bold', color: '#555', backgroundColor: '#f9f9f9', padding: '5px', borderRadius: '5px', width: '100%', boxSizing: 'border-box', flexWrap: 'wrap' },
-  vsText: { fontSize: 'clamp(16px, 5vw, 36px)', fontWeight: '900', fontStyle: 'italic', color: '#ff9800', textShadow: '2px 2px 0px #000' },
-  countdownOverlay: { 
-    position: 'absolute',
-    top: '20px',
-    left: '50%',
-    transform: 'translateX(-50%)',
-    fontSize: '80px',
-    fontWeight: 'bold',
-    color: 'rgba(255, 255, 255, 0.7)',
-    textShadow: '0 0 20px red, 2px 2px 0px #000, -2px -2px 0px #000, 2px -2px 0px #000, -2px 2px 0px #000',
-    pointerEvents: 'none',
-    zIndex: 10
-  },
-  loadingOverlay: {
-    position: 'absolute',
-    top: 0, left: 0, width: '100%', height: '100%',
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    zIndex: 100
-  },
-  loadingSpinner: {
-    width: '50px', height: '50px',
-    border: '5px solid rgba(255,255,255,0.3)',
-    borderTop: '5px solid orange',
-    borderRadius: '50%',
-    animation: 'spin 1s linear infinite'
-  }
-};
