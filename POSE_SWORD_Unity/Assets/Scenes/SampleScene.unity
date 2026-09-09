@@ -1089,8 +1089,8 @@ MonoBehaviour:
   pointyAngleThreshold: 100
   critThreshold: 3000
   damagePopupPrefab: {fileID: 1265573088081304454, guid: ac1ed211887abce4c909f7a7bfa6e534, type: 3}
-  critEffectPrefab: {fileID: 167464568570872501, guid: 19251962f9b17754ead93755314e8ddf, type: 3}
-  guardEffectPrefab: {fileID: 995215030239813062, guid: be718cabb944a644da14bdc75a71f70b, type: 3}
+  critEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
+  guardEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
   normalHitSound: {fileID: 8300000, guid: 86b0aa7415a27c643886df9c0a811202, type: 3}
   critHitSound: {fileID: 8300000, guid: 7a379e66c22b3de4aa1a4b697e38d3e0, type: 3}
   defeatSound: {fileID: 8300000, guid: 4e2a9b9e78e025242b5c25a6691280c2, type: 3}
@@ -1170,7 +1170,7 @@ MonoBehaviour:
   komaSpinTorque: 1000
   komaHomingForce: 500
   maxKomaSpinSpeed: 2000
-  testKomaMode: 0
+  testKomaMode: 1
 --- !u!82 &287059455
 AudioSource:
   m_ObjectHideFlags: 0
@@ -1994,7 +1994,7 @@ MonoBehaviour:
   komaSpinTorque: 1000
   komaHomingForce: 500
   maxKomaSpinSpeed: 2000
-  testKomaMode: 0
+  testKomaMode: 1
 --- !u!114 &503523103
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2020,8 +2020,8 @@ MonoBehaviour:
   pointyAngleThreshold: 100
   critThreshold: 3000
   damagePopupPrefab: {fileID: 1265573088081304454, guid: ac1ed211887abce4c909f7a7bfa6e534, type: 3}
-  critEffectPrefab: {fileID: 167464568570872501, guid: 19251962f9b17754ead93755314e8ddf, type: 3}
-  guardEffectPrefab: {fileID: 995215030239813062, guid: be718cabb944a644da14bdc75a71f70b, type: 3}
+  critEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
+  guardEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
   normalHitSound: {fileID: 8300000, guid: 86b0aa7415a27c643886df9c0a811202, type: 3}
   critHitSound: {fileID: 8300000, guid: 7a379e66c22b3de4aa1a4b697e38d3e0, type: 3}
   defeatSound: {fileID: 8300000, guid: 4e2a9b9e78e025242b5c25a6691280c2, type: 3}
@@ -2738,7 +2738,7 @@ MonoBehaviour:
   countdownText: {fileID: 1937249877}
   countdownZoomSize: 5.5
   debugBattleJsonFile: {fileID: 0}
-  autoTestOnStart: 0
+  autoTestOnStart: 1
 --- !u!114 &618030781
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4174,7 +4174,7 @@ MonoBehaviour:
   swordBattle: {fileID: 503523103}
   handleObject: {fileID: 473435595}
   targetBladeWidth: 1.5
-  generateOnStart: 0
+  generateOnStart: 1
 --- !u!1 &990760267
 GameObject:
   m_ObjectHideFlags: 0
@@ -4211,7 +4211,7 @@ MonoBehaviour:
   swordBattle: {fileID: 287059451}
   handleObject: {fileID: 1711303185}
   targetBladeWidth: 1.5
-  generateOnStart: 0
+  generateOnStart: 1
 --- !u!4 &990760269
 Transform:
   m_ObjectHideFlags: 0
