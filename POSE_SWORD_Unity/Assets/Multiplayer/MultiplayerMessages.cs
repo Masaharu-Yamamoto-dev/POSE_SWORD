@@ -30,6 +30,11 @@ using System;
     public int hp, dashType;
     public bool isDashing;
     public string targetPlayerId;
+    // 前回SYNC以降にこのプレイヤーが受けた攻撃の種類と位置。
+    // ホストしか衝突判定を持たないので、クリティカル／弱点の演出はここで配る。
+    // ビットは SwordBattle.HitCrit / HitWeakPoint / HitPointValid。
+    public int hitFlags;
+    public float hitX, hitY;
 }
 [Serializable] public class MultiplayerSync
 {

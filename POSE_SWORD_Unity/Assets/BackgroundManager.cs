@@ -24,6 +24,11 @@ public class BackgroundManager : MonoBehaviour
     private float currentShake = 0f;
     private float shakeDecay = 5f;
 
+    // 本来は「2人のHPの綱引き」で境界線を動かす作り。4人戦にはその概念が無いので、
+    // MultiplayerManager から割合を直接渡せるようにしておく。
+    [HideInInspector] public bool useExternalRatio = false;
+    [HideInInspector] public float externalRatio = 0.5f;
+
     void Awake()
     {
         Instance = this;
@@ -91,16 +96,25 @@ public class BackgroundManager : MonoBehaviour
 
     void Update()
     {
-        if (hostSword == null || clientSword == null || rightColorTransform == null) return;
+        if (rightColorTransform == null) return;
 
-        float hostHp = hostSword.hp;
-        float clientHp = clientSword.hp;
-        float totalHp = hostHp + clientHp;
-        
         float ratio = 0.5f;
-        if (totalHp > 0)
+        if (useExternalRatio)
         {
-            ratio = hostHp / totalHp; 
+            ratio = externalRatio;
+        }
+        else
+        {
+            if (hostSword == null || clientSword == null) return;
+
+            float hostHp = hostSword.hp;
+            float clientHp = clientSword.hp;
+            float totalHp = hostHp + clientHp;
+
+            if (totalHp > 0)
+            {
+                ratio = hostHp / totalHp;
+            }
         }
 
         // 少しのダメージでもダイナミックに動く

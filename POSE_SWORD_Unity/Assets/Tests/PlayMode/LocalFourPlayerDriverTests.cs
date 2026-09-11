@@ -129,5 +129,47 @@ public class LocalFourPlayerDriverTests
 
         // The manager must have frozen the match rather than leaving physics running.
         Assert.IsFalse((bool)manager.GetType().GetProperty("IsPlaying").GetValue(manager));
+        Assert.AreEqual(1f, Time.timeScale, 0.0001f, "a finished match must leave time running normally");
+    }
+
+    // 4人戦では TakeDamage が即returnするので、演出は ApplyMultiplayerHealth 経由の
+    // 一本道になる。ここが切れると「当たっているのに何も出ない」に戻る。
+    [UnityTest]
+    public IEnumerator CriticalHitSpawnsItsEffectAndNeverStrandsTimeScale()
+    {
+        yield return null; yield return null; yield return null;
+        float startDeadline = Time.realtimeSinceStartup + 10f;
+        while (!(bool)manager.GetType().GetProperty("IsPlaying").GetValue(manager) &&
+               Time.realtimeSinceStartup < startDeadline) yield return null;
+        Assert.IsTrue((bool)manager.GetType().GetProperty("IsPlaying").GetValue(manager), "match never started");
+
+        // BOTは既定でOFFなので、この一撃以外に衝突は起きない。
+        var swords = GameObject.Find("MultiplayerArena").GetComponentsInChildren(RuntimeType("SwordBattle"));
+        var attacker = swords[0];
+        var target = swords[1];
+        var hp = target.GetType().GetField("hp");
+        int before = (int)hp.GetValue(target);
+        int particlesBefore = UnityEngine.Object.FindObjectsByType<ParticleSystem>(FindObjectsSortMode.None).Length;
+
+        manager.GetType().GetMethod("QueueHit").Invoke(manager,
+            new object[] { attacker, target, 50, true, false, new Vector2(1f, 2f) });
+
+        yield return new WaitForFixedUpdate();
+        yield return null;
+
+        Assert.AreEqual(before - 50, (int)hp.GetValue(target), "MatchRules must still own the HP change");
+        Assert.Greater(UnityEngine.Object.FindObjectsByType<ParticleSystem>(FindObjectsSortMode.None).Length,
+            particlesBefore, "a critical hit must spawn critEffectPrefab");
+
+        // ヒットストップは timeScale を触る。掛かること、そして必ず1に戻ることの両方を見る。
+        bool sawHitStop = Time.timeScale < 1f;
+        float deadline = Time.realtimeSinceStartup + 1f;
+        while (Time.realtimeSinceStartup < deadline)
+        {
+            if (Time.timeScale < 1f) sawHitStop = true;
+            yield return null;
+        }
+        Assert.IsTrue(sawHitStop, "a critical hit must trigger the hit stop");
+        Assert.AreEqual(1f, Time.timeScale, 0.0001f, "timeScale must always come back, or the match freezes for everyone");
     }
 }

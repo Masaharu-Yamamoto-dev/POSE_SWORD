@@ -5,6 +5,9 @@ using TMPro;
 
 public class SwordBattle : MonoBehaviour
 {
+    // 攻撃の種類をSYNCで運ぶためのビット。MultiplayerManager と共有する。
+    public const int HitCrit = 1, HitWeakPoint = 2, HitPointValid = 4;
+
     public MultiplayerManager MultiplayerOwner { get; private set; }
     public string PlayerId { get; private set; }
     public bool IsAlive { get { return !isDead && hp > 0; } }
@@ -123,13 +126,13 @@ public static bool matchEnded = false;
         }
     }
 
-    public void ApplyMultiplayerHealth(int health)
+    public void ApplyMultiplayerHealth(int health, int hitFlags = 0, Vector2 hitPoint = default)
     {
         if (MultiplayerOwner == null || isDead) return;
         int damage = Mathf.Max(0, hp - health);
         if (damage > 0)
         {
-            PlayClientDamageEffect(damage);
+            PlayClientDamageEffect(damage, hitFlags, hitPoint);
             if (MultiplayerOwner.IsHost) currentSp = Mathf.Min(maxSp, currentSp + 100f * damage / maxHp * damageSpMultiplier);
         }
         hp = Mathf.Clamp(health, 0, maxHp); UpdateUI();
@@ -467,7 +470,7 @@ public static bool matchEnded = false;
                 }
                     // ▼変更：TakeDamageの結果（倒したかどうか）を受け取る
                     bool killedTarget = false;
-                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage);
+                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, isCrit, isWeakPoint, hitPoint);
                     else killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
 
                     // ▼追加：もし自分が勝者になったなら、弾き飛ぶのをキャンセル！
@@ -635,15 +638,19 @@ public static bool matchEnded = false;
         Time.timeScale = 0f; 
     }
 
-    public void PlayClientDamageEffect(int damage)
+    // 4人戦では TakeDamage が即returnするため、演出はすべてここを通る。
+    // hitFlags はホストが判定した攻撃の種類（2人戦では常に0なので従来どおりの見た目になる）。
+    public void PlayClientDamageEffect(int damage, int hitFlags = 0, Vector2 hitPoint = default)
     {
         if (isDead || matchEnded) return;
 
-        // ❌ 修正前：一律で通常音が鳴っていた
-        // if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+        bool isCrit = (hitFlags & HitCrit) != 0;
+        bool isWeakPoint = (hitFlags & HitWeakPoint) != 0;
+        bool special = isCrit || isWeakPoint;
+        // 判定情報が無い経路（2人戦のSYNC）は、これまでどおりダメージ量で音を選ぶ。
+        bool heavy = special || damage >= 100;
 
-        // ⭕ 修正後：通信に頼らず、届いたダメージの大きさで通常音とクリティカル音をスマートに分岐！
-        if (damage >= 100)
+        if (heavy)
         {
             if (critHitSound != null) audioSource.PlayOneShot(critHitSound);
         }
@@ -652,24 +659,40 @@ public static bool matchEnded = false;
             if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
         }
 
-        // ▼ 通信相手の画面にもダメージ数値を出す（ここはそのまま）
+        // 当たった位置が分かっていればそこに、無ければ従来どおり剣の周りに散らす。
+        Vector3 effectPos = (hitFlags & HitPointValid) != 0
+            ? new Vector3(hitPoint.x, hitPoint.y, transform.position.z)
+            : transform.position + (Vector3)Random.insideUnitCircle * 1.5f;
+
         if (damagePopupPrefab != null && damage > 0)
         {
-            Vector3 spawnPos = transform.position + (Vector3)Random.insideUnitCircle * 1.5f;
-            GameObject popup = Instantiate(damagePopupPrefab, spawnPos, Quaternion.identity);
+            GameObject popup = Instantiate(damagePopupPrefab, effectPos, Quaternion.identity);
             DamagePopup popupScript = popup.GetComponent<DamagePopup>();
-            if (popupScript != null) popupScript.Setup(damage, damage >= 20);
+            if (popupScript != null) popupScript.Setup(damage, special || damage >= 20);
         }
 
-        // ---（以下、カメラシェイクや決着音の既存コードがそのまま続きます）---
-        if (damage >= 20)
-        {
-            BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
-            if (cam != null) cam.TriggerShake(0.1f, 0.3f);
+        // クリティカル・弱点のパーティクル。従来は TakeDamage 側にしか無く、4人戦では出ていなかった。
+        if (isCrit && critEffectPrefab != null) Instantiate(critEffectPrefab, effectPos, Quaternion.identity);
+        else if (isWeakPoint && guardEffectPrefab != null) Instantiate(guardEffectPrefab, effectPos, Quaternion.identity);
 
-            if (BackgroundManager.Instance != null)
+        if (damage >= 20 || special)
+        {
+            if (MultiplayerOwner != null)
             {
-                BackgroundManager.Instance.TriggerImpact(damage * 0.1f);
+                // カメラも背景も MultiplayerManager が握っているので、そちらへ回す。
+                MultiplayerOwner.TriggerShake(0.1f, 0.3f);
+                MultiplayerOwner.TriggerBackgroundImpact(damage * 0.1f);
+                if (special) MultiplayerOwner.RequestHitStop(0.1f);
+            }
+            else
+            {
+                BattleCamera cam = Camera.main == null ? null : Camera.main.GetComponent<BattleCamera>();
+                if (cam != null) cam.TriggerShake(0.1f, 0.3f);
+
+                if (BackgroundManager.Instance != null)
+                {
+                    BackgroundManager.Instance.TriggerImpact(damage * 0.1f);
+                }
             }
         }
 

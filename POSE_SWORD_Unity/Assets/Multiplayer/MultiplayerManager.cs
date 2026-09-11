@@ -34,6 +34,16 @@ public class MultiplayerManager : MonoBehaviour
     private bool ownsSimulation;
     private BattleCamera battleCamera;
 
+    // 演出。衝突判定を持つのはホストだけなので、攻撃の種類はここで集めて配る。
+    private struct HitEffect { public int Flags; public Vector2 Point; }
+    private readonly Dictionary<string, HitEffect> stepEffects = new Dictionary<string, HitEffect>();
+    private readonly Dictionary<string, HitEffect> syncEffects = new Dictionary<string, HitEffect>();
+    private Vector3 cameraAnchor;
+    private float shakeUntil, shakeMagnitude, hitStopUntil, nextHitStop;
+    // 0.05倍は4人で殴り合うと止まりすぎるので緩め、連続ヒットで常時スローにならないよう間隔を空ける。
+    private const float HitStopScale = .15f;
+    private const float HitStopCooldown = .35f;
+
     void Start() { Emit("READY", new MultiplayerCommand()); }
 
     [UnityEngine.Scripting.Preserve]
@@ -65,7 +75,13 @@ public class MultiplayerManager : MonoBehaviour
             if (network.komaStage != null) network.komaStage.SetActive(false);
             foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsSortMode.None)) canvas.enabled = false;
             foreach (var tutorial in FindObjectsByType<TutorialManager>(FindObjectsSortMode.None)) tutorial.enabled = false;
-            if (BackgroundManager.Instance != null) BackgroundManager.Instance.enabled = false;
+            if (BackgroundManager.Instance != null)
+            {
+                // 背景のオーラは2人のHP比で境界線が動く作り。4人戦では
+                // 「自分のHPが全体に占める割合」に読み替えて動かす（UpdateBackground）。
+                BackgroundManager.Instance.useExternalRatio = true;
+                BackgroundManager.Instance.enabled = true;
+            }
             if (CutinManager.Instance != null) { CutinManager.Instance.StopAllCoroutines(); CutinManager.Instance.enabled = false; }
             Time.timeScale = 1;
             SwordController.isKomaMode = config.gameMode == "1";
@@ -73,6 +89,10 @@ public class MultiplayerManager : MonoBehaviour
             SwordBattle.matchEnded = false;
             battleCamera = Camera.main == null ? null : Camera.main.GetComponent<BattleCamera>();
             if (battleCamera != null) battleCamera.enabled = false;
+            // カメラはここが動かすので、揺れの基準になる素の位置を別に持つ。
+            cameraAnchor = Camera.main == null ? new Vector3(0, 0, -10) : Camera.main.transform.position;
+            stepEffects.Clear(); syncEffects.Clear();
+            shakeUntil = 0; shakeMagnitude = 0; hitStopUntil = 0; nextHitStop = 0;
 
             previousSimulationMode = Physics2D.simulationMode;
             Physics2D.simulationMode = SimulationMode2D.Script;
@@ -196,6 +216,9 @@ public class MultiplayerManager : MonoBehaviour
     void Update()
     {
         if (config == null) return;
+        // コルーチンではなく毎フレームの再評価にすることで、途中で何が起きても必ず戻る。
+        if (IsHost) Time.timeScale = IsPlaying && Time.unscaledTime < hitStopUntil ? HitStopScale : 1f;
+        UpdateBackground();
         if (IsHost && phase == "COUNTDOWN" && Time.unscaledTime >= countdownEnd)
         {
             phase = "PLAYING"; SwordBattle.isRoundStarted = true;
@@ -226,7 +249,12 @@ public class MultiplayerManager : MonoBehaviour
         Physics2D.Simulate(Time.fixedDeltaTime);
         rules.ResolveStep(++physicsTick, hits, forfeits);
         hits.Clear(); forfeits.Clear();
-        foreach (var score in rules.Players) swords[score.PlayerId].ApplyMultiplayerHealth(score.Hp);
+        foreach (var score in rules.Players)
+        {
+            stepEffects.TryGetValue(score.PlayerId, out var effect);
+            swords[score.PlayerId].ApplyMultiplayerHealth(score.Hp, effect.Flags, effect.Point);
+        }
+        stepEffects.Clear();
         if (rules.Ended)
         {
             // Deliver final HP/death state before the separately acknowledged result.
@@ -240,13 +268,70 @@ public class MultiplayerManager : MonoBehaviour
         }
     }
 
-    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage)
+    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage, bool isCrit, bool isWeakPoint, Vector2 point)
     {
         if (!IsHost || !IsPlaying || target.MultiplayerOwner != this || !rules.Get(target.PlayerId).Alive) return;
         // Two dashes clashing in koma mode break each other's guard.
         bool blocked = invulnerable.ContainsKey(target.PlayerId) && invulnerable[target.PlayerId];
         bool clash = SwordController.isKomaMode && invulnerable.ContainsKey(attacker.PlayerId) && invulnerable[attacker.PlayerId];
-        if (!blocked || clash) hits.Add(new Hit(attacker.PlayerId, target.PlayerId, damage));
+        if (blocked && !clash) return;
+        hits.Add(new Hit(attacker.PlayerId, target.PlayerId, damage));
+
+        int flags = SwordBattle.HitPointValid |
+            (isCrit ? SwordBattle.HitCrit : 0) | (isWeakPoint ? SwordBattle.HitWeakPoint : 0);
+        Record(stepEffects, target.PlayerId, flags, point);  // ホスト自身の即時演出用（毎ステップ消費）
+        Record(syncEffects, target.PlayerId, flags, point);  // ゲストへ配る用（SYNCごとに消費）
+    }
+
+    // 同じ区間に複数当たったら、演出はいちばん派手なものを残す。
+    private static void Record(Dictionary<string, HitEffect> into, string id, int flags, Vector2 point)
+    {
+        if (into.TryGetValue(id, out var current) && EffectRank(current.Flags) >= EffectRank(flags)) return;
+        into[id] = new HitEffect { Flags = flags, Point = point };
+    }
+    private static int EffectRank(int flags)
+    {
+        if ((flags & SwordBattle.HitCrit) != 0) return 3;
+        if ((flags & SwordBattle.HitWeakPoint) != 0) return 2;
+        return flags != 0 ? 1 : 0;
+    }
+
+    // カメラはこのクラスが動かしているので、揺れもここが持つ。
+    public void TriggerShake(float duration, float magnitude)
+    {
+        if (config == null) return;
+        shakeUntil = Mathf.Max(shakeUntil, Time.unscaledTime + duration);
+        shakeMagnitude = Mathf.Max(shakeMagnitude, magnitude);
+    }
+
+    // ヒットストップは Time.timeScale を触る。剣側のコルーチンに持たせると
+    // 撃破時の StopAllCoroutines で止まり、timeScale が戻らないまま残る。
+    // ホストが落とせば位置が進まなくなり全員の画面で止まるので、ホストだけが行う。
+    public void RequestHitStop(float duration)
+    {
+        if (!IsHost || !IsPlaying || Time.unscaledTime < nextHitStop) return;
+        nextHitStop = Time.unscaledTime + HitStopCooldown;
+        hitStopUntil = Time.unscaledTime + duration;
+    }
+
+    public void TriggerBackgroundImpact(float strength)
+    {
+        if (BackgroundManager.Instance != null) BackgroundManager.Instance.TriggerImpact(strength);
+    }
+
+    // 自分のHPが全体に占める割合。4人が均等なら 1/4 なので、人数を掛けて 0.5 を「互角」に揃える。
+    void UpdateBackground()
+    {
+        var background = BackgroundManager.Instance;
+        if (background == null || !background.useExternalRatio) return;
+        float total = 0, mine = 0;
+        foreach (var pair in swords)
+        {
+            float hp = Mathf.Max(0, pair.Value.hp);
+            total += hp;
+            if (pair.Key == config.localPlayerId) mine = hp;
+        }
+        background.externalRatio = total > 0 ? Mathf.Clamp01(mine / total * swords.Count / 2f) : .5f;
     }
 
     public void SubmitLocalInput(bool right)
@@ -288,17 +373,21 @@ public class MultiplayerManager : MonoBehaviour
 
     MultiplayerSync Snapshot()
     {
-        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, phase = phase,
+        var snapshot = new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, phase = phase,
             countdownRemaining = phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0,
             players = config.players.Select(p => {
                 var sword = swords[p.playerId]; var pos = sword.transform.position;
                 var center = SwordController.isKomaMode ? (Vector3)bodies[p.playerId].worldCenterOfMass : pos;
                 sword.currentCenterPosition = center;
+                syncEffects.TryGetValue(p.playerId, out var effect);
                 return new MultiplayerPlayerState { playerId = p.playerId, x = pos.x, y = pos.y,
                     rotation = sword.transform.eulerAngles.z, centerX = center.x, centerY = center.y,
                     hp = sword.hp, sp = sword.currentSp, isDashing = sword.isDashing, dashType = sword.currentDashType,
-                    targetPlayerId = targets[p.playerId] };
+                    targetPlayerId = targets[p.playerId],
+                    hitFlags = effect.Flags, hitX = effect.Point.x, hitY = effect.Point.y };
             }).ToArray() };
+        syncEffects.Clear();
+        return snapshot;
     }
 
     [UnityEngine.Scripting.Preserve]
@@ -316,7 +405,7 @@ public class MultiplayerManager : MonoBehaviour
             if (receivedTick < 0) { sword.transform.position = new Vector3(data.x, data.y, 0); sword.transform.rotation = Quaternion.Euler(0, 0, data.rotation); }
             syncTargets[data.playerId] = data;
             sword.currentCenterPosition = new Vector3(data.centerX, data.centerY, 0);
-            sword.ApplyMultiplayerHealth(data.hp);
+            sword.ApplyMultiplayerHealth(data.hp, data.hitFlags, new Vector2(data.hitX, data.hitY));
             sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType);
             targets[data.playerId] = data.targetPlayerId;
         }
@@ -336,7 +425,15 @@ public class MultiplayerManager : MonoBehaviour
         // Reserve the upper part of the viewport for React's four health panels.
         var position = new Vector3(bounds.center.x, bounds.center.y + size * .16f, -10);
         float t = 1 - Mathf.Exp(-5 * Time.unscaledDeltaTime);
-        camera.transform.position = Vector3.Lerp(camera.transform.position, position, t);
+        // 揺らした座標から次のLerpを始めるとブレが構図に溜まるので、素の位置は別に保つ。
+        cameraAnchor = Vector3.Lerp(cameraAnchor, position, t);
+        if (Time.unscaledTime < shakeUntil)
+            camera.transform.position = cameraAnchor + (Vector3)(UnityEngine.Random.insideUnitCircle * shakeMagnitude);
+        else
+        {
+            camera.transform.position = cameraAnchor;
+            shakeMagnitude = 0;
+        }
         camera.orthographicSize = Mathf.Lerp(camera.orthographicSize, size * 1.2f, t);
     }
 
@@ -347,6 +444,7 @@ public class MultiplayerManager : MonoBehaviour
         if (config == null || result == null || result.matchId != config.matchId || phase == "RESULT") return;
         phase = "RESULT"; SwordBattle.matchEnded = true; SwordBattle.isRoundStarted = false;
         foreach (var sword in swords.Values) { sword.StopAllCoroutines(); bodies[sword.PlayerId].simulated = false; }
+        hitStopUntil = 0; shakeUntil = 0; shakeMagnitude = 0;
         Time.timeScale = 1;
     }
     [UnityEngine.Scripting.Preserve]
@@ -366,6 +464,9 @@ public class MultiplayerManager : MonoBehaviour
         if (ownsSimulation) { Physics2D.simulationMode = previousSimulationMode; ownsSimulation = false; }
         swords.Clear(); bodies.Clear(); targets.Clear(); sequences.Clear(); inputTimes.Clear();
         hits.Clear(); forfeits.Clear(); invulnerable.Clear(); syncTargets.Clear();
+        stepEffects.Clear(); syncEffects.Clear();
+        hitStopUntil = 0; shakeUntil = 0; shakeMagnitude = 0; nextHitStop = 0;
+        if (BackgroundManager.Instance != null) BackgroundManager.Instance.useExternalRatio = false;
         config = null; rules = null; phase = "IDLE";
         Time.timeScale = 1; SwordBattle.isRoundStarted = false; SwordBattle.matchEnded = false;
         if (AudioManager.Instance != null) AudioManager.Instance.ResetSoundEffects();

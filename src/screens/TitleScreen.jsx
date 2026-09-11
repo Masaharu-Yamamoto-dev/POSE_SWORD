@@ -12,7 +12,8 @@ export default function TitleScreen({
   handleCreateRoom,
   handleJoinRoom,
   handleCancelJoin,   
-  connectToHost       
+  connectToHost,      
+  goToMultiplayer     
 }) {
   return (
     <div style={styles.container}>
@@ -56,6 +57,21 @@ export default function TitleScreen({
               <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
               <button className="sharp-button" onClick={handleJoinRoom} disabled={!mySwordData}>
                 ロビーに入る
+              </button>
+            </div>
+
+            <div style={{ borderTop: '2px solid #ddd', margin: '10px 0' }}></div>
+
+            {/* 4人個人戦。部屋の作成・参加は MultiplayerGame 側が持っている */}
+            <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
+              <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+              <button
+                className="sharp-button"
+                style={{ '--btn-color': '#9a52c5' }}
+                onClick={goToMultiplayer}
+                disabled={!mySwordData}
+              >
+                👥 4人で対戦
               </button>
             </div>
           </div>
