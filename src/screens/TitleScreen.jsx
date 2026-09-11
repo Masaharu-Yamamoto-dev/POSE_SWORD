@@ -17,7 +17,7 @@ export default function TitleScreen({
   return (
     <div style={styles.container}>
       {mySwordData?.imageSrc && (
-        <img src={mySwordData.imageSrc} alt="Background Sword" style={styles.bgImageCenter} />
+        <img src={mySwordData.imageSrc} alt="Background Sword" style={{ ...styles.bgImageCenter, transform: 'translate(-50%, -50%)' }} />
       )}
       
       <div style={styles.contentWrapper}>
