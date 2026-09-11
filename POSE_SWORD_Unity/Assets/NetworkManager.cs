@@ -97,11 +97,16 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
+    // ▼【新規追加】React（WebGL）が存在しない環境でも送信内容を受け取れるようにする出口。
+    // Unityエディタのローカル対戦ドライバが、Reactの代わりにここへ接続する。
+    public event System.Action<string, string> LocalMessageSink;
+
     public void SendData(string type, string jsonString)
     {
         #if UNITY_WEBGL && !UNITY_EDITOR
             SendToReact(type, jsonString);
         #endif
+        if (LocalMessageSink != null) LocalMessageSink(type, jsonString);
     }
 
     // HOST：タイマーで正確に30fpsに間引いて送信

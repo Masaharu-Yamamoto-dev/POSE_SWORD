@@ -32,6 +32,14 @@ public class MultiplayerSceneTests
     public IEnumerator LoadScene()
     {
         yield return SceneManager.LoadSceneAsync("SampleScene");
+        // These tests drive MultiplayerManager directly, so the editor-only local
+        // driver must not also start a match or inject bot input alongside them.
+        var driver = GameObject.Find("GameManager").GetComponent(RuntimeType("LocalFourPlayerDriver"));
+        if (driver != null)
+        {
+            driver.GetType().GetField("autoStart").SetValue(driver, false);
+            UnityEngine.Object.DestroyImmediate(driver);
+        }
         yield return null;
         manager = GameObject.Find("GameManager").GetComponent(RuntimeType("MultiplayerManager"));
         Assert.IsNotNull(manager);

@@ -2710,6 +2710,7 @@ GameObject:
   - component: {fileID: 618030781}
   - component: {fileID: 618030780}
   - component: {fileID: 618030783}
+  - component: {fileID: 629368974}
   m_Layer: 0
   m_Name: GameManager
   m_TagString: Untagged
@@ -2784,6 +2785,32 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   mainMixer: {fileID: 24100000, guid: 17ff803b41988424c9baf371725929f7, type: 2}
+--- !u!114 &629368974
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 618030779}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1a95cdab7a3c44b4a05a61d11869db9a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  autoStart: 1
+  playerCount: 4
+  komaMode: 0
+  hitPoints: 300
+  swordJsonFiles: []
+  swordImages:
+  - {fileID: 2800000, guid: c85a2c87d8f9ae84882836d5323dd3ef, type: 3}
+  - {fileID: 2800000, guid: 60de0c56ea193f74bb88fa21a0648b4c, type: 3}
+  - {fileID: 2800000, guid: c85a2c87d8f9ae84882836d5323dd3ef, type: 3}
+  - {fileID: 2800000, guid: 60de0c56ea193f74bb88fa21a0648b4c, type: 3}
+  enableBots: 0
+  botTakeoverDelay: 3
+  botInterval: 0.5
+  showHud: 1
 --- !u!1 &619394800
 GameObject:
   m_ObjectHideFlags: 0
