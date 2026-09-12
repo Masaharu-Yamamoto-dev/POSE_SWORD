@@ -12,8 +12,8 @@ export default function TitleScreen({
   handleCreateRoom,
   handleJoinRoom,
   handleCancelJoin,   
-  connectToHost,      
-  onStartMultiplayer  
+  connectToHost,
+  connecting
 }) {
   return (
     <div style={styles.container}>
@@ -40,30 +40,21 @@ export default function TitleScreen({
             
             <div style={{ borderTop: '2px solid #ddd', margin: '10px 0' }}></div>
             
-            {!mySwordData && (
-              <p style={{ color: '#888', fontSize: '14px', margin: '0 0 -10px 0', fontWeight: 'bold' }}>
-                対戦するには、先に剣を錬成してください
-              </p>
-            )}
+            <p style={{ color: '#888', fontSize: '14px', margin: '0 0 -10px 0', fontWeight: 'bold' }}>
+              {mySwordData ? "2〜4人で対戦できます" : "対戦するには、先に剣を錬成してください"}
+            </p>
 
             <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
               <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-              <button className="sharp-button" onClick={handleCreateRoom} disabled={!mySwordData}>
+              <button className="sharp-button" onClick={handleCreateRoom} disabled={!mySwordData || connecting}>
                 ロビーを作成
               </button>
             </div>
 
             <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
               <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-              <button className="sharp-button" onClick={handleJoinRoom} disabled={!mySwordData}>
+              <button className="sharp-button" onClick={handleJoinRoom} disabled={!mySwordData || connecting}>
                 ロビーに入る
-              </button>
-            </div>
-
-            <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
-              <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-              <button className="sharp-button" onClick={onStartMultiplayer} disabled={!mySwordData}>
-                4人個人戦
               </button>
             </div>
           </div>
@@ -106,6 +97,7 @@ export default function TitleScreen({
                   transition: 'background-color 0.1s'
                 }} 
                 onClick={connectToHost}
+                disabled={connecting}
               >
                 接続
               </button>

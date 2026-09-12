@@ -61,6 +61,18 @@ Mono用ランナーは引数なしの`[Test]`メソッドのみを実行し、Un
 6. 退出後の状態遷移を修正し、JavaScript全13件を成功させた。
 7. 不正入力・整数上限・全衝突順序の検証を追加し、C#全10件を成功させた。
 
+## 2026-09-12 の変更：2〜4人の可変人数に統合
+
+「4人個人戦」専用画面をやめ、タイトルの「ロビーを作成」「ロビーに入る」を唯一の対戦導線にした。部屋は常に4席で、在室している2〜4人がそのまま試合の人数になる。
+
+- `HostRoom`：定員選択（`setCapacity`）を廃止し、`MAX_PLAYERS`（4席）と`MIN_PLAYERS`（2人）に置き換えた。`canStart()`は「在室2人以上・全員が接続中・準備完了・ロビー在室」で成立する。退室・中止のたびに`compactSlots()`でスロットを0..n-1へ詰める（Unityが連番のスロットを要求するため）。
+- `RoomSession`：出現位置の抽選を定員ではなく参加人数で行う。武器の持ち替えを部屋へ伝える`SWORD`メッセージと`updateSword()`を追加した。パケット仕様が変わったため`PROTOCOL_VERSION`を3へ上げた。
+- Unity：`MatchRules`と`MultiplayerManager.ValidateConfig`が2〜4人を受け付ける。`SpawnPosition`は人数に応じて配置する（剣モードは横一列に等間隔、独楽モードの3人は三角配置）。
+- 画面：`src/screens/LobbyScreen.jsx`が実際の名簿を表示し（自分＋他3席、空き枠は「参加を待っています」）、ホストの「◯人で対戦開始」ボタンを持つ。対戦画面は`src/components/BattleArena.jsx`、結果は`src/screens/ResultScreen.jsx`の順位表に統合した。`src/components/MultiplayerGame.jsx`は削除。
+- 旧2人専用の通信（`App.jsx`のPeerJS直結）と`ver2.10`ビルドの対戦導線は使わなくなった。
+
+WebGLビルド（`public/multiplayer/`）はこのリポジトリに未生成のため、Unity Editorの「POSE SWORD/Build four-player WebGL」で作成する必要がある。
+
 ## 残りの実装
 
 1. PeerJSの接続管理を`HostRoom`に接続し、3接続の配布・ACK・期限・ハートビートを実装する。
@@ -68,7 +80,7 @@ Mono用ランナーは引数なしの`[Test]`メソッドのみを実行し、Un
 3. Unityの剣・HUDの生成、入力先、ターゲット、カメラを人物IDに対応させる。
 4. 物理ステップ後の攻撃集約を実装し、`MatchRules`の結果をHP・脱落・終了演出へ反映する。
 5. 人数配列のSYNCと試合IDをReact–Unity間で共有し、再戦時に初期化する。
-6. WebGLを再ビルドし、4台で両モード・切断・性能・既存2人戦の回帰を検証する。
+6. WebGLを再ビルドし、2〜4台で両モード・切断・性能を検証する。
 
 ## 実行環境の制約
 

@@ -1,0 +1,8 @@
+.mp-arena { position: relative; width: 100%; aspect-ratio: 16/9; max-width: 1400px; margin: 0 auto; background: #20252b; }
+.mp-hud { position: absolute; left: 1%; top: 1%; width: 98%; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; pointer-events: none; }
+.mp-hud > div { background: #fffe; border-top: 4px solid; padding: 6px; font-size: clamp(9px, 1.2vw, 15px); text-align: left; }
+.mp-hud strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-hud progress { width: 100%; accent-color: #388b3c; height: 10px; display: block; }
+.mp-self { outline: 2px solid white; box-shadow: 0 0 0 4px #222; }
+.mp-status, .mp-loading { position: absolute; left: 10%; width: 80%; top: 45%; color: white; background: #000a; padding: 12px; box-sizing: border-box; pointer-events: none; text-align: center; font-weight: bold; }
+.mp-status { font-size: clamp(16px, 4vw, 40px); }

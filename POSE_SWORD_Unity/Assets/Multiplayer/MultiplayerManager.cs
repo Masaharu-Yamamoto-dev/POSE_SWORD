@@ -95,7 +95,7 @@ public class MultiplayerManager : MonoBehaviour
 
     void ValidateConfig()
     {
-        if (config.players == null || !new[] { 2, 4 }.Contains(config.players.Length) || !new[] { "0", "1" }.Contains(config.gameMode) ||
+        if (config.players == null || config.players.Length < 2 || config.players.Length > 4 || !new[] { "0", "1" }.Contains(config.gameMode) ||
             !config.players.Any(p => p != null && p.playerId == config.localPlayerId) ||
             config.players.Any(p => p == null || p.swordData == null || string.IsNullOrEmpty(p.playerId)) ||
             config.players.Select(p => p.playerId).Distinct().Count() != config.players.Length ||
@@ -150,10 +150,13 @@ public class MultiplayerManager : MonoBehaviour
         obj.SetActive(true);
     }
 
+    // Two to four players share one arena: spread them evenly instead of assuming four seats.
     Vector3 SpawnPosition(int slot)
     {
-        if (config.players.Length == 2) return new Vector3(slot == 0 ? -8 : 8, 0, 0);
-        if (config.gameMode == "0") return new Vector3(-15 + slot * 10, 0, 0);
+        int count = config.players.Length;
+        if (count == 2) return new Vector3(slot == 0 ? -8 : 8, 0, 0);
+        if (config.gameMode == "0") return new Vector3(-15 + slot * (30f / (count - 1)), 0, 0);
+        if (count == 3) return new Vector3(slot == 0 ? 0 : slot == 1 ? -9 : 9, slot == 0 ? 7 : -5, 0);
         return new Vector3(slot % 2 == 0 ? -8 : 8, slot < 2 ? -6 : 6, 0);
     }
 

@@ -1,5 +1,8 @@
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const MAX_IMAGE_LENGTH = 4 * 1024 * 1024;
+// 部屋は常に4席。開始は在室者が2人以上で、その人数のまま試合を始める。
+export const MAX_PLAYERS = 4;
+export const MIN_PLAYERS = 2;
 
 export function validateSword(sword) {
   if (!sword || typeof sword.name !== 'string' || !sword.name.trim() || sword.name.length > 100 ||
@@ -15,9 +18,9 @@ export function validateSword(sword) {
 
 // The host owns this model. Transport identities never come from packet playerId fields.
 export class HostRoom {
-  constructor({ capacity = 4, roomEpoch, hostSword }) {
-    if (![2, 4].includes(capacity) || !roomEpoch) throw new Error('Invalid room configuration');
-    this.capacity = capacity;
+  constructor({ roomEpoch, hostSword }) {
+    if (!roomEpoch) throw new Error('Invalid room configuration');
+    this.maxPlayers = MAX_PLAYERS;
     this.roomEpoch = roomEpoch;
     this.gameMode = '0';
     this.phase = 'LOBBY';
@@ -38,12 +41,12 @@ export class HostRoom {
 
   snapshot() {
     return structuredClone({ protocolVersion: PROTOCOL_VERSION, roomEpoch: this.roomEpoch,
-      revision: this.revision, readyVersion: this.readyVersion, capacity: this.capacity, gameMode: this.gameMode,
+      revision: this.revision, readyVersion: this.readyVersion, maxPlayers: this.maxPlayers, gameMode: this.gameMode,
       phase: this.phase, matchId: this.matchId, players: this.players });
   }
 
   reserve(connectionId) {
-    if (this.phase !== 'LOBBY' || this.connections.has(connectionId) || this.connections.size >= this.capacity - 1) return false;
+    if (this.phase !== 'LOBBY' || this.connections.has(connectionId) || this.connections.size >= this.maxPlayers - 1) return false;
     this.connections.set(connectionId, null);
     return true;
   }
@@ -52,7 +55,7 @@ export class HostRoom {
     if (!this.connections.has(connectionId) || this.connections.get(connectionId) !== null || this.phase !== 'LOBBY') {
       throw new Error('入室を受け付けられません。');
     }
-    const slot = Array.from({ length: this.capacity }, (_, i) => i).find(i => !this.players.some(p => p.slotIndex === i));
+    const slot = Array.from({ length: this.maxPlayers }, (_, i) => i).find(i => !this.players.some(p => p.slotIndex === i));
     const player = this.makePlayer(`p${this.nextPlayer++}`, slot, sword);
     this.connections.set(connectionId, player.playerId);
     this.players.push(player);
@@ -63,20 +66,12 @@ export class HostRoom {
   playerForConnection(connectionId) { return this.connections.get(connectionId); }
   get(playerId) { return this.players.find(p => p.playerId === playerId); }
   resetReady() { this.players.forEach(p => { p.ready = false; p.loaded = false; }); this.revision++; this.readyVersion++; }
+  // Unity requires slots 0..n-1, so vacated seats close up while the room waits in the lobby.
+  compactSlots() { this.players.sort((a, b) => a.slotIndex - b.slotIndex).forEach((p, i) => { p.slotIndex = i; }); }
 
   setGameMode(mode) {
     if (this.phase !== 'LOBBY' || !['0', '1'].includes(mode)) throw new Error('モードを変更できません。');
     this.gameMode = mode;
-    this.resetReady();
-  }
-
-  setCapacity(capacity) {
-    if (this.phase !== 'LOBBY' || ![2, 4].includes(capacity) || this.connections.size + 1 > capacity) {
-      throw new Error('参加者と接続待ちの人数より少ない定員には変更できません。');
-    }
-    if (capacity === this.capacity) return;
-    this.capacity = capacity;
-    this.players.sort((a, b) => a.slotIndex - b.slotIndex).forEach((p, i) => { p.slotIndex = i; });
     this.resetReady();
   }
 
@@ -96,7 +91,7 @@ export class HostRoom {
   }
 
   canStart() {
-    return this.phase === 'LOBBY' && this.players.length === this.capacity &&
+    return this.phase === 'LOBBY' && this.players.length >= MIN_PLAYERS && this.players.length <= this.maxPlayers &&
       this.players.every(p => p.connected && p.ready && p.inLobby);
   }
 
@@ -149,6 +144,7 @@ export class HostRoom {
     }
     if (this.phase === 'PLAYING') return { kind: 'FORFEIT', playerId };
     this.players = this.players.filter(p => p.connected);
+    this.compactSlots();
     if (this.phase === 'RESULT' && this.players.every(p => p.inLobby)) this.phase = 'LOBBY';
     this.resetReady();
     return { kind: 'LEFT', playerId };
@@ -158,6 +154,7 @@ export class HostRoom {
     this.phase = 'LOBBY';
     this.players = this.players.filter(p => p.connected);
     this.players.forEach(p => { p.inLobby = true; });
+    this.compactSlots();
     this.resetReady();
   }
 
@@ -174,6 +171,7 @@ export class HostRoom {
     if (!player?.connected) return false;
     player.inLobby = true;
     this.players = this.players.filter(p => p.connected);
+    this.compactSlots();
     if (this.players.every(p => p.inLobby)) this.phase = 'LOBBY';
     this.revision++;
     return true;

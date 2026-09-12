@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { HostRoom } from '../src/network/HostRoom.js';
 
 const sword = { name: 'テスト剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
-function fullRoom(capacity = 4) {
-  const room = new HostRoom({ capacity, roomEpoch: 'room-a', hostSword: sword });
-  for (let i = 1; i < capacity; i++) {
+function fullRoom(count = 4) {
+  const room = new HostRoom({ roomEpoch: 'room-a', hostSword: sword });
+  for (let i = 1; i < count; i++) {
     room.reserve(`peer-${i}`);
     room.join(`peer-${i}`, sword);
   }
@@ -14,7 +14,7 @@ function fullRoom(capacity = 4) {
 }
 
 test('pending connections reserve seats synchronously, including the host', () => {
-  const room = new HostRoom({ capacity: 4, roomEpoch: 'a', hostSword: sword });
+  const room = new HostRoom({ roomEpoch: 'a', hostSword: sword });
   assert.equal(room.reserve('a'), true);
   assert.equal(room.reserve('b'), true);
   assert.equal(room.reserve('c'), true);
@@ -35,13 +35,34 @@ test('players keep distinct IDs when a vacated seat is reused', () => {
   assert.ok(room.snapshot().players.every(p => !p.ready));
 });
 
-test('four-player room cannot start with three players or an unready player', () => {
+test('any two to four ready players may start, but not one and not a half-ready room', () => {
   const room = fullRoom();
   room.setReady(room.playerForConnection('peer-3'), false);
   assert.equal(room.canStart(), false);
   room.removeConnection('peer-3');
+  assert.equal(room.canStart(), false); // 入退室は全員の準備を解除する
+  assert.throws(() => room.prepare());
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  assert.equal(room.canStart(), true);
+  assert.equal(room.prepare().players.length, 3);
+});
+
+test('a lone host cannot start a match', () => {
+  const room = new HostRoom({ roomEpoch: 'a', hostSword: sword });
+  room.setReady('p0', true);
   assert.equal(room.canStart(), false);
   assert.throws(() => room.prepare());
+});
+
+test('vacated seats close up so slots stay contiguous for the arena', () => {
+  const room = fullRoom();
+  room.removeConnection('peer-1');
+  assert.deepEqual(room.snapshot().players.map(p => p.slotIndex), [0, 1, 2]);
+  assert.deepEqual(room.snapshot().players.map(p => p.playerId), ['p0', 'p2', 'p3']);
+  room.reserve('late'); room.join('late', sword);
+  assert.deepEqual(room.snapshot().players.map(p => p.slotIndex), [0, 1, 2, 3]);
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  assert.deepEqual(room.prepare().players.map(p => p.slotIndex).sort(), [0, 1, 2, 3]);
 });
 
 test('all four initialize the same match before the countdown starts', () => {
@@ -109,7 +130,7 @@ test('rematch uses a new match ID and clears previous load/input state', () => {
   assert.equal(room.snapshot().phase, 'LOADING');
 });
 
-test('two-player capacity uses the same lifecycle', () => {
+test('a two-player room uses the same lifecycle', () => {
   const room = fullRoom(2);
   assert.equal(room.canStart(), true);
   assert.equal(room.prepare().players.length, 2);
@@ -146,7 +167,7 @@ test('configuration changes invalidate all ready states and are locked during lo
 });
 
 test('invalid join does not occupy a permanent player seat', () => {
-  const room = new HostRoom({ capacity: 4, roomEpoch: 'a', hostSword: sword });
+  const room = new HostRoom({ roomEpoch: 'a', hostSword: sword });
   room.reserve('bad');
   assert.throws(() => room.join('bad', { ...sword, hp: -1 }));
   assert.equal(room.snapshot().players.length, 1);
@@ -156,21 +177,4 @@ test('invalid join does not occupy a permanent player seat', () => {
     room.join(id, sword);
   }
   assert.equal(room.snapshot().players.length, 4);
-});
-
-test('capacity changes count reserved seats, clear ready states and compact vacant slots', () => {
-  const room = fullRoom();
-  assert.throws(() => room.setCapacity(2));
-  room.removeConnection('peer-1'); room.removeConnection('peer-2');
-  room.reserve('pending');
-  assert.throws(() => room.setCapacity(2));
-  room.removeConnection('pending');
-  room.setReady('p0', true);
-  room.setCapacity(2);
-  assert.deepEqual(room.snapshot().players.map(p => p.slotIndex), [0, 1]);
-  assert.equal(room.snapshot().players[1].playerId, 'p3');
-  assert.ok(room.snapshot().players.every(p => !p.ready));
-  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
-  room.prepare();
-  assert.throws(() => room.setCapacity(4));
 });

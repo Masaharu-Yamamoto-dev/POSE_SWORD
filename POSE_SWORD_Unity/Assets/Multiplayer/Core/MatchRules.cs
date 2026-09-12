@@ -55,10 +55,10 @@ namespace PoseSword.Multiplayer
         public MatchRules(string[] playerIds, int[] hitPoints)
         {
             if (playerIds == null || hitPoints == null ||
-                (playerIds.Length != 2 && playerIds.Length != 4) || playerIds.Length != hitPoints.Length ||
+                playerIds.Length < 2 || playerIds.Length > 4 || playerIds.Length != hitPoints.Length ||
                 playerIds.Any(string.IsNullOrWhiteSpace) || playerIds.Distinct().Count() != playerIds.Length ||
                 hitPoints.Any(hp => hp < 1 || hp > 1000))
-                throw new ArgumentException("A match requires two or four distinct players with valid HP.");
+                throw new ArgumentException("A match requires two to four distinct players with valid HP.");
 
             var roster = playerIds.Select((id, slot) => new PlayerScore(id, slot, hitPoints[slot])).ToList();
             players = roster.AsReadOnly();

@@ -123,9 +123,24 @@ public class MatchRulesTests
     public void InvalidRosterIsRejected()
     {
         Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "a", "a" }, new[] { 100, 100 }));
-        Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "a", "b", "c" }, new[] { 100, 100, 100 }));
+        Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "a" }, new[] { 100 }));
+        Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "a", "b", "c", "d", "e" }, new[] { 100, 100, 100, 100, 100 }));
         Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "a", "b" }, new[] { 0, 100 }));
         Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "a", "b" }, new[] { 100 }));
+    }
+
+    [Test]
+    public void ThreePlayersRankBySurvivalLikeFour()
+    {
+        var match = new MatchRules(new[] { "a", "b", "c" }, new[] { 100, 100, 100 });
+        match.ResolveStep(1, new[] { new Hit("a", "b", 100) });
+        Assert.IsFalse(match.Ended);
+        Assert.AreEqual(3, match.Get("b").Rank);
+        match.ResolveStep(2, new[] { new Hit("c", "a", 100) });
+        Assert.IsTrue(match.Ended);
+        Assert.AreEqual("c", match.WinnerId);
+        Assert.AreEqual(2, match.Get("a").Rank);
+        Assert.AreEqual(1, match.Get("c").Rank);
     }
 
     [Test]
