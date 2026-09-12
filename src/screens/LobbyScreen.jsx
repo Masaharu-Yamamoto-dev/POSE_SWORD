@@ -13,14 +13,22 @@ export default function LobbyScreen({
 
   const isHost = view.isHost;
   const gameMode = room.gameMode;
+  const seatLimit = room.seatLimit ?? MAX_PLAYERS;
+  // ランダムマッチの部屋は準備ボタンを使わず、人数がそろえば自動で始まる。
+  const auto = Boolean(room.autoStart);
   const playerCount = room.players.length;
   const readyCount = room.players.filter(p => p.ready).length;
-  const otherSeats = Array.from({ length: MAX_PLAYERS }, (_, slot) => slot)
+  const otherSeats = Array.from({ length: seatLimit }, (_, slot) => slot)
     .filter(slot => slot !== me.slotIndex)
     .map(slot => ({ slot, player: room.players.find(p => p.slotIndex === slot) }));
 
-  const status =
-    playerCount < MIN_PLAYERS ? `参加者を待っています（最低${MIN_PLAYERS}人・最大${MAX_PLAYERS}人）`
+  const autoStatus =
+    room.startsInMs == null ? `対戦相手を待っています（あと${Math.max(0, MIN_PLAYERS - playerCount)}人で開始）`
+    : room.startsInMs <= 10000 ? 'まもなく開始します'
+    : `${Math.ceil(room.startsInMs / 1000)}秒以内に開始します`;
+
+  const status = auto ? autoStatus
+    : playerCount < MIN_PLAYERS ? `参加者を待っています（最低${MIN_PLAYERS}人・最大${seatLimit}人）`
     : readyCount < playerCount ? `準備完了 ${readyCount} / ${playerCount}人`
     : isHost ? `${playerCount}人全員の準備が完了。対戦を開始できます`
     : `${playerCount}人全員の準備が完了。ホストの開始を待っています`;
@@ -45,8 +53,8 @@ export default function LobbyScreen({
                   return (
                     <div
                       key={sword.id}
-                      onClick={() => { if (!me.ready) equipSword(sword); }}
-                      style={{ position: 'relative', width: '60px', height: '60px', backgroundColor: 'white', borderRadius: '10px', border: isEquippedSlot ? '4px solid #2196F3' : '2px solid #ccc', cursor: (isEquippedSlot || me.ready) ? 'default' : 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', opacity: (isEquippedSlot || !me.ready) ? 1 : 0.5, transition: '0.2s' }}
+                      onClick={() => { if (!me.ready && !auto) equipSword(sword); }}
+                      style={{ position: 'relative', width: '60px', height: '60px', backgroundColor: 'white', borderRadius: '10px', border: isEquippedSlot ? '4px solid #2196F3' : '2px solid #ccc', cursor: (isEquippedSlot || me.ready || auto) ? 'default' : 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', opacity: (isEquippedSlot || (!me.ready && !auto)) ? 1 : 0.5, transition: '0.2s' }}
                     >
                       {isEquippedSlot && <div style={{ position: 'absolute', top: -5, left: -5, width: '110%', backgroundColor: '#2196F3', color: 'white', fontSize: '10px', fontWeight: 'bold' }}>装備</div>}
                       <img src={sword.imageSrc} alt="" style={{ maxWidth: '80%', maxHeight: '80%' }} />
@@ -66,31 +74,38 @@ export default function LobbyScreen({
                 <span style={{ color: '#558b2f' }}>重: {mySwordData.weight}</span>
               </div>
 
-              <div style={{ display: 'flex', gap: '15px', width: '100%', maxWidth: '400px' }}>
-                <button
-                  style={{ flex: 1, padding: '15px', fontSize: '18px', backgroundColor: me.ready ? '#ccc' : '#607d8b', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: me.ready ? 'not-allowed' : 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
-                  onClick={() => goToCrafting("LOBBY")}
-                  disabled={me.ready}
-                >
-                  🔧 武器庫へ
-                </button>
+              {auto ? (
+                <p style={{ margin: 0, padding: '12px 20px', backgroundColor: '#e8f5e9', borderRadius: '8px',
+                  fontWeight: 'bold', color: '#2e7d32' }}>
+                  この装備で参戦します
+                </p>
+              ) : (
+                <div style={{ display: 'flex', gap: '15px', width: '100%', maxWidth: '400px' }}>
+                  <button
+                    style={{ flex: 1, padding: '15px', fontSize: '18px', backgroundColor: me.ready ? '#ccc' : '#607d8b', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: me.ready ? 'not-allowed' : 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
+                    onClick={() => goToCrafting("LOBBY")}
+                    disabled={me.ready}
+                  >
+                    🔧 武器庫へ
+                  </button>
 
-                {!me.ready ? (
-                  <button
-                    style={{ flex: 1.5, padding: '15px', fontSize: '18px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
-                    onClick={() => onReady(true)}
-                  >
-                    ✅ 準備完了
-                  </button>
-                ) : (
-                  <button
-                    style={{ flex: 1.5, padding: '15px', fontSize: '18px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', boxShadow: 'inset 0 4px 6px rgba(0,0,0,0.2)' }}
-                    onClick={() => onReady(false)}
-                  >
-                    🔄 準備取消
-                  </button>
-                )}
-              </div>
+                  {!me.ready ? (
+                    <button
+                      style={{ flex: 1.5, padding: '15px', fontSize: '18px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
+                      onClick={() => onReady(true)}
+                    >
+                      ✅ 準備完了
+                    </button>
+                  ) : (
+                    <button
+                      style={{ flex: 1.5, padding: '15px', fontSize: '18px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', boxShadow: 'inset 0 4px 6px rgba(0,0,0,0.2)' }}
+                      onClick={() => onReady(false)}
+                    >
+                      🔄 準備取消
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
              <div style={{ height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>剣がありません</div>
@@ -148,7 +163,7 @@ export default function LobbyScreen({
                 {playerCount >= 3 ? "最後の1人になるまで戦う個人戦" : gameMode === "1" ? "独楽のようにぶつかり合う半自動戦闘モード" : "剣を振り回して戦うモード"}
               </p>
 
-              {isHost && (
+              {isHost && !auto && (
                 <button
                   style={{ padding: '8px 15px', backgroundColor: '#2196F3', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}
                   onClick={() => onGameMode(gameMode === "1" ? "0" : "1")}
@@ -163,25 +178,32 @@ export default function LobbyScreen({
         {/* 右下：ID・開始・退出 */}
         <div className="lobby-panel system-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
 
-          <div style={{ backgroundColor: '#e8eaf6', padding: '15px', borderRadius: '8px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ textAlign: 'left' }}>
-              <span style={{ fontSize: '12px', color: '#666', display: 'block' }}>ロビーID</span>
-              <span style={{ fontSize: '24px', fontWeight: 'bold', letterSpacing: '2px', color: '#3f51b5' }}>{roomId || "----"}</span>
+          {auto ? (
+            <div style={{ backgroundColor: '#fdecea', padding: '15px', borderRadius: '8px', marginBottom: '15px' }}>
+              <span style={{ fontSize: '12px', color: '#666', display: 'block' }}>対戦形式</span>
+              <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#c62828' }}>⚡ ランダムマッチ</span>
             </div>
-            <button
-              onClick={handleCopyId}
-              style={{ padding: '10px 15px', backgroundColor: isCopied ? '#4CAF50' : '#fff', color: isCopied ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              {isCopied ? "✓ コピー" : "📋 コピー"}
-            </button>
-          </div>
+          ) : (
+            <div style={{ backgroundColor: '#e8eaf6', padding: '15px', borderRadius: '8px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ textAlign: 'left' }}>
+                <span style={{ fontSize: '12px', color: '#666', display: 'block' }}>ロビーID</span>
+                <span style={{ fontSize: '24px', fontWeight: 'bold', letterSpacing: '2px', color: '#3f51b5' }}>{roomId || "----"}</span>
+              </div>
+              <button
+                onClick={handleCopyId}
+                style={{ padding: '10px 15px', backgroundColor: isCopied ? '#4CAF50' : '#fff', color: isCopied ? '#fff' : '#333', border: '1px solid #ccc', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                {isCopied ? "✓ コピー" : "📋 コピー"}
+              </button>
+            </div>
+          )}
 
           <p style={{ margin: '0 0 12px 0', fontWeight: 'bold', color: '#333' }}>
-            現在 {playerCount}人 ／ 最大 {MAX_PLAYERS}人
+            現在 {playerCount}人 ／ 最大 {seatLimit}人
             <span style={{ display: 'block', fontSize: '13px', fontWeight: 'normal', color: '#666', marginTop: '4px' }}>{status}</span>
           </p>
 
-          {isHost && (
+          {isHost && !auto && (
             <button
               style={{ padding: '15px', fontSize: '20px', backgroundColor: view.canStart ? '#d32f2f' : '#ccc', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: view.canStart ? 'pointer' : 'not-allowed', width: '100%', marginBottom: '10px' }}
               onClick={onStart}

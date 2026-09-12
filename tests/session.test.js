@@ -21,15 +21,15 @@ function network() {
   return { link, flush() { let n = 0; while (queue.length) { if (++n > 10000) throw Error('message loop'); queue.shift()(); } } };
 }
 
-function setup() {
+function setup(hostOptions = {}, guestCount = 3) {
   const net = network();
   let now = 0;
   const commands = [[], [], [], []];
   const host = new RoomSession({ isHost: true, roomEpoch: 'epoch', sword, now: () => now,
-    onUnity: c => commands[0].push(c) });
+    onUnity: c => commands[0].push(c), ...hostOptions });
   const guests = [];
   const links = [];
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= guestCount; i++) {
     const guest = new RoomSession({ sword, now: () => now, onUnity: c => commands[i].push(c) });
     const [a, b] = net.link(`peer-${i}`);
     host.attach(a); guest.attach(b);
@@ -37,6 +37,15 @@ function setup() {
     net.flush();
   }
   return { host, guests, links, commands, net, advance(ms) { now += ms; } };
+}
+
+// 実時間を1秒ずつ進める。両側をpumpしないとハートビートが途切れて切断扱いになる。
+function tick(s, seconds) {
+  for (let i = 0; i < seconds; i++) {
+    s.advance(1000);
+    s.guests.forEach(g => g.pump()); s.net.flush();
+    s.host.pump(); s.net.flush();
+  }
 }
 
 function start(s) {
@@ -235,6 +244,62 @@ test('a weapon change reaches the host, clears that player ready state and re-se
   assert.equal(roster.find(p => p.playerId === playerId).ready, false);
   assert.equal(s.guests[1].view().room.players.find(p => p.playerId === playerId).swordData.imageStr, other.imageStr);
   assert.equal(s.host.view().canStart, false);
+});
+
+test('an auto-start room begins on its own once every seat is taken', () => {
+  const s = setup({ seatLimit: 2, autoStart: true }, 1);
+  assert.equal(s.host.view().room.players.length, 2);
+  s.host.pump(); s.net.flush();
+  assert.equal(s.host.view().room.startsInMs, 3000);
+  assert.equal(s.guests[0].view().room.startsInMs, 3000);
+  tick(s, 2);
+  assert.equal(s.host.view().room.phase, 'LOBBY');
+  tick(s, 1);
+  assert.equal(s.host.view().room.phase, 'LOADING');
+  assert.equal(s.guests[0].view().room.phase, 'LOADING');
+});
+
+test('a four-seat auto room waits for the fill timeout, then starts short-handed', () => {
+  const s = setup({ autoStart: true }, 1);
+  s.host.pump(); s.net.flush();
+  assert.equal(s.host.view().room.startsInMs, 60000);
+  tick(s, 59);
+  assert.equal(s.host.view().room.phase, 'LOBBY');
+  tick(s, 1);
+  assert.equal(s.host.view().room.phase, 'LOADING');
+  assert.equal(s.host.view().room.players.length, 2);
+});
+
+test('losing a player cancels the imminent start and waits again', () => {
+  const s = setup({ autoStart: true }, 3);
+  s.host.pump(); s.net.flush();
+  assert.equal(s.host.view().room.startsInMs, 3000);
+  s.links[0][0].close(); s.net.flush();
+  s.host.pump(); s.net.flush();
+  assert.equal(s.host.view().room.startsInMs, 60000);
+  tick(s, 3);
+  assert.equal(s.host.view().room.phase, 'LOBBY');
+  assert.equal(s.host.view().room.players.length, 3);
+});
+
+test('an auto-start room falling below two players stops counting down', () => {
+  const s = setup({ seatLimit: 2, autoStart: true }, 1);
+  s.host.pump(); s.net.flush();
+  assert.equal(s.host.view().room.startsInMs, 3000);
+  s.links[0][0].close(); s.net.flush();
+  s.host.pump(); s.net.flush();
+  assert.equal(s.host.view().room.startsInMs, null);
+  tick(s, 5);
+  assert.equal(s.host.view().room.phase, 'LOBBY');
+});
+
+test('a manual room never starts by itself', () => {
+  const s = setup();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  assert.equal(s.host.view().canStart, true);
+  tick(s, 70);
+  assert.equal(s.host.view().room.phase, 'LOBBY');
+  assert.equal(s.host.view().room.startsInMs, null);
 });
 
 test('packets queued on a disconnected transport cannot abort the surviving match', () => {

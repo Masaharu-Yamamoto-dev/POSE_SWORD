@@ -12,18 +12,26 @@
 from __future__ import annotations
 
 import math
+import os
+import threading
 import urllib.request
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-# MediaPipe Tasks 用のポーズモデル(lite, 数MB)。初回に自動ダウンロードする。
+# MediaPipe Tasks 用のポーズモデル(lite, 数MB)。
+# コンテナではビルド時に焼き込み、POSE_MODEL_PATH で場所を渡す。
+# Cloud Run のファイルシステムは起動のたびに空になるため、実行時ダウンロードに頼ると
+# スケールゼロから起きるたびに外部から取り直すことになる。
 POSE_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
     "pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
 )
-POSE_MODEL_PATH = Path.home() / ".pose_sword" / "pose_landmarker_lite.task"
+POSE_MODEL_PATH = Path(
+    os.environ.get("POSE_MODEL_PATH")
+    or Path.home() / ".pose_sword" / "pose_landmarker_lite.task"
+)
 
 # ----- 正規化の基準(チューニング用) -----
 ATTACK_SPIKINESS_MAX = 0.45   # 尖り具合(=1-solidity)がこれ以上で尖り満点(50)
@@ -167,18 +175,27 @@ def compute_hp(landmarks, width: int, height: int) -> dict:
 
 
 _LANDMARKER = None  # 起動後に1回だけ生成して使い回す
+# MediaPipe Tasks の detect() はスレッド安全ではない。FastAPI は同期の関数を
+# スレッドプールで動かすため、生成と実行をこのロックで直列化する。
+_LANDMARKER_LOCK = threading.Lock()
 
 
 def _ensure_pose_model() -> str:
-    """ポーズモデルが無ければダウンロードし、ローカルパスを返す。"""
+    """ポーズモデルのパスを返す。イメージに焼かれていない場合だけ取得する。"""
     if not POSE_MODEL_PATH.exists():
         POSE_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
         urllib.request.urlretrieve(POSE_MODEL_URL, POSE_MODEL_PATH)
     return str(POSE_MODEL_PATH)
 
 
+def warmup_pose() -> None:
+    """起動時に姿勢推定を読み込んでおく(初回リクエストを待たせないため)。"""
+    with _LANDMARKER_LOCK:
+        _get_landmarker()
+
+
 def _get_landmarker():
-    """MediaPipe Tasks の PoseLandmarker を生成(初回のみ)して返す。"""
+    """MediaPipe Tasks の PoseLandmarker を生成(初回のみ)して返す。呼び出しはロック内で。"""
     global _LANDMARKER
     if _LANDMARKER is None:
         from mediapipe.tasks import python as mp_python
@@ -199,7 +216,8 @@ def _run_pose(rgb: Image.Image):
 
     arr = np.ascontiguousarray(np.array(rgb.convert("RGB")))
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=arr)
-    result = _get_landmarker().detect(mp_image)
+    with _LANDMARKER_LOCK:
+        result = _get_landmarker().detect(mp_image)
     if not result.pose_landmarks:
         return None
     return result.pose_landmarks[0]  # 先頭の人物の 33 関節

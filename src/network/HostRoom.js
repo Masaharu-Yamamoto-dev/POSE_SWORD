@@ -1,6 +1,7 @@
 export const PROTOCOL_VERSION = 3;
 export const MAX_IMAGE_LENGTH = 4 * 1024 * 1024;
-// 部屋は常に4席。開始は在室者が2人以上で、その人数のまま試合を始める。
+// 席数は2〜4。通常ロビーは4席で、そろった人数のまま試合を始める。
+// ランダムマッチは希望人数をそのまま席数にし、autoStart で準備ボタンなしに開始する。
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 2;
 
@@ -18,11 +19,15 @@ export function validateSword(sword) {
 
 // The host owns this model. Transport identities never come from packet playerId fields.
 export class HostRoom {
-  constructor({ roomEpoch, hostSword }) {
-    if (!roomEpoch) throw new Error('Invalid room configuration');
-    this.maxPlayers = MAX_PLAYERS;
+  constructor({ roomEpoch, hostSword, seatLimit = MAX_PLAYERS, autoStart = false, gameMode = '0' }) {
+    if (!roomEpoch || !Number.isInteger(seatLimit) || seatLimit < MIN_PLAYERS || seatLimit > MAX_PLAYERS ||
+        !['0', '1'].includes(gameMode)) {
+      throw new Error('Invalid room configuration');
+    }
+    this.seatLimit = seatLimit;
+    this.autoStart = autoStart;
     this.roomEpoch = roomEpoch;
-    this.gameMode = '0';
+    this.gameMode = gameMode;
     this.phase = 'LOBBY';
     this.revision = 0;
     this.readyVersion = 0;
@@ -41,12 +46,12 @@ export class HostRoom {
 
   snapshot() {
     return structuredClone({ protocolVersion: PROTOCOL_VERSION, roomEpoch: this.roomEpoch,
-      revision: this.revision, readyVersion: this.readyVersion, maxPlayers: this.maxPlayers, gameMode: this.gameMode,
+      revision: this.revision, readyVersion: this.readyVersion, seatLimit: this.seatLimit, autoStart: this.autoStart, gameMode: this.gameMode,
       phase: this.phase, matchId: this.matchId, players: this.players });
   }
 
   reserve(connectionId) {
-    if (this.phase !== 'LOBBY' || this.connections.has(connectionId) || this.connections.size >= this.maxPlayers - 1) return false;
+    if (this.phase !== 'LOBBY' || this.connections.has(connectionId) || this.connections.size >= this.seatLimit - 1) return false;
     this.connections.set(connectionId, null);
     return true;
   }
@@ -55,7 +60,7 @@ export class HostRoom {
     if (!this.connections.has(connectionId) || this.connections.get(connectionId) !== null || this.phase !== 'LOBBY') {
       throw new Error('入室を受け付けられません。');
     }
-    const slot = Array.from({ length: this.maxPlayers }, (_, i) => i).find(i => !this.players.some(p => p.slotIndex === i));
+    const slot = Array.from({ length: this.seatLimit }, (_, i) => i).find(i => !this.players.some(p => p.slotIndex === i));
     const player = this.makePlayer(`p${this.nextPlayer++}`, slot, sword);
     this.connections.set(connectionId, player.playerId);
     this.players.push(player);
@@ -91,8 +96,8 @@ export class HostRoom {
   }
 
   canStart() {
-    return this.phase === 'LOBBY' && this.players.length >= MIN_PLAYERS && this.players.length <= this.maxPlayers &&
-      this.players.every(p => p.connected && p.ready && p.inLobby);
+    return this.phase === 'LOBBY' && this.players.length >= MIN_PLAYERS && this.players.length <= this.seatLimit &&
+      this.players.every(p => p.connected && p.inLobby && (this.autoStart || p.ready));
   }
 
   prepare() {

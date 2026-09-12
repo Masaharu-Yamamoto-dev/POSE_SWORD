@@ -42,7 +42,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-初回実行時に rembg（u2net, 約 170MB）と MediaPipe のポーズモデル（数 MB, `~/.pose_sword/`）を自動ダウンロードする（要ネット接続）。
+初回実行時に rembg（既定は人物専用の `u2net_human_seg`, 約 170MB）と MediaPipe のポーズモデル（数 MB, `~/.pose_sword/`）を自動ダウンロードする（要ネット接続）。モデルは環境変数 `REMBG_MODEL` で差し替えられる（例: 汎用に戻すなら `u2net`）が、焼き込んでいないモデル名を指定すると起動後にダウンロードが発生するため、切り替えるときはイメージを作り直すこと。コンテナではどちらもビルド時に焼き込むため、起動後のダウンロードは発生しない。
 
 ## API サーバ（React 連携）
 

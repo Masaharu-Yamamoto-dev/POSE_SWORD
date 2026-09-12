@@ -1,6 +1,9 @@
 import { HostRoom, MAX_PLAYERS, PROTOCOL_VERSION, validateSword } from './HostRoom.js';
 
 const ACTIVE = ['LOADING', 'COUNTDOWN', 'PLAYING'];
+// 自動開始の部屋のタイミング。席が埋まれば少し待って開始し、埋まらなければ人数を切り上げる。
+export const AUTO_START_DELAY = 3000;
+export const FILL_TIMEOUT = 60000;
 const withoutImages = room => ({ ...room, players: room.players.map(p => {
   const stats = { ...p.swordData };
   delete stats.imageStr;
@@ -10,15 +13,15 @@ const withoutImages = room => ({ ...room, players: room.players.map(p => {
 // Transport adapter for PeerJS DataConnection. Time is injected so barriers,
 // disconnects and retransmission can be tested without browser timers.
 export class RoomSession {
-  constructor({ isHost = false, roomEpoch = '', sword, now = () => performance.now(),
-    onChange = () => {}, onUnity = () => {} }) {
+  constructor({ isHost = false, roomEpoch = '', seatLimit, autoStart = false, gameMode = '0', sword,
+    now = () => performance.now(), onChange = () => {}, onUnity = () => {} }) {
     this.isHost = isHost;
     this.epoch = roomEpoch;
     this.sword = validateSword(sword);
     this.now = now;
     this.onChange = onChange;
     this.onUnity = onUnity;
-    this.host = isHost ? new HostRoom({ roomEpoch, hostSword: sword }) : null;
+    this.host = isHost ? new HostRoom({ roomEpoch, hostSword: sword, seatLimit, autoStart, gameMode }) : null;
     this.localPlayerId = isHost ? 'p0' : null;
     this.links = new Map();
     this.room = this.host?.snapshot() ?? null;
@@ -31,6 +34,9 @@ export class RoomSession {
     this.loadDeadline = Infinity;
     this.lastHeartbeat = -Infinity;
     this.sequence = 0;
+    this.autoStartAt = null;
+    this.gatheredAt = null;
+    this.fullAt = null;
   }
 
   view() {
@@ -70,7 +76,8 @@ export class RoomSession {
   }
 
   publish(withAssets = false) {
-    this.room = this.host.snapshot();
+    this.room = { ...this.host.snapshot(),
+      startsInMs: this.autoStartAt === null ? null : Math.max(0, this.autoStartAt - this.now()) };
     if (withAssets) {
       this.assetVersion++;
       this.broadcast('ROSTER', { room: this.room, assetVersion: this.assetVersion });
@@ -247,6 +254,25 @@ export class RoomSession {
     }
   }
 
+  autoStartTick(now) {
+    if (!this.isHost || !this.host.autoStart) return;
+    if (this.room.phase !== 'LOBBY' || !this.host.canStart()) { this.cancelAutoStart(); return; }
+    const full = this.room.players.length >= this.host.seatLimit;
+    this.gatheredAt ??= now;
+    if (full) this.fullAt ??= now; else this.fullAt = null;
+    const deadline = full ? this.fullAt + AUTO_START_DELAY : this.gatheredAt + FILL_TIMEOUT;
+    if (deadline !== this.autoStartAt) { this.autoStartAt = deadline; this.publish(); }
+    // 武器データが全員に届くまでは開始しない（view().canStart が受信完了を見ている）
+    if (now >= deadline && this.view().canStart) { this.cancelAutoStart(); this.prepare(); }
+  }
+
+  cancelAutoStart() {
+    this.gatheredAt = null; this.fullAt = null;
+    if (this.autoStartAt === null) return;
+    this.autoStartAt = null;
+    if (this.room.phase === 'LOBBY') this.publish();
+  }
+
   abort(reason) {
     const matchId = this.room.matchId;
     this.broadcast('ABORT', { matchId, reason });
@@ -296,6 +322,7 @@ export class RoomSession {
       if (now - this.lastHeartbeat >= 1000) this.send(link, 'PING');
     }
     if (now - this.lastHeartbeat >= 1000) this.lastHeartbeat = now;
+    this.autoStartTick(now);
   }
 
   close(notifyPeers = true) {

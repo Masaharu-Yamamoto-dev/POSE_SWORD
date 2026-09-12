@@ -4,7 +4,7 @@ import { PLAYER_COLORS, styles, swordImageSource } from '../styles';
 const REASONS = { DISCONNECTED: '（切断）', FORFEIT: '（切断）' };
 
 // 2〜4人の順位表。1位以外は自分の順位を見出しに出す。
-export default function ResultScreen({ view, onReturnToLobby, onLeave }) {
+export default function ResultScreen({ view, onReturnToLobby, onLeave, onFindNewOpponents = null }) {
   const result = view?.result;
   if (!result) return null;
 
@@ -74,7 +74,7 @@ export default function ResultScreen({ view, onReturnToLobby, onLeave }) {
           </table>
         </div>
 
-        <div style={{ marginTop: '40px', display: 'flex', gap: '5%', width: '100%', maxWidth: '500px' }}>
+        <div style={{ marginTop: '40px', display: 'flex', flexWrap: 'wrap', gap: '5%', rowGap: '15px', width: '100%', maxWidth: '500px' }}>
           {!view.closed && (
             <div className="ink-btn-container" style={{ flex: 1 }}>
               <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
@@ -90,6 +90,15 @@ export default function ResultScreen({ view, onReturnToLobby, onLeave }) {
               退出する
             </button>
           </div>
+
+          {onFindNewOpponents && (
+            <div className="ink-btn-container" style={{ flexBasis: '100%' }}>
+              <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+              <button className="sharp-button" style={{ '--btn-color': '#d32f2f' }} onClick={onFindNewOpponents}>
+                ⚡ 別の相手を探す
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
