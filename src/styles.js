@@ -1,3 +1,9 @@
+// P1〜P4の色。Unityの頭上マーカーと対応させる。
+export const PLAYER_COLORS = ['#2469df', '#d33143', '#248843', '#9a52c5'];
+
+export const swordImageSource = sword =>
+  sword?.imageSrc ?? (sword?.imageStr?.startsWith('data:') ? sword.imageStr : `data:image/png;base64,${sword?.imageStr ?? ''}`);
+
 export const styles = {
   container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%', fontFamily: 'Kurobara, serif', boxSizing: 'border-box', overflowX: 'hidden' },
   contentWrapper: { zIndex: 1, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' },

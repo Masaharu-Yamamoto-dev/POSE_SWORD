@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomSession } from '../src/network/RoomSession.js';
+import { PROTOCOL_VERSION } from '../src/network/HostRoom.js';
 
 const sword = { name: '剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
 // Queue messages like a DataChannel (never synchronously re-enter send()).
@@ -72,7 +73,7 @@ test('guest input goes once to its own sword on the host; guest sync is ignored'
   assert.equal(input.playerId, guest.view().localPlayerId);
   assert.equal(input.direction, 'LEFT');
   const before = s.commands[0].length;
-  s.links[1][1].send({ type: 'SYNC', protocolVersion: 2, roomEpoch: 'epoch', matchId, tick: 999 }); s.net.flush();
+  s.links[1][1].send({ type: 'SYNC', protocolVersion: PROTOCOL_VERSION, roomEpoch: 'epoch', matchId, tick: 999 }); s.net.flush();
   assert.equal(s.commands[0].length, before);
 });
 
@@ -200,8 +201,7 @@ test('two players use the shared initialization barrier, spawns and rematch', ()
   const s = setup();
   s.links[0][0].close(); s.links[1][0].close(); s.net.flush();
   s.guests = [s.guests[2]];
-  s.host.setCapacity(2); s.net.flush();
-  assert.equal(s.guests[0].view().room.capacity, 2);
+  assert.equal(s.guests[0].view().room.players.length, 2);
   const first = start(s);
   const config = s.commands[0].find(c => c.method === 'InitializeMultiplayer').data;
   assert.deepEqual(config.players.map(p => p.slotIndex), [0, 1]);
@@ -211,9 +211,35 @@ test('two players use the shared initialization barrier, spawns and rematch', ()
   assert.notEqual(start(s), first);
 });
 
+test('three players start with three spawns and three arena slots', () => {
+  const s = setup();
+  s.links[1][0].close(); s.net.flush();
+  s.guests = [s.guests[0], s.guests[2]];
+  assert.equal(s.host.view().room.players.length, 3);
+  start(s);
+  const config = s.commands[0].find(c => c.method === 'InitializeMultiplayer').data;
+  assert.equal(config.players.length, 3);
+  assert.deepEqual(config.players.map(p => p.slotIndex), [0, 1, 2]);
+  assert.deepEqual(config.players.map(p => p.spawnIndex).sort(), [0, 1, 2]);
+});
+
+test('a weapon change reaches the host, clears that player ready state and re-sends the roster', () => {
+  const s = setup();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  assert.equal(s.host.view().canStart, true);
+  const other = { name: '別の剣', hp: 200, attack: 10, weight: 20, imageStr: 'd29ybGQ=' };
+  s.guests[0].updateSword(other); s.net.flush();
+  const playerId = s.guests[0].view().localPlayerId;
+  const roster = s.host.view().room.players;
+  assert.equal(roster.find(p => p.playerId === playerId).swordData.name, '別の剣');
+  assert.equal(roster.find(p => p.playerId === playerId).ready, false);
+  assert.equal(s.guests[1].view().room.players.find(p => p.playerId === playerId).swordData.imageStr, other.imageStr);
+  assert.equal(s.host.view().canStart, false);
+});
+
 test('packets queued on a disconnected transport cannot abort the surviving match', () => {
   const s = setup(); const matchId = start(s);
-  s.links[0][1].send({ type: 'LOAD_FAILED', protocolVersion: 2, roomEpoch: 'epoch', matchId });
+  s.links[0][1].send({ type: 'LOAD_FAILED', protocolVersion: PROTOCOL_VERSION, roomEpoch: 'epoch', matchId });
   s.host.disconnected(s.host.links.get('peer-1'));
   s.net.flush();
   assert.equal(s.host.view().room.phase, 'PLAYING');
@@ -236,7 +262,7 @@ test('heartbeat traffic cannot hold an uncompleted handshake seat forever', () =
   const [a, b] = s.net.link('never-joins'); s.host.attach(a);
   for (let i = 0; i < 10; i++) {
     s.advance(1000);
-    b.send({ type: 'PONG', protocolVersion: 2, roomEpoch: 'epoch' });
+    b.send({ type: 'PONG', protocolVersion: PROTOCOL_VERSION, roomEpoch: 'epoch' });
     s.guests.slice(1).forEach(g => g.pump()); s.net.flush(); s.host.pump(); s.net.flush();
   }
   assert.equal(a.open, false);

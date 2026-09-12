@@ -1,4 +1,4 @@
-import { HostRoom, PROTOCOL_VERSION, validateSword } from './HostRoom.js';
+import { HostRoom, MAX_PLAYERS, PROTOCOL_VERSION, validateSword } from './HostRoom.js';
 
 const ACTIVE = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 const withoutImages = room => ({ ...room, players: room.players.map(p => {
@@ -10,7 +10,7 @@ const withoutImages = room => ({ ...room, players: room.players.map(p => {
 // Transport adapter for PeerJS DataConnection. Time is injected so barriers,
 // disconnects and retransmission can be tested without browser timers.
 export class RoomSession {
-  constructor({ isHost = false, roomEpoch = '', capacity = 4, sword, now = () => performance.now(),
+  constructor({ isHost = false, roomEpoch = '', sword, now = () => performance.now(),
     onChange = () => {}, onUnity = () => {} }) {
     this.isHost = isHost;
     this.epoch = roomEpoch;
@@ -18,7 +18,7 @@ export class RoomSession {
     this.now = now;
     this.onChange = onChange;
     this.onUnity = onUnity;
-    this.host = isHost ? new HostRoom({ roomEpoch, capacity, hostSword: sword }) : null;
+    this.host = isHost ? new HostRoom({ roomEpoch, hostSword: sword }) : null;
     this.localPlayerId = isHost ? 'p0' : null;
     this.links = new Map();
     this.room = this.host?.snapshot() ?? null;
@@ -111,6 +111,9 @@ export class RoomSession {
         this.notify(); break;
       case 'READY':
         if (m.readyVersion === this.room.readyVersion && this.host.setReady(link.playerId, m.ready)) this.publish(); break;
+      case 'SWORD':
+        this.host.updateSword(link.playerId, m.swordData);
+        this.publish(true); break;
       case 'INITIALIZED': this.loaded(link.playerId, m.matchId); break;
       case 'LOAD_FAILED':
         if (m.matchId === this.room.matchId && ACTIVE.includes(this.room.phase)) this.abort('ゲームの初期化に失敗しました。');
@@ -138,7 +141,7 @@ export class RoomSession {
       case 'REJECT': this.error = m.reason; this.close(false); return;
       case 'ROSTER':
       case 'STATE': {
-        if (!this.localPlayerId || !m.room || m.room.players?.length > 4 ||
+        if (!this.localPlayerId || !m.room || m.room.players?.length > MAX_PLAYERS ||
             (this.room && m.room.revision < this.room.revision)) return;
         const previous = this.room;
         this.room = { ...m.room, players: m.room.players.map(p => ({ ...p,
@@ -185,13 +188,18 @@ export class RoomSession {
     else this.sendToHost('READY', { ready, readyVersion: this.room?.readyVersion });
   }
   setGameMode(mode) { if (!this.closed && this.isHost) { this.host.setGameMode(mode); this.publish(); } }
-  setCapacity(capacity) { if (!this.closed && this.isHost) { this.host.setCapacity(capacity); this.publish(); } }
+  updateSword(sword) {
+    if (this.closed) return;
+    this.sword = validateSword(sword);
+    if (this.isHost) { this.host.updateSword('p0', this.sword); this.publish(true); }
+    else this.sendToHost('SWORD', { swordData: this.sword });
+  }
   sendToHost(type, data) { const link = this.links.values().next().value; if (link) this.send(link, type, data); }
 
   prepare() {
     if (!this.view().canStart) throw new Error('全員の準備と武器データの受信を待ってください。');
     this.host.prepare(); this.publish();
-    const spawnSlots = Array.from({ length: this.room.capacity }, (_, i) => i);
+    const spawnSlots = this.room.players.map((_, i) => i);
     for (let i = spawnSlots.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1)); [spawnSlots[i], spawnSlots[j]] = [spawnSlots[j], spawnSlots[i]];
     }
