@@ -1,12 +1,12 @@
 /**
- * Vercel サーバーサイド関数 — HuggingFace Space への中継
+ * Vercel サーバーサイド関数 — Cloud Run 上の錬成APIへの中継
  *
  * ブラウザからは /api/cutout を呼ぶ。
  * APIキーはこのサーバー側でのみ付与されるため、ブラウザには漏れない。
  *
  * 必要な Vercel 環境変数（VITE_ を付けないこと！）:
- *   API_URL  ... HuggingFace Space の URL（例: https://user-pose-sword-api.hf.space）
- *   API_KEY  ... HuggingFace Space の Secrets に設定した API_KEY と同じ値
+ *   API_URL  ... Cloud Run のサービスURL（例: https://pose-sword-api-xxxx.a.run.app）
+ *   API_KEY  ... Cloud Run 側に設定した API_KEY と同じ値
  */
 // Vercel の最大実行時間を延長（画像処理は時間がかかるため）
 // BodyParserの上限も引き上げ（base64画像は大きい）
@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     const data = await response.json();
     return res.status(response.status).json(data);
   } catch (err) {
-    console.error("HuggingFace Space への接続エラー:", err);
+    console.error("錬成APIへの接続エラー:", err);
     return res.status(502).json({ error: "APIサーバーへの接続に失敗しました" });
   }
 }

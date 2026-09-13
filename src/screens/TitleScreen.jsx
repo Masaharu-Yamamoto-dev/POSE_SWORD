@@ -13,7 +13,11 @@ export default function TitleScreen({
   handleJoinRoom,
   handleCancelJoin,   
   connectToHost,
-  connecting
+  connecting,
+  openRandomMatch,
+  startRandomMatch,
+  matchMode,
+  setMatchMode
 }) {
   return (
     <div style={styles.container}>
@@ -46,6 +50,14 @@ export default function TitleScreen({
 
             <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
               <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+              <button className="sharp-button" style={{ '--btn-color': '#d32f2f' }}
+                onClick={openRandomMatch} disabled={!mySwordData || connecting}>
+                ⚡ ランダムマッチ
+              </button>
+            </div>
+
+            <div className={`ink-btn-container ${!mySwordData ? 'disabled' : ''}`}>
+              <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
               <button className="sharp-button" onClick={handleCreateRoom} disabled={!mySwordData || connecting}>
                 ロビーを作成
               </button>
@@ -56,6 +68,58 @@ export default function TitleScreen({
               <button className="sharp-button" onClick={handleJoinRoom} disabled={!mySwordData || connecting}>
                 ロビーに入る
               </button>
+            </div>
+          </div>
+        ) : titleMode === "MATCH_SIZE" ? (
+          /* ▼ ランダムマッチの人数選択 */
+          <div className="glass" style={{ width: '100%', maxWidth: '400px', padding: '25px', boxSizing: 'border-box' }}>
+            <p style={{ fontSize: '18px', fontWeight: 'bold', color: '#000', margin: '0 0 5px 0' }}>
+              何人で戦いますか
+            </p>
+            <p style={{ fontSize: '13px', color: '#666', margin: '0 0 20px 0' }}>
+              見知らぬ相手と自動で合流します。集まりしだい開始します。
+            </p>
+
+            {/* 自分が部屋を立てたときのルール。相手の部屋に入った場合はその部屋に従う。 */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+              {[["0", "🗡️ 剣"], ["1", "🌀 独楽"]].map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setMatchMode(value)}
+                  style={{
+                    flex: 1, padding: '12px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer',
+                    borderRadius: '8px', fontFamily: 'inherit',
+                    border: matchMode === value ? '3px solid #2196F3' : '2px solid #ccc',
+                    backgroundColor: matchMode === value ? '#e3f2fd' : '#fff',
+                    color: matchMode === value ? '#1565c0' : '#666',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize: '12px', color: '#888', margin: '0 0 20px 0' }}>
+              相手の部屋に入ったときは、その部屋のルールになります
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              {[2, 4].map(size => (
+                <div key={size} className="ink-btn-container">
+                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                  <button className="sharp-button" onClick={() => startRandomMatch(size)}>
+                    {size}人で戦う
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ marginTop: '25px', display: 'flex', justifyContent: 'center' }}>
+              <div className="ink-btn-container" style={{ width: '200px' }}>
+                <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+                <button className="sharp-button" style={{ '--btn-color': '#666666' }} onClick={handleCancelJoin}>
+                  戻る
+                </button>
+              </div>
             </div>
           </div>
         ) : (

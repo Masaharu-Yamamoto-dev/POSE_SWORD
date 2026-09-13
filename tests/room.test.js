@@ -47,6 +47,49 @@ test('any two to four ready players may start, but not one and not a half-ready 
   assert.equal(room.prepare().players.length, 3);
 });
 
+test('a two-seat room turns away a third connection', () => {
+  const room = new HostRoom({ roomEpoch: 'a', hostSword: sword, seatLimit: 2 });
+  assert.equal(room.reserve('a'), true);
+  assert.equal(room.reserve('b'), false);
+  room.join('a', sword);
+  assert.deepEqual(room.snapshot().players.map(p => p.slotIndex), [0, 1]);
+  assert.equal(room.snapshot().seatLimit, 2);
+});
+
+test('seat limits outside two to four are rejected', () => {
+  for (const seatLimit of [1, 5, 2.5, '2', null]) {
+    assert.throws(() => new HostRoom({ roomEpoch: 'a', hostSword: sword, seatLimit }));
+  }
+});
+
+test('部屋を作るときに最初のルールを決められる', () => {
+  const koma = new HostRoom({ roomEpoch: 'a', hostSword: sword, gameMode: '1' });
+  assert.equal(koma.snapshot().gameMode, '1');
+  assert.equal(new HostRoom({ roomEpoch: 'a', hostSword: sword }).snapshot().gameMode, '0');
+  for (const gameMode of ['2', '', 0, null]) {
+    assert.throws(() => new HostRoom({ roomEpoch: 'a', hostSword: sword, gameMode }));
+  }
+});
+
+test('an auto-start room does not wait for ready buttons', () => {
+  const auto = new HostRoom({ roomEpoch: 'a', hostSword: sword, seatLimit: 2, autoStart: true });
+  auto.reserve('a'); auto.join('a', sword);
+  assert.ok(auto.snapshot().players.every(p => !p.ready));
+  assert.equal(auto.canStart(), true);
+  const manual = new HostRoom({ roomEpoch: 'a', hostSword: sword, seatLimit: 2 });
+  manual.reserve('a'); manual.join('a', sword);
+  assert.equal(manual.canStart(), false);
+});
+
+test('an auto-start room still needs two connected players in the lobby', () => {
+  const room = new HostRoom({ roomEpoch: 'a', hostSword: sword, autoStart: true });
+  assert.equal(room.canStart(), false);
+  room.reserve('a'); room.join('a', sword);
+  assert.equal(room.canStart(), true);
+  room.removeConnection('a');
+  assert.equal(room.canStart(), false);
+});
+
 test('a lone host cannot start a match', () => {
   const room = new HostRoom({ roomEpoch: 'a', hostSword: sword });
   room.setReady('p0', true);

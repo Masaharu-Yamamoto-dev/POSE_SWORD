@@ -33,9 +33,11 @@ export function useRoom({ peerOptions, onClosed }) {
   }, []);
 
   // ホストの退出や強制切断など、こちらから閉じていない終了。
+  // 理由は消さずに残す。ランダムマッチの探索は、これを見て次の候補へすぐ移る。
   const dropped = useCallback(message => {
     teardown(false);
-    setView(null); setRoomId(''); setConnecting(false); setHasArena(false); setError('');
+    setView(null); setRoomId(''); setConnecting(false); setHasArena(false);
+    setError(message ?? '');
     closedRef.current?.(message);
   }, [teardown]);
 
@@ -58,12 +60,12 @@ export function useRoom({ peerOptions, onClosed }) {
     };
   }, [bridge, teardown]);
 
-  const open = useCallback((isHost, sword, targetId) => {
+  const open = useCallback((isHost, sword, targetId, roomOptions = {}) => {
     teardown(true);
     setError(''); setHasArena(false); setView(null); setConnecting(true);
     let session;
     try {
-      session = new RoomSession({ isHost, roomEpoch: isHost ? crypto.randomUUID() : '', sword,
+      session = new RoomSession({ isHost, roomEpoch: isHost ? crypto.randomUUID() : '', sword, ...roomOptions,
         onChange: state => {
           setView(state);
           if (state.room || state.closed) setConnecting(false);
@@ -117,7 +119,7 @@ export function useRoom({ peerOptions, onClosed }) {
 
   return {
     view, roomId, error, connecting, hasArena, bridge,
-    createRoom: useCallback(sword => open(true, sword), [open]),
+    createRoom: useCallback((sword, roomOptions) => open(true, sword, undefined, roomOptions), [open]),
     joinRoom: useCallback((id, sword) => { setRoomId(id); open(false, sword, id); }, [open]),
     leave: useCallback(() => {
       teardown(true);

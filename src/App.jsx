@@ -7,8 +7,10 @@ import LobbyScreen from './screens/LobbyScreen';
 import ResultScreen from './screens/ResultScreen';
 import { NameInputScreen, CraftPoseScreen, CraftingApiScreen, CraftCompleteScreen } from './screens/CraftingScreens';
 import SwordListScreen from './screens/SwordListScreen';
+import MatchmakingScreen from './screens/MatchmakingScreen';
 import BattleArena from './components/BattleArena.jsx';
 import { useRoom } from './network/useRoom.js';
+import { useRandomMatch } from './network/useRandomMatch.js';
 
 const PEER_ICE_CONFIG = {
   config: {
@@ -58,6 +60,9 @@ export default function PoseSwordWeb() {
   });
   const view = room.view;
   const sentSwordRef = useRef(null);
+  const [matchSize, setMatchSize] = useState(2);
+  const [matchMode, setMatchMode] = useState("0");
+  const randomMatch = useRandomMatch({ room, sword: mySwordData });
 
   const resetToTitle = useCallback((msg = "") => {
     setTitleMode("DEFAULT"); setTargetId(""); setSystemMessage(msg); setStep("TITLE");
@@ -73,8 +78,12 @@ export default function PoseSwordWeb() {
     if (view.result && me && !me.inLobby) return "RESULT";
     return "LOBBY";
   })();
+  // 相手を探している間は、自分の部屋ができていても探索画面を出し続ける。
+  const seeking = Boolean(randomMatch.view?.seeking);
   // 部屋が無い状態で部屋の画面は出さない。
-  const screen = ROOM_STEPS.includes(step) || step === "TITLE" ? (roomScreen ?? "TITLE") : step;
+  const screen = seeking ? "MATCHING"
+    : ROOM_STEPS.includes(step) || step === "TITLE" ? (roomScreen ?? "TITLE")
+    : step;
 
   // 武器を持ち替えたら部屋にも反映する（本人の準備は解除される）
   useEffect(() => {
@@ -189,8 +198,34 @@ export default function PoseSwordWeb() {
   // ===============================
 
   const handleLeave = () => {
+    randomMatch.cancel();
     room.leave();
     resetToTitle("");
+  };
+
+  const openRandomMatch = () => {
+    if (!mySwordData) return;
+    setSystemMessage(""); setTitleMode("MATCH_SIZE");
+  };
+
+  const startRandomMatch = (size) => {
+    if (!mySwordData) return;
+    setMatchSize(size);
+    setSystemMessage(""); setTitleMode("DEFAULT");
+    sentSwordRef.current = swordKey(mySwordData);
+    randomMatch.start(size, matchMode);
+  };
+
+  const cancelRandomMatch = () => {
+    randomMatch.cancel();
+    resetToTitle("");
+  };
+
+  // 同じ部屋を畳んで、新しい相手を探しに行く
+  const findNewOpponents = () => {
+    room.leave();
+    sentSwordRef.current = swordKey(mySwordData);
+    randomMatch.start(matchSize, matchMode);
   };
 
   const handleCopyId = () => {
@@ -243,7 +278,8 @@ export default function PoseSwordWeb() {
     const base64Full = canvas.toDataURL('image/jpeg');
     setCapturedImage(base64Full);
     const base64DataOnly = base64Full.split(',')[1]; 
-    const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? 'https://akequreru-pose-sword-api.hf.space'}/cutout`;
+    // 既定は Vercel 関数経由。関数側が Cloud Run の錬成APIへ中継し、APIキーを付ける。
+    const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? '/api'}/cutout`;
 
     fetch(pythonApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: base64DataOnly, userName: userName }) })
     .then(res => { if (!res.ok) throw new Error(`HTTPエラー`); return res.json(); })
@@ -316,7 +352,10 @@ export default function PoseSwordWeb() {
   const renderScreen = () => {
     switch (screen) {
       case "TITLE":
-        return <TitleScreen mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={room.error || systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} connecting={room.connecting} />;
+        return <TitleScreen mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={room.error || systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} connecting={room.connecting} openRandomMatch={openRandomMatch} startRandomMatch={startRandomMatch} matchMode={matchMode} setMatchMode={setMatchMode} />;
+
+      case "MATCHING":
+        return <MatchmakingScreen view={randomMatch.view} mySwordData={mySwordData} gameMode={matchMode} onCancel={cancelRandomMatch} />;
       
       case "NAME_INPUT":
         return <NameInputScreen userName={userName} setUserName={setUserName} mySwordData={mySwordData} setMySwordData={setMySwordData} setStep={setStep} craftReturnStep={craftReturnStep} handleCancel={handleCancelCrafting}/>;
@@ -337,7 +376,8 @@ export default function PoseSwordWeb() {
         return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} onReady={room.setReady} onGameMode={room.setGameMode} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
 
       case "RESULT":
-        return <ResultScreen view={view} onReturnToLobby={room.returnToLobby} onLeave={handleLeave} />;
+        return <ResultScreen view={view} onReturnToLobby={room.returnToLobby} onLeave={handleLeave}
+          onFindNewOpponents={view?.room?.autoStart ? findNewOpponents : null} />;
       
       default: return null;
     }
