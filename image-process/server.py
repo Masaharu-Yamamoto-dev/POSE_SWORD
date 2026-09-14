@@ -43,12 +43,12 @@ SWORD_NAMES = [
     "破魔",
 ]
 
-from person_cutout import crop_to_subject, cutout_person, decode_image
-from stats import compute_stats, silhouette_mask
+from person_cutout import DEFAULT_MODEL, crop_to_subject, cutout_person, decode_image
+from stats import compute_stats, silhouette_mask, warmup_pose
 
 app = FastAPI(title="POSE_SWORD API", version="0.1.0")
 
-# HuggingFace Spaces の「Secrets」で API_KEY を設定する
+# Cloud Run の環境変数（または Secret Manager）で API_KEY を設定する
 # 未設定の場合は認証なし（ローカル開発用）
 _API_KEY = os.environ.get("API_KEY", "")
 
@@ -64,8 +64,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# rembg のモデルは起動時に1回だけロードして使い回す(リクエストごとに読むと遅い)
-_REMBG_SESSION = new_session("u2net")
+# モデルは起動時に1回だけロードして使い回す(リクエストごとに読むと遅い)。
+# 姿勢推定もここで読み込むので、/health が応答した時点で両方が使える状態になる。
+_REMBG_SESSION = new_session(DEFAULT_MODEL)
+warmup_pose()
 
 
 class CutoutRequest(BaseModel):
