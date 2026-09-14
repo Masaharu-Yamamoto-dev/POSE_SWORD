@@ -11,9 +11,8 @@ public class BackgroundManager : MonoBehaviour
     public float minX = -15f; 
     public float maxX = 15f;  
 
-    [Header("プレイヤー参照")]
-    public SwordBattle hostSword;   
-    public SwordBattle clientSword; 
+    // ▼【N人対応】固定2人参照はやめ、毎フレームNetworkManagerから
+    // 「自分」と「生存中の他プレイヤーの平均HP」を取得して左右の傾きに反映する
 
     [Header("斜めの角度")]
     public float baseAngle = 15f; 
@@ -91,16 +90,35 @@ public class BackgroundManager : MonoBehaviour
 
     void Update()
     {
-        if (hostSword == null || clientSword == null || rightColorTransform == null) return;
+        if (rightColorTransform == null || NetworkManager.Instance == null) return;
 
-        float hostHp = hostSword.hp;
-        float clientHp = clientSword.hp;
+        GameObject mySwordObj = NetworkManager.Instance.GetMySword();
+        SwordBattle mine = mySwordObj != null ? mySwordObj.GetComponent<SwordBattle>() : null;
+        if (mine == null) return;
+
+        // ▼【N人対応】自分 vs 生存中の他プレイヤーの平均HPで左右の傾きを決める(2人時は従来と同じ計算になる)
+        float othersHpSum = 0f;
+        int othersCount = 0;
+        GameObject[] swords = NetworkManager.Instance.playerSwords;
+        for (int i = 0; i < swords.Length; i++)
+        {
+            GameObject obj = swords[i];
+            if (obj == null || obj == mySwordObj || !obj.activeInHierarchy) continue;
+            SwordBattle battle = obj.GetComponent<SwordBattle>();
+            if (battle == null) continue;
+            othersHpSum += battle.hp;
+            othersCount++;
+        }
+        if (othersCount == 0) return;
+
+        float hostHp = mine.hp;
+        float clientHp = othersHpSum / othersCount;
         float totalHp = hostHp + clientHp;
-        
+
         float ratio = 0.5f;
         if (totalHp > 0)
         {
-            ratio = hostHp / totalHp; 
+            ratio = hostHp / totalHp;
         }
 
         // 少しのダメージでもダイナミックに動く

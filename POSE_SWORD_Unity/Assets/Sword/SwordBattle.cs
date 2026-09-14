@@ -29,6 +29,7 @@ public class SwordBattle : MonoBehaviour
     public GameObject damagePopupPrefab;
 
 [Header("演出（エフェクト）")]
+public ParticleSystem normalEffectPrehub;
 public ParticleSystem critEffectPrefab;   
 public ParticleSystem guardEffectPrefab;  
 private SpriteRenderer spriteRenderer;    
@@ -74,21 +75,31 @@ public static bool matchEnded = false;
     private Vector2 lastPosition;
     private Rigidbody2D rb;
     private bool isDead = false;
+    public bool IsDead => isDead;
 
     // ▼【新規追加】カメラが追従するための、画像サイズに左右されない本物の中心座標
     [HideInInspector] public Vector3 currentCenterPosition;
 
-    public static bool isRoundStarted = false; // ★新規追加：ラウンドが開始したか
+    public static bool isRoundStarted = false;
+
+    // ▼【N人対応】生存者数の管理。試合開始時にSceneControllerからプレイヤー人数がセットされ、
+    // 誰かが撃破されるたびにReportElimination()で減算。残り1人になった時だけ試合終了とする。
+    public static int alivePlayerCount = 0;
+
+    public static void ReportElimination()
+    {
+        alivePlayerCount = Mathf.Max(0, alivePlayerCount - 1);
+        if (alivePlayerCount <= 1) matchEnded = true;
+    }
 
     void Start()
     {   
         matchEnded = false;
-        isRoundStarted = false; // ★開始時は一回 false にする
+        isRoundStarted = false;
         rb = GetComponent<Rigidbody2D>();
         controller = GetComponent<SwordController>();
         Transform blade = transform.Find("Blade");
         if (blade != null) spriteRenderer = blade.GetComponent<SpriteRenderer>();
-        // ▼追加：スピーカー（AudioSource）を取得、無ければ自動で追加する
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
 
@@ -96,7 +107,6 @@ public static bool matchEnded = false;
         UpdateUI();
         lastPosition = transform.position;
         
-        // ▼【新規追加】初期値は通常の座標にしておく
         currentCenterPosition = transform.position;
     }
 
@@ -477,7 +487,7 @@ public static bool matchEnded = false;
 
         if (hp == 0)
         {
-            matchEnded = true;
+            ReportElimination();
             // 時間の奪い合いを防ぐため、進行中のヒットストップなどを全て強制キャンセル
             StopAllCoroutines();
             
@@ -514,6 +524,7 @@ public static bool matchEnded = false;
 
         if (isCrit && critEffectPrefab != null) Instantiate(critEffectPrefab, hitPos, Quaternion.identity);
         else if (isWeakPoint && guardEffectPrefab != null) Instantiate(guardEffectPrefab, hitPos, Quaternion.identity);
+        else Instantiate(normalEffectPrehub, hitPos, Quaternion.identity);
 
         if (hp <= 0)
         {
@@ -541,34 +552,39 @@ public static bool matchEnded = false;
         isDead = true;
         if (controller != null) controller.enabled = false;
 
-        // カメラを激しく揺らす！
+        // 剣が黒くなり、コライダーを消してすり抜けるようにする（めり込み防止）
+        // ▼【N人対応】ここまでは「自分が脱落した」演出。試合が終わったかに関わらず毎回実行する
+        if (spriteRenderer != null) spriteRenderer.color = new Color(0.2f, 0.2f, 0.2f);
+        Collider2D[] colliders = GetComponentsInChildren<Collider2D>();
+        foreach (var col in colliders) col.enabled = false;
+
+        // 天高く吹き飛ばし、超高速で回転させる！
+        rb.gravityScale = 2f;
+        rb.linearVelocity = Vector2.zero; // 今の勢いをリセット
+        rb.AddForce(new Vector2(Random.Range(-500f, 500f), 2000f), ForceMode2D.Impulse);
+        rb.AddTorque(5000f, ForceMode2D.Impulse);
+
+        // ▼【N人対応】ここから先（カメラ固定・スローモーション・完全停止）は
+        // 「本当に試合が終わった撃破」の時だけ行う。3〜4人戦で他の生存者がまだ残っている間は
+        // 試合を止めず、脱落者は上の演出だけ見せて続行させる。
+        if (!matchEnded) yield break;
+
+        // カメラを激しく揺らして固定！
         BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
-        
         if (cam != null)
         {
             cam.StopTracking(); // 追従をストップして位置をロック！
             cam.TriggerShake(1.5f, 1.2f);
         }
 
-        // 剣が黒くなり、コライダーを消してすり抜けるようにする（めり込み防止）
-        if (spriteRenderer != null) spriteRenderer.color = new Color(0.2f, 0.2f, 0.2f); 
-        Collider2D[] colliders = GetComponentsInChildren<Collider2D>();
-        foreach (var col in colliders) col.enabled = false;
-
-        // 天高く吹き飛ばし、超高速で回転させる！
-        rb.gravityScale = 2f; 
-        rb.linearVelocity = Vector2.zero; // 今の勢いをリセット
-        rb.AddForce(new Vector2(Random.Range(-500f, 500f), 2000f), ForceMode2D.Impulse); 
-        rb.AddTorque(5000f, ForceMode2D.Impulse); 
-
         // スローモーション発動
-        Time.timeScale = 0.15f; 
-        
+        Time.timeScale = 0.15f;
+
         // 2.5秒間（現実時間）劇的なスローモーションと画面揺れを見せる
         yield return new WaitForSecondsRealtime(2.5f);
 
         // ゲーム完全停止
-        Time.timeScale = 0f; 
+        Time.timeScale = 0f;
     }
 
     public void PlayClientDamageEffect(int damage)
@@ -611,7 +627,7 @@ public static bool matchEnded = false;
 
         if (hp - damage <= 0)
         {
-            matchEnded = true;
+            ReportElimination();
             StopAllCoroutines();
             if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
             StartCoroutine(DefeatRoutine());
