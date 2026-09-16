@@ -18,6 +18,10 @@ public class CutinManager : MonoBehaviour
 
     [Header("演出設定")]
     public float timeScaleDuringCutin = 0.05f; 
+
+    // 対戦中は時間を止めない。ホストは FixedUpdate で物理を進めているため、
+    // timeScale を落とすと演出だけでなく試合そのものがスローになる。
+    public static bool scaleTimeDuringCutin = true;
     public float cutinDuration = 0.8f;         
 
     // ▼【新規追加】サウンド設定
@@ -71,7 +75,7 @@ public class CutinManager : MonoBehaviour
         }
 
         // 1. スローモーション＆全体表示
-        Time.timeScale = timeScaleDuringCutin;
+        if (scaleTimeDuringCutin) Time.timeScale = timeScaleDuringCutin;
         cutinCanvasGroup.alpha = 1f;
 
         backgroundBar.anchoredPosition = new Vector2(1500f, 500f); 
