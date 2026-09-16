@@ -5,10 +5,10 @@ import './BattleArena.css';
 // 2〜4人共通の対戦画面。プレイ中はUnity側の描画のみを表示する。
 export default function BattleArena({ bridge, view, onLoadFailed }) {
   const { unityProvider, sendMessage, isLoaded, initialisationError, loadingProgression } = useUnityContext({
-    loaderUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.loader.js',
-    dataUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.data',
-    frameworkUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.framework.js',
-    codeUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.wasm',
+    loaderUrl: '/POSE_SWORD_Unity/Builds/ver3.1/Build/ver3.1.loader.js',
+    dataUrl: '/POSE_SWORD_Unity/Builds/ver3.1/Build/ver3.1.data',
+    frameworkUrl: '/POSE_SWORD_Unity/Builds/ver3.1/Build/ver3.1.framework.js',
+    codeUrl: '/POSE_SWORD_Unity/Builds/ver3.1/Build/ver3.1.wasm',
   });
   const room = view?.room;
   const matchId = room?.matchId;
