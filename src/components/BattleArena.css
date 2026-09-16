@@ -1,0 +1,3 @@
+.mp-arena { position: relative; width: 100%; aspect-ratio: 16/9; max-width: 1400px; margin: 0 auto; background: #20252b; }
+.mp-status, .mp-loading { position: absolute; left: 10%; width: 80%; top: 45%; color: white; background: #000a; padding: 12px; box-sizing: border-box; pointer-events: none; text-align: center; font-weight: bold; }
+.mp-status { font-size: clamp(16px, 4vw, 40px); }

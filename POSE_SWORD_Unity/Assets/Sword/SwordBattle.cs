@@ -1,21 +1,43 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
+using System.Collections.Generic;
 using TMPro;
 
 public class SwordBattle : MonoBehaviour
 {
+    public MultiplayerManager MultiplayerOwner { get; private set; }
+    public string PlayerId { get; private set; }
+    public bool IsAlive { get { return !isDead && hp > 0; } }
     [Header("ステータス")]
     public string swordName = "ダミー剣";
     public int hp = 100;
-    private int maxHp; 
+    
+    private int maxHp;
     public int attack = 10;
+    public string hiltType = "0"; // 柄の種類＝必殺技の種類（JSONのhiltTypeが未指定なら"0"＝デフォルトの必殺技）
+
+    [Header("プレイヤー識別（P1赤 / P2青 / P3黄 / P4緑）")]
+    public int playerNumber = 1; // 1〜4。マルチプレイでは自動的にスロット番号(slotIndex+1)がセットされる
+    // 枠の色付けやオーラの色付けに使う共通カラーパレット。他スクリプト（MultiplayerManagerのHUD等）からも参照する。
+    public static readonly Color[] PlayerColors =
+    {
+        new Color(0.2f, 0.45f, 1f),     // P1 青
+        new Color(0.92f, 0.18f, 0.18f), // P2 赤
+        new Color(1f, 0.82f, 0.1f),     // P3 黄
+        new Color(0.25f, 0.85f, 0.35f), // P4 緑
+    };
+    public Color PlayerMainColor => PlayerColors[Mathf.Clamp(playerNumber - 1, 0, PlayerColors.Length - 1)];
+    // 必殺技が撃てるようになるSPのライン（独楽モードは竜巻の70、剣モードは満タン）
+    public float UltimateThreshold => SwordController.isKomaMode ? 70f : maxSp;
 
     [Header("UI設定")]
     public Slider hpBar;        // 手前の緑ゲージ
     public Slider delayHpBar;   // ▼【追加】奥の赤ゲージ
     public TextMeshProUGUI nameText; // ▼ 【変更】Text から TextMeshProUGUI に変更
-    public TextMeshProUGUI hpText;   // ▼ 【変更】Text から TextMeshProUGUI に変更   
+    public TextMeshProUGUI hpText;   // ▼ 【変更】Text から TextMeshProUGUI に変更
+    public Image frameImage;    // プレイヤーのメインカラーで塗る枠（HPパネルの縁など。Editor側で用意して割り当てる）
+    public Button specialAttackButton; // 必殺技専用ボタン。自キャラのSPが条件を満たした時だけ表示する（Editor側で用意して割り当てる）
 
     [Header("物理・ダメージ調整")]
     public float bounceForce = 500f;
@@ -27,10 +49,14 @@ public class SwordBattle : MonoBehaviour
     public GameObject damagePopupPrefab;
 
 [Header("演出（エフェクト）")]
-public ParticleSystem critEffectPrefab;   
-public ParticleSystem guardEffectPrefab;  
-private SpriteRenderer spriteRenderer;    
-private SwordController controller;       
+public ParticleSystem normalEffectPrehub;
+public ParticleSystem critEffectPrefab;
+public ParticleSystem guardEffectPrefab;
+public ParticleSystem ultimateAuraPrefab; // SPが必殺技分たまった時に体から出す炎エフェクト（メインカラーで色付けする。Editor側で用意して割り当てる）
+private ParticleSystem ultimateAuraInstance;
+private bool ultimateAuraActive;
+private SpriteRenderer spriteRenderer;
+private SwordController controller;
 
 [Header("サウンド")]
     public AudioClip normalHitSound; // 通常ヒット音
@@ -46,14 +72,30 @@ public static bool matchEnded = false;
     public float maxSp = 100f;         // SPの最大値
     public float passiveSpFill = 5f;   // 1秒間に自動で溜まる量
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
- 
+    public float giantSpinScale = 6f; // 巨大化一回転（hiltType:"1"）の拡大率
+    public float giantSpinDamageMultiplier = 8f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
+    public int cloneCount = 3; // 分身突進（hiltType:"2"）の分身数
+    public float cloneSpawnMinRadius = 2f; // 分身の出現位置：自分からの最小距離
+    public float cloneSpawnMaxRadius = 4f; // 分身の出現位置：自分からの最大距離
+    public float cloneDashSpeed = 35f; // 分身の突進速度
+    public float cloneDamageMultiplier = 3f; // 分身1体が命中した時のダメージ倍率（attackへの倍率）
+    public float cloneLifeTime = 3f; // 何にも当たらなかった場合に分身が自動的に消えるまでの秒数
+    public float cloneSpawnStagger = 0.08f; // 分身が1体ずつ出現する間隔（秒）
+    public int leafShieldCount = 3; // リーフシールド（hiltType:"3"）の展開枚数
+    public float leafShieldDuration = 15f; // リーフシールドの持続時間（秒）
+    public float leafShieldOrbitRadius = 2.5f; // 本体からの周回半径
+    public float leafShieldOrbitSpeed = 150f; // 周回速度（度/秒）
+    public float leafShieldHpRatio = 1f / 3f; // 各シールドのHP（本体の最大HPに対する割合）
+    public float leafShieldReflectMultiplier = 2f; // シールドが被弾した時、受けたダメージの何倍を相手に返すか
+
     // 突進状態の管理用
 // 突進状態の管理用
     [HideInInspector] public bool isDashing = false;
-    [HideInInspector] public bool isDashShooting = false; 
-    private float dashDamageBonus = 1.0f; 
+    [HideInInspector] public bool isDashShooting = false;
+    private float dashDamageBonus = 1.0f;
+    private bool hasHitDuringGiantSpin = false;
 
-    // ▼【新規追加】現在のダッシュ技の種類 (0:なし, 1:小ダッシュ, 2:竜巻, 3:大回転)
+    // ▼【新規追加】現在のダッシュ技の種類 (0:なし, 1:小ダッシュ, 2:竜巻, 3:大回転, 4:巨大化一回転, 5:分身突進)
     [HideInInspector] public int currentDashType = 0;
 
     // SwordBattle.cs の変数宣言エリアに追加
@@ -62,30 +104,149 @@ public static bool matchEnded = false;
     private Vector2 lastPosition;
     private Rigidbody2D rb;
     private bool isDead = false;
+    public bool IsDead => isDead;
 
     // ▼【新規追加】カメラが追従するための、画像サイズに左右されない本物の中心座標
     [HideInInspector] public Vector3 currentCenterPosition;
 
-    public static bool isRoundStarted = false; // ★新規追加：ラウンドが開始したか
+    public static bool isRoundStarted = false;
+
+    // ▼【N人対応】生存者数の管理。試合開始時にSceneControllerからプレイヤー人数がセットされ、
+    // 誰かが撃破されるたびにReportElimination()で減算。残り1人になった時だけ試合終了とする。
+    public static int alivePlayerCount = 0;
+
+    public static void ReportElimination()
+    {
+        alivePlayerCount = Mathf.Max(0, alivePlayerCount - 1);
+        if (alivePlayerCount <= 1) matchEnded = true;
+    }
 
     void Start()
     {   
+        if (MultiplayerOwner != null) return;
         matchEnded = false;
         isRoundStarted = false; // ★開始時は一回 false にする
+        InitializeComponents();
+
+        maxHp = hp;
+        UpdateUI();
+        ApplyPlayerColor();
+        lastPosition = transform.position;
+        currentCenterPosition = transform.position;
+    }
+
+    // ▼【新規追加】playerNumber(P1〜P4)に応じたメインカラーを枠画像に反映する
+    void ApplyPlayerColor()
+    {
+        if (frameImage == null) return;
+        Color c = PlayerMainColor;
+        c.a = frameImage.color.a;
+        frameImage.color = c;
+    }
+
+    void InitializeComponents()
+    {
         rb = GetComponent<Rigidbody2D>();
         controller = GetComponent<SwordController>();
         Transform blade = transform.Find("Blade");
         if (blade != null) spriteRenderer = blade.GetComponent<SpriteRenderer>();
-        // ▼追加：スピーカー（AudioSource）を取得、無ければ自動で追加する
         audioSource = GetComponent<AudioSource>();
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
 
-        maxHp = hp;
-        UpdateUI();
-        lastPosition = transform.position;
-        
-        // ▼【新規追加】初期値は通常の座標にしておく
-        currentCenterPosition = transform.position;
+        if (specialAttackButton != null)
+        {
+            specialAttackButton.onClick.RemoveListener(TryUltimate);
+            specialAttackButton.onClick.AddListener(TryUltimate);
+            specialAttackButton.gameObject.SetActive(false);
+        }
+
+    }
+
+    public void ConfigureMultiplayer(MultiplayerManager owner, string playerId)
+    {
+        MultiplayerOwner = owner; PlayerId = playerId;
+        InitializeComponents(); StopAllCoroutines();
+        enabled = true; isDead = false; isDashing = false; isDashShooting = false;
+        currentDashType = 0; currentSp = 0;
+        ApplyPlayerColor();
+        controller.enabled = true;
+        foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = true;
+        rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0;
+        lastPosition = transform.position; currentCenterPosition = transform.position;
+    }
+
+    // ▼ 通常クリック/タップ由来の入力：必殺技はここでは発動しない（ジャンプ・小ダッシュのみ）
+    public void ExecuteMultiplayerAction(bool right)
+    {
+        if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
+        string action = PoseSword.Multiplayer.BattlePolicies.PrimaryAction(SwordController.isKomaMode, currentSp,
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing, right);
+        switch (action)
+        {
+            case "KomaDash": StartCoroutine(DashRoutine()); break;
+            case "JumpRight": controller.NetworkJump(true); break;
+            case "JumpLeft": controller.NetworkJump(false); break;
+        }
+    }
+
+    // ▼【新規追加】必殺技専用ボタン/スペースキー由来の入力：SPが条件を満たしている時だけ発動する
+    // ▼【修正】SPが足りているかどうかの判定だけBattlePoliciesで行い、実際にどの技が出るかはUltimateRoutine()の
+    // hiltType分岐に任せる（以前はTornado/SwordDash固定で、柄違いの必殺技がオンラインでは一切出せなかった）
+    public void ExecuteMultiplayerUltimate()
+    {
+        if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
+        string action = PoseSword.Multiplayer.BattlePolicies.UltimateAction(SwordController.isKomaMode, currentSp,
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing);
+        if (action == null) return;
+        StartCoroutine(UltimateRoutine());
+    }
+
+    // ▼【新規追加】剣本体以外（分身・リーフシールドなど）からも、TakeDamage/QueueHitへの正しい経路で
+    // ダメージを与えられるようにする共通口。ローカルではTakeDamageへ、オンラインではHost権威のQueueHitへ回す
+    public void DealDamageTo(SwordBattle target, int damage, Vector2 hitPoint, bool isCrit = false, bool isWeakPoint = false)
+    {
+        if (target == null || target == this || !target.IsAlive) return;
+        if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage);
+        else target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
+    }
+
+    public void ApplyMultiplayerHealth(int health)
+    {
+        if (MultiplayerOwner == null || isDead) return;
+        int damage = Mathf.Max(0, hp - health);
+        if (damage > 0)
+        {
+            PlayClientDamageEffect(damage);
+            if (MultiplayerOwner.IsHost) currentSp = Mathf.Min(maxSp, currentSp + 100f * damage / maxHp * damageSpMultiplier);
+        }
+        hp = Mathf.Clamp(health, 0, maxHp); UpdateUI();
+        if (hp > 0) return;
+        isDead = true; isDashing = false; currentDashType = 0;
+        StopUltimateAura();
+        StopAllCoroutines(); controller.enabled = false; controller.isLocalControlled = false;
+        rb.simulated = false;
+        foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = false;
+        if (spriteRenderer != null) spriteRenderer.color = new Color(.2f, .2f, .2f);
+        if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
+        StartCoroutine(HideEliminatedSword());
+    }
+    IEnumerator HideEliminatedSword()
+    {
+        yield return new WaitForSecondsRealtime(.8f);
+        gameObject.SetActive(false);
+    }
+
+    // ▼【修正】dashType 4(巨大化一回転)・5(分身突進)・6(リーフシールド発動)の色分けと、
+    // 巨大化のスケールをクライアント側にも反映する
+    public void ApplyMultiplayerVisuals(float sp, bool dashing, int dashType, float scale)
+    {
+        if (!IsAlive) return;
+        currentSp = Mathf.Clamp(sp, 0, maxSp); isDashing = dashing; currentDashType = dashType;
+        if (spriteRenderer != null) spriteRenderer.color = dashType == 1 ? new Color(1, .5f, .5f) :
+            dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) :
+            dashType == 4 ? new Color(1f, .3f, .3f) : dashType == 5 ? new Color(.3f, .6f, 1f) :
+            dashType == 6 ? new Color(.4f, .95f, .5f) : Color.white;
+        if (scale > 0f) transform.localScale = Vector3.one * scale;
     }
 
     void FixedUpdate()
@@ -117,9 +278,14 @@ public static bool matchEnded = false;
             if (delayHpBar.value - hpBar.value < 0.5f) delayHpBar.value = hpBar.value;
         }
 
+        if (MultiplayerOwner == null && Input.GetMouseButtonDown(0))
+    {
+        Debug.Log($"クリック検出 / Round={isRoundStarted}, Dead={isDead}, Ended={matchEnded}, Local={(controller != null && controller.isLocalControlled)}");
+    }
+
         if (!isRoundStarted || isDead || matchEnded) return;
 
-        currentSp += passiveSpFill * Time.deltaTime;
+        if (MultiplayerOwner == null || MultiplayerOwner.IsHost) currentSp += passiveSpFill * Time.deltaTime;
         currentSp = Mathf.Clamp(currentSp, 0f, maxSp);
 
         if (spGaugeBar != null)
@@ -133,23 +299,43 @@ public static bool matchEnded = false;
             spText.text = $"SP: {Mathf.FloorToInt(currentSp)} / {maxSp}";
         }
 
-        // ▼【変更】画面の「右半分」か「左半分」かを判定してジャンプ！
-        if (Input.GetMouseButtonDown(0) && controller != null && controller.isLocalControlled)
+        UpdateUltimateAura();
+        UpdateSpecialAttackButton();
+
+        if (controller != null && controller.isLocalControlled)
         {
-            // クリックしたX座標が、画面幅の半分より大きければ「右（true）」、小さければ「左（false）」
-            bool clickedRight = Input.mousePosition.x > (Screen.width / 2f);
-            
-            TryAction(clickedRight); 
+            // ▼【変更】画面の「右半分」か「左半分」かを判定してジャンプ！（必殺技はここでは発動しない）
+            if (Input.GetMouseButtonDown(0))
+            {
+                // クリックしたX座標が、画面幅の半分より大きければ「右（true）」、小さければ「左（false）」
+                bool clickedRight = Input.mousePosition.x > (Screen.width / 2f);
+                TryAction(clickedRight);
+            }
+
+            // ▼【新規追加】PC操作時のみ：スペースキーでも必殺技専用ボタンと同じ発動ができるようにする
+            if (Input.GetKeyDown(KeyCode.Space)) TryUltimate();
         }
     }
 
+    // ▼【新規追加】必殺技専用ボタンの表示切り替え：自キャラのSPが必殺技分たまっている時だけ表示する
+    // オンラインN人戦では全員のSwordBattleが同じ1つのボタンを参照しているため、
+    // 自分が操作しているキャラ以外は絶対にこのボタンへ触れないようにする（他人の生死やSPで消えてしまうのを防ぐ）
+    void UpdateSpecialAttackButton()
+    {
+        if (specialAttackButton == null || controller == null || !controller.isLocalControlled) return;
+        bool shouldShow = !isDashing && currentSp >= UltimateThreshold;
+        if (specialAttackButton.gameObject.activeSelf != shouldShow)
+            specialAttackButton.gameObject.SetActive(shouldShow);
+    }
+
     // ▼追加：SwordGeneratorから正しいタイミングで呼ばれる初期化関数
-    public void SetupStatus(string newName, int newHp, int newAttack)
+    public void SetupStatus(string newName, int newHp, int newAttack, string newHiltType = "0")
     {
         swordName = newName;
         hp = newHp;
         maxHp = newHp;
         attack = newAttack;
+        hiltType = string.IsNullOrEmpty(newHiltType) ? "0" : newHiltType;
         UpdateUI();
     }
 
@@ -172,8 +358,42 @@ public static bool matchEnded = false;
         if (hpText != null) hpText.text = $"{hp} / {maxHp}";
     }
 
+    // ▼【新規追加】SPが必殺技を撃てる量まで溜まっている間、メインカラーの炎エフェクトを体から出し続ける
+    void UpdateUltimateAura()
+    {
+        bool shouldBeActive = IsAlive && currentSp >= UltimateThreshold;
+        if (shouldBeActive == ultimateAuraActive) return;
+        ultimateAuraActive = shouldBeActive;
+
+        if (shouldBeActive)
+        {
+            if (ultimateAuraInstance == null && ultimateAuraPrefab != null)
+            {
+                ultimateAuraInstance = Instantiate(ultimateAuraPrefab, transform);
+                ultimateAuraInstance.transform.localPosition = new Vector3(0f, 0f, 5f);
+                var main = ultimateAuraInstance.main;
+                main.startColor = PlayerMainColor;
+            }
+            if (ultimateAuraInstance != null) ultimateAuraInstance.Play();
+        }
+        else if (ultimateAuraInstance != null)
+        {
+            ultimateAuraInstance.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+        }
+    }
+
+    void StopUltimateAura()
+    {
+        ultimateAuraActive = false;
+        if (ultimateAuraInstance != null) ultimateAuraInstance.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+        // ▼ ボタンは全員で共有されているため、自分が操作しているキャラの死亡時だけ隠す（他人の脱落で消してしまわないように）
+        if (specialAttackButton != null && controller != null && controller.isLocalControlled)
+            specialAttackButton.gameObject.SetActive(false);
+    }
+
     void OnCollisionEnter2D(Collision2D collision)
     {
+        if (MultiplayerOwner != null && (!MultiplayerOwner.IsHost || !MultiplayerOwner.IsPlaying)) return;
         if (isDead) return;
         bool wasDashing = isDashing;
         
@@ -392,7 +612,9 @@ public static bool matchEnded = false;
                     }
                 }
                     // ▼変更：TakeDamageの結果（倒したかどうか）を受け取る
-                    bool killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
+                    bool killedTarget = false;
+                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage);
+                    else killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
 
                     // ▼追加：もし自分が勝者になったなら、弾き飛ぶのをキャンセル！
                     if (killedTarget)
@@ -437,6 +659,7 @@ public static bool matchEnded = false;
     // ▼変更：void から bool に変更
     public bool TakeDamage(int damage, Vector2 hitPos, bool isCrit, bool isWeakPoint)
     {
+        if (MultiplayerOwner != null) return false; // HP is committed once per physics step by MatchRules.
         if (isDead) return false; // 変更
         if (isDashing)
         {
@@ -464,7 +687,7 @@ public static bool matchEnded = false;
 
         if (hp == 0)
         {
-            matchEnded = true;
+            ReportElimination();
             // 時間の奪い合いを防ぐため、進行中のヒットストップなどを全て強制キャンセル
             StopAllCoroutines();
             
@@ -501,6 +724,7 @@ public static bool matchEnded = false;
 
         if (isCrit && critEffectPrefab != null) Instantiate(critEffectPrefab, hitPos, Quaternion.identity);
         else if (isWeakPoint && guardEffectPrefab != null) Instantiate(guardEffectPrefab, hitPos, Quaternion.identity);
+        else Instantiate(normalEffectPrehub, hitPos, Quaternion.identity);
 
         if (hp <= 0)
         {
@@ -526,36 +750,42 @@ public static bool matchEnded = false;
     IEnumerator DefeatRoutine()
     {
         isDead = true;
+        StopUltimateAura();
         if (controller != null) controller.enabled = false;
 
-        // カメラを激しく揺らす！
+        // 剣が黒くなり、コライダーを消してすり抜けるようにする（めり込み防止）
+        // ▼【N人対応】ここまでは「自分が脱落した」演出。試合が終わったかに関わらず毎回実行する
+        if (spriteRenderer != null) spriteRenderer.color = new Color(0.2f, 0.2f, 0.2f);
+        Collider2D[] colliders = GetComponentsInChildren<Collider2D>();
+        foreach (var col in colliders) col.enabled = false;
+
+        // 天高く吹き飛ばし、超高速で回転させる！
+        rb.gravityScale = 2f;
+        rb.linearVelocity = Vector2.zero; // 今の勢いをリセット
+        rb.AddForce(new Vector2(Random.Range(-500f, 500f), 2000f), ForceMode2D.Impulse);
+        rb.AddTorque(5000f, ForceMode2D.Impulse);
+
+        // ▼【N人対応】ここから先（カメラ固定・スローモーション・完全停止）は
+        // 「本当に試合が終わった撃破」の時だけ行う。3〜4人戦で他の生存者がまだ残っている間は
+        // 試合を止めず、脱落者は上の演出だけ見せて続行させる。
+        if (!matchEnded) yield break;
+
+        // カメラを激しく揺らして固定！
         BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
-        
         if (cam != null)
         {
             cam.StopTracking(); // 追従をストップして位置をロック！
             cam.TriggerShake(1.5f, 1.2f);
         }
 
-        // 剣が黒くなり、コライダーを消してすり抜けるようにする（めり込み防止）
-        if (spriteRenderer != null) spriteRenderer.color = new Color(0.2f, 0.2f, 0.2f); 
-        Collider2D[] colliders = GetComponentsInChildren<Collider2D>();
-        foreach (var col in colliders) col.enabled = false;
-
-        // 天高く吹き飛ばし、超高速で回転させる！
-        rb.gravityScale = 2f; 
-        rb.linearVelocity = Vector2.zero; // 今の勢いをリセット
-        rb.AddForce(new Vector2(Random.Range(-500f, 500f), 2000f), ForceMode2D.Impulse); 
-        rb.AddTorque(5000f, ForceMode2D.Impulse); 
-
         // スローモーション発動
-        Time.timeScale = 0.15f; 
-        
+        Time.timeScale = 0.15f;
+
         // 2.5秒間（現実時間）劇的なスローモーションと画面揺れを見せる
         yield return new WaitForSecondsRealtime(2.5f);
 
         // ゲーム完全停止
-        Time.timeScale = 0f; 
+        Time.timeScale = 0f;
     }
 
     public void PlayClientDamageEffect(int damage)
@@ -566,13 +796,17 @@ public static bool matchEnded = false;
         // if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
 
         // ⭕ 修正後：通信に頼らず、届いたダメージの大きさで通常音とクリティカル音をスマートに分岐！
+        // ▼【新規追加】TakeDamage()はマルチプレイ中は呼ばれない（HPはMatchRules経由で直接反映される）ため、
+        // ここでヒットエフェクトも出さないとマルチプレイでは誰の画面にも斬撃エフェクトが表示されなかった
         if (damage >= 100)
         {
             if (critHitSound != null) audioSource.PlayOneShot(critHitSound);
+            if (critEffectPrefab != null) Instantiate(critEffectPrefab, transform.position, Quaternion.identity);
         }
         else
         {
             if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+            if (normalEffectPrehub != null) Instantiate(normalEffectPrehub, transform.position, Quaternion.identity);
         }
 
         // ▼ 通信相手の画面にもダメージ数値を出す（ここはそのまま）
@@ -596,9 +830,9 @@ public static bool matchEnded = false;
             }
         }
 
-        if (hp - damage <= 0)
+        if (MultiplayerOwner == null && hp - damage <= 0)
         {
-            matchEnded = true;
+            ReportElimination();
             StopAllCoroutines();
             if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
             StartCoroutine(DefeatRoutine());
@@ -608,41 +842,54 @@ public static bool matchEnded = false;
     // ▼【新規追加】突進アクション
     // ▼【変更】SPの量によって技を分岐させる
     // ▼【変更】自分のアクションを実行しつつ、その名前をWebに送る！
+    // ▼【変更】通常クリック/タップ用：必殺技はここでは発動せず、ジャンプ・小ダッシュのみ行う
     public void TryAction(bool clickedRight = true)
     {
+        if (MultiplayerOwner != null) { MultiplayerOwner.SubmitLocalInput(clickedRight); return; }
         if (isDead || matchEnded || isDashing) return;
 
         string actionName = ""; // ★Webに送る用のアクション名
 
         if (SwordController.isKomaMode)
         {
-            if (currentSp >= 70f)
+            if (currentSp >= 20f)
             {
-                StartCoroutine(TornadoDashRoutine());
-                actionName = "Tornado";
-            }
-            else if (currentSp >= 20f)
-            {
-                StartCoroutine(DashRoutine()); 
+                StartCoroutine(DashRoutine());
                 actionName = "KomaDash";
             }
         }
-        else
+        else if (controller != null)
         {
-            if (currentSp >= maxSp)
-            {
-                StartCoroutine(SwordDashRoutine());
-                actionName = "SwordDash";
-            }
-            else if (controller != null)
-            {
-                controller.NetworkJump(clickedRight); 
-                actionName = clickedRight ? "JumpRight" : "JumpLeft";
-            }
+            controller.NetworkJump(clickedRight);
+            actionName = clickedRight ? "JumpRight" : "JumpLeft";
         }
 
         // ▼【新規追加】自分が操作した時だけ、Web（React）側にアクションを伝える！
         if (controller != null && controller.isLocalControlled && !string.IsNullOrEmpty(actionName))
+        {
+            InputMessage msg = new InputMessage();
+            msg.action = actionName;
+            NetworkManager.Instance.SendData("INPUT", JsonUtility.ToJson(msg));
+        }
+    }
+
+    // ▼【新規追加】必殺技専用ボタン/スペースキー用：SPが必殺技分たまっている時だけ発動する
+    public void TryUltimate()
+    {
+        // ▼【修正】specialAttackButtonはP1〜P4全員のSwordBattleが同じ1つのUIボタンを共有しており、
+        // 各インスタンスがInitializeComponents()で自分のTryUltimateをonClickに登録するため、
+        // ボタンを1回押すと全員分のTryUltimate()が呼ばれてしまう。
+        // 自分が操作しているキャラでなければ即座に何もしないようにして、他人の必殺技が暴発しないようにする
+        if (controller == null || !controller.isLocalControlled) return;
+        if (MultiplayerOwner != null) { MultiplayerOwner.SubmitLocalUltimate(); return; }
+        if (isDead || matchEnded || isDashing || !isRoundStarted) return;
+        if (currentSp < UltimateThreshold) return;
+
+        StartCoroutine(UltimateRoutine());
+        string actionName = SwordController.isKomaMode ? "Tornado" : "SwordDash";
+
+        // ▼ 自分が操作した時だけ、Web（React）側にアクションを伝える！
+        if (controller != null && controller.isLocalControlled)
         {
             InputMessage msg = new InputMessage();
             msg.action = actionName;
@@ -660,7 +907,7 @@ public static bool matchEnded = false;
         if (actionName == "Tornado")
         {
             currentSp = 0f; // 強制消費
-            StartCoroutine(TornadoDashRoutine());
+            StartCoroutine(UltimateRoutine());
         }
         else if (actionName == "KomaDash")
         {
@@ -670,7 +917,7 @@ public static bool matchEnded = false;
         else if (actionName == "SwordDash")
         {
             currentSp = 0f;
-            StartCoroutine(SwordDashRoutine());
+            StartCoroutine(UltimateRoutine());
         }
         else if (actionName == "JumpRight")
         {
@@ -708,6 +955,43 @@ public static bool matchEnded = false;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
+    // ▼【新規追加】剣ごとのhiltType（JSON由来）に応じて必殺技の中身を振り分ける
+    // 未対応のhiltType（未指定＝"0"を含む）は既存のデフォルト必殺技にフォールバック
+    IEnumerator UltimateRoutine()
+    {
+        // ▼ 独楽モードと剣モードで必殺技を完全に分けて管理する。
+        // hiltType(柄の種類)ごとの技は、モードごとに別々のswitchで振り分ける。
+        if (SwordController.isKomaMode)
+        {
+            switch (hiltType)
+            {
+                // ▼ 独楽モード専用の必殺技を増やす場合はここにcaseを足す（今のところhiltTypeによらず竜巻に統一）
+                default:
+                    yield return StartCoroutine(TornadoDashRoutine());
+                    break;
+            }
+        }
+        else
+        {
+            switch (hiltType)
+            {
+                // ▼ 剣モード専用の必殺技を増やす場合はここにcaseを足す
+                case "1": // 巨大化して一回転。当たると大ダメージ
+                    yield return StartCoroutine(GiantSpinRoutine());
+                    break;
+                case "2": // 分身を3体出現させ、相手へホーミング突進させる
+                    yield return StartCoroutine(CloneRushRoutine());
+                    break;
+                case "3": // 本体の周りをシールドが公転する「リーフシールド」
+                    yield return StartCoroutine(LeafShieldRoutine());
+                    break;
+                default:
+                    yield return StartCoroutine(SwordDashRoutine());
+                    break;
+            }
+        }
+    }
+
     // ▼【修正】独楽モード：超必殺「竜巻」
     IEnumerator TornadoDashRoutine()
     {
@@ -718,9 +1002,9 @@ public static bool matchEnded = false;
 
         Debug.Log($"🌪️ 独楽モード：超必殺【竜巻】発動！ (消費SP: {consumedSp:F0})");
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
+        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f));
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f), PlayerMainColor);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
@@ -760,6 +1044,324 @@ public static bool matchEnded = false;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
+    // ▼【新規追加】剣モード必殺技（hiltType:"1"）：巨大化して一回転。当たると大ダメージ
+    IEnumerator GiantSpinRoutine()
+    {
+        isDashing = true;
+        currentDashType = 4;
+        currentSp = 0f;
+        hasHitDuringGiantSpin = false;
+
+        // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
+        // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
+        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
+        {
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f), PlayerMainColor);
+        }
+
+        if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.3f, 0.3f);
+
+        Vector3 originalScale = transform.localScale;
+        transform.localScale = originalScale * giantSpinScale;
+
+        // 壁にも相手の剣にも物理的に引っかからず回転できるよう、回転中は当たり判定をトリガー化する
+        // （ダメージはOnTriggerEnter2D側で判定する）
+        Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
+        bool[] originalTriggerStates = new bool[myColliders.Length];
+        for (int i = 0; i < myColliders.Length; i++)
+        {
+            originalTriggerStates[i] = myColliders[i].isTrigger;
+            myColliders[i].isTrigger = true;
+        }
+
+        bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
+        float originalGravityScale = 0f;
+
+        if (controlsPhysics)
+        {
+            // 回転中は床に落ちていかないよう、重力も一時的に切る
+            originalGravityScale = rb.gravityScale;
+            rb.gravityScale = 0f;
+            rb.linearVelocity = Vector2.zero;
+        }
+
+        // 敵がいる方向に振りかぶるように回転方向を決める
+        float spinDir = 1f;
+        if (controller != null && controller.enemyTarget != null)
+        {
+            float dx = controller.enemyTarget.position.x - transform.position.x;
+            if (Mathf.Abs(dx) > 0.01f)
+            {
+                spinDir = Mathf.Sign(dx) * -1f;
+            }
+        }
+
+        float angularSpeed = 1080f * spinDir; // 度/秒
+        float duration = 360f / Mathf.Abs(angularSpeed); // ちょうど一回転分の時間
+
+        if (controlsPhysics)
+        {
+            rb.angularVelocity = angularSpeed;
+        }
+
+        yield return new WaitForSeconds(duration);
+
+        if (controlsPhysics)
+        {
+            rb.angularVelocity = 0f;
+            rb.gravityScale = originalGravityScale;
+        }
+
+        for (int i = 0; i < myColliders.Length; i++)
+        {
+            if (myColliders[i] != null) myColliders[i].isTrigger = originalTriggerStates[i];
+        }
+
+        transform.localScale = originalScale;
+        isDashing = false;
+        currentDashType = 0;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】剣モード必殺技（hiltType:"2"）：分身を3体出現させ、相手へホーミング突進させる
+    IEnumerator CloneRushRoutine()
+    {
+        isDashing = true;
+        currentDashType = 5;
+        currentSp = 0f;
+
+        Color cloneColor = new Color(0.3f, 0.6f, 1f);
+
+        // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
+        // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
+        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
+        {
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "影武者突撃!!", cloneColor, PlayerMainColor);
+        }
+
+        if (spriteRenderer != null) spriteRenderer.color = cloneColor;
+
+        // ▼【重要】実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行う。
+        // Client側の見た目再生（Kinematicコピー）では分身は出すが、ダメージは与えない。
+        bool isAuthoritative = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
+        int cloneDamage = Mathf.Max(Mathf.RoundToInt(attack * cloneDamageMultiplier), 1);
+
+        Vector3 enemyPos = (controller != null && controller.enemyTarget != null)
+            ? controller.enemyTarget.position
+            : transform.position + transform.right;
+
+        Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
+        List<Collider2D> spawnedColliders = new List<Collider2D>();
+        const float cloneColliderRadius = 0.6f;
+        float sectorSize = 360f / cloneCount; // 各分身の出現方向を等間隔に散らすための区画角度
+
+        for (int i = 0; i < cloneCount; i++)
+        {
+            // ▼【重要】画面端など出現位置の確保が難しい状況で1体の生成に失敗しても、
+            // 残りの分身の生成や末尾の状態リセットが必ず実行されるようにtry/catchで保護する
+            try
+            {
+                float baseAngle = i * sectorSize;
+                Vector3 spawnPos = FindCloneSpawnPosition(cloneColliderRadius, baseAngle, sectorSize);
+
+                GameObject cloneObj = new GameObject("SwordClone");
+                cloneObj.transform.position = spawnPos;
+                cloneObj.transform.rotation = transform.rotation;
+
+                if (spriteRenderer != null)
+                {
+                    SpriteRenderer sr = cloneObj.AddComponent<SpriteRenderer>();
+                    sr.sprite = spriteRenderer.sprite;
+                    sr.color = cloneColor;
+                    sr.sortingLayerID = spriteRenderer.sortingLayerID;
+                    sr.sortingOrder = spriteRenderer.sortingOrder;
+                }
+
+                CircleCollider2D cloneCollider = cloneObj.AddComponent<CircleCollider2D>();
+                cloneCollider.radius = cloneColliderRadius;
+
+                Rigidbody2D cloneRb = cloneObj.AddComponent<Rigidbody2D>();
+                cloneRb.gravityScale = 0f;
+
+                Vector2 dirToEnemy = ((Vector2)enemyPos - (Vector2)spawnPos).normalized;
+                cloneRb.linearVelocity = dirToEnemy * cloneDashSpeed;
+
+                // ▼【新規追加】オンライン対戦では、Host権威の分身だけをMultiplayerManagerに登録し、
+                // その位置をSYNCでクライアントへ配信して見た目を再現できるようにする
+                string cloneId = (isAuthoritative && MultiplayerOwner != null) ? MultiplayerOwner.RegisterClone(cloneObj, PlayerId, cloneColor) : null;
+
+                SwordCloneProjectile clone = cloneObj.AddComponent<SwordCloneProjectile>();
+                clone.Setup(this, isAuthoritative, cloneDamage, cloneLifeTime, MultiplayerOwner, cloneId);
+
+                // 自分自身や他の分身とは当たらないようにする
+                foreach (Collider2D myCol in myColliders)
+                {
+                    Physics2D.IgnoreCollision(cloneCollider, myCol, true);
+                }
+                foreach (Collider2D otherCloneCollider in spawnedColliders)
+                {
+                    Physics2D.IgnoreCollision(cloneCollider, otherCloneCollider, true);
+                }
+
+                // ▼【保険】それでも壁と重なった状態で出現してしまった場合、出現直後に消えないよう
+                // 重なっている壁（相手の剣ではないコライダー）とは衝突しないようにする
+                foreach (Collider2D overlapped in Physics2D.OverlapCircleAll(spawnPos, cloneColliderRadius))
+                {
+                    if (overlapped.GetComponentInParent<SwordBattle>() == null)
+                    {
+                        Physics2D.IgnoreCollision(cloneCollider, overlapped, true);
+                    }
+                }
+                spawnedColliders.Add(cloneCollider);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"❌ 分身の生成に失敗しました（{i + 1}体目）: {e}");
+            }
+
+            // 出現タイミングを1体ずつずらす（最後の1体の後は待たない）
+            if (i < cloneCount - 1 && cloneSpawnStagger > 0f)
+            {
+                yield return new WaitForSeconds(cloneSpawnStagger);
+            }
+        }
+
+        yield return new WaitForSeconds(0.3f);
+
+        isDashing = false;
+        currentDashType = 0;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】剣モード必殺技（hiltType:"3"）：本体の周りをシールドが公転する「リーフシールド」。
+    // 発動直後（無敵の一瞬）を除けば通常通り動けるようになり、シールドはバックグラウンドで持続時間いっぱい残り続ける。
+    // 各シールドは本体の攻撃力ぶんのダメージを敵に与えつつ、敵の攻撃力ぶんのダメージを受けて壊れる。
+    IEnumerator LeafShieldRoutine()
+    {
+        isDashing = true;
+        currentDashType = 6;
+        currentSp = 0f;
+
+        Color shieldColor = new Color(0.4f, 0.95f, 0.5f);
+
+        // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
+        // 他の剣モード必殺技と同様にローカル/テストモード時だけ再生する
+        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
+        {
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "リーフシールド!!", shieldColor, PlayerMainColor);
+        }
+
+        if (spriteRenderer != null) spriteRenderer.color = shieldColor;
+
+        // ▼【重要】実際にシールドを展開・判定するのはHost権威（またはローカル/テストモード）側のみ。
+        // Client側の見た目再生（Kinematicコピー）では展開しない（見た目はSYNCで複製される）
+        bool isAuthoritative = rb == null || rb.bodyType == RigidbodyType2D.Dynamic;
+        if (isAuthoritative && spriteRenderer != null)
+        {
+            float shieldHp = Mathf.Max(1f, maxHp * leafShieldHpRatio);
+            float sectorSize = 360f / Mathf.Max(1, leafShieldCount);
+
+            for (int i = 0; i < leafShieldCount; i++)
+            {
+                GameObject shieldObj = new GameObject("LeafShield_" + i);
+
+                SpriteRenderer sr = shieldObj.AddComponent<SpriteRenderer>();
+                sr.sprite = spriteRenderer.sprite;
+                sr.color = shieldColor;
+                sr.sortingLayerID = spriteRenderer.sortingLayerID;
+                sr.sortingOrder = spriteRenderer.sortingOrder;
+
+                CircleCollider2D col = shieldObj.AddComponent<CircleCollider2D>();
+                col.isTrigger = true;
+                col.radius = 0.5f;
+
+                LeafShieldOrb orb = shieldObj.AddComponent<LeafShieldOrb>();
+                orb.Setup(this, i * sectorSize, leafShieldOrbitRadius, leafShieldOrbitSpeed, shieldHp, leafShieldReflectMultiplier, leafShieldDuration);
+
+                // ▼ オンライン対戦では、この分身をMultiplayerManagerに登録し、位置をSYNCでクライアントへ配信する
+                if (MultiplayerOwner != null)
+                {
+                    string id = MultiplayerOwner.RegisterClone(shieldObj, PlayerId, shieldColor);
+                    orb.SetNetworkId(MultiplayerOwner, id);
+                }
+            }
+        }
+
+        yield return new WaitForSeconds(0.2f);
+
+        isDashing = false;
+        currentDashType = 0;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】分身の出現位置を決める。baseAngleを中心とした区画(sectorSize)内でランダムな方向・距離を選び、
+    // 壁・床と重なる場合は区画内で角度をずらしながら数回試行する。分身ごとに区画をずらすことで位置が偏らないようにする。
+    // 見つからなければ最後に試した場所を返す（呼び出し側でIgnoreCollisionの保険をかける）
+    // 画面端など、割り当てられた方向(baseAngle)がずっと壁で塞がっている場合に備え、
+    // 後半の試行では区画に関係なく全方位からも探す
+    private Vector3 FindCloneSpawnPosition(float colliderRadius, float baseAngle, float sectorSize)
+    {
+        const int attemptCount = 8;
+        const int sectorAttempts = 3; // 最初の数回は割り当てられた方向を優先して探す
+
+        Vector3 candidate = transform.position;
+        for (int attempt = 0; attempt < attemptCount; attempt++)
+        {
+            float angle = attempt < sectorAttempts
+                ? baseAngle + Random.Range(-sectorSize * 0.5f, sectorSize * 0.5f)
+                : Random.Range(0f, 360f); // 割り当てられた区画が塞がっている場合は全方位から探す
+
+            // 半径も塞がっている場合に備え、徐々に自分に近い側も試す
+            float minRadius = Mathf.Lerp(cloneSpawnMinRadius, 0.5f, (float)attempt / (attemptCount - 1));
+            float radius = Random.Range(Mathf.Min(minRadius, cloneSpawnMaxRadius), cloneSpawnMaxRadius);
+
+            Vector2 dir = new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad));
+            candidate = transform.position + (Vector3)(dir * radius);
+
+            bool blockedByWall = false;
+            foreach (Collider2D overlapped in Physics2D.OverlapCircleAll(candidate, colliderRadius))
+            {
+                if (overlapped.GetComponentInParent<SwordBattle>() == null)
+                {
+                    blockedByWall = true;
+                    break;
+                }
+            }
+
+            if (!blockedByWall) return candidate;
+        }
+        return candidate;
+    }
+
+    // ▼【新規追加】巨大化一回転（currentDashType 4）専用のダメージ判定
+    // （回転中は当たり判定をトリガー化しているためOnCollisionEnter2Dではなくこちらで処理する）
+    void OnTriggerEnter2D(Collider2D other)
+    {
+        if (isDead || matchEnded) return;
+        if (currentDashType != 4 || hasHitDuringGiantSpin) return;
+
+        // ▼【重要】トリガー判定はKinematic同士でも発火してしまう。
+        // 他の必殺技と同様、実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行い、
+        // Client側の見た目再生（Kinematicコピー）では二重計算しない。HP等はHostからのSYNCで同期される。
+        if (rb == null || rb.bodyType != RigidbodyType2D.Dynamic) return;
+
+        SwordBattle target = other.GetComponentInParent<SwordBattle>();
+        if (target == null || target == this) return;
+
+        hasHitDuringGiantSpin = true;
+
+        bool isWeakPoint = other.CompareTag("Handle");
+        int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier);
+        if (isWeakPoint) damage *= 2;
+        damage = Mathf.Max(damage, 1);
+
+        Vector2 hitPoint = other.ClosestPoint(transform.position);
+        // ▼【修正】target.TakeDamage()を直接呼ぶと、target側がマルチプレイ中(MultiplayerOwner != null)の時に
+        // 何もせず握りつぶしてしまう（HPはQueueHit経由のMatchRulesでのみ確定するため）。
+        // DealDamageTo()を通すことで、オンラインでも正しくダメージが反映されるようにする
+        DealDamageTo(target, damage, hitPoint, true, isWeakPoint);
+    }
+
     // ▼【修正】剣モード専用「一直線ジャンプダッシュ」
     IEnumerator SwordDashRoutine()
     {
@@ -772,9 +1374,9 @@ public static bool matchEnded = false;
         currentSp = 0f;
         dashDamageBonus = 5.0f; 
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
+        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f));
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f), PlayerMainColor);
         }
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）

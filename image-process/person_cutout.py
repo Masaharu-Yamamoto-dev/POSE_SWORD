@@ -15,6 +15,7 @@ import base64
 import binascii
 import io
 import json
+import os
 import sys
 
 import numpy as np
@@ -57,6 +58,12 @@ def decode_image(b64: str) -> Image.Image:
     return img.convert("RGBA")
 
 
+# 切り抜きモデル。人物専用(u2net_human_seg)を既定にする。
+# 汎用の u2net は「画面で最も目立つ物体」を抜くため、家具などを巻き込むことがある。
+# 変更するときは Dockerfile の焼き込みも同じ名前になる（DEFAULT_MODEL を参照している）。
+DEFAULT_MODEL = os.environ.get("REMBG_MODEL") or "u2net_human_seg"
+
+
 def keep_largest_subject(rgba: Image.Image) -> Image.Image:
     """アルファの連結成分のうち最大のものだけを残す(主被写体一人だけ)。"""
     from scipy import ndimage  # rembg の依存に含まれるため遅延 import
@@ -88,7 +95,7 @@ def cutout_person(
     largest_only: bool = True,
     crop: bool = True,
     alpha_matting: bool = False,
-    model: str = "u2net",
+    model: str = DEFAULT_MODEL,
     session=None,
 ) -> Image.Image:
     """rembg で人物を切り抜き、背景透過の RGBA Image を返す。
@@ -123,7 +130,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("input", help="入力 JSON ファイルのパス('-' で標準入力)")
     p.add_argument("-o", "--output", default="output.png", help="出力 PNG パス(既定: output.png)")
     p.add_argument("--json-key", default="imageData", help="base64 が入っているキー名(既定: imageData)")
-    p.add_argument("--model", default="u2net", help="rembg モデル名(既定: u2net)")
+    p.add_argument("--model", default=DEFAULT_MODEL,
+                   help=f"rembg モデル名(既定: {DEFAULT_MODEL})")
     p.add_argument("--all-subjects", action="store_true", help="主被写体だけでなく検出した全領域を残す")
     p.add_argument("--no-crop", action="store_true", help="被写体で切り抜かず元の画像サイズを維持する")
     p.add_argument("--alpha-matting", action="store_true", help="輪郭をより滑らかにする(低速)")

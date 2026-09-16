@@ -18,6 +18,7 @@ public class SwordController : MonoBehaviour
     // 【追加1】上部の変数宣言のところ
     [Header("操作権限")]
     public bool isLocalControlled = true;
+    [HideInInspector] public MultiplayerManager multiplayer;
 
     [Header("モード設定")]
     public static bool isKomaMode = false; // 全体で共有するモードフラグ
@@ -37,7 +38,7 @@ public class SwordController : MonoBehaviour
     {
         // Unityエディタで実行している時だけ、インスペクタのチェックを反映する
 #if UNITY_EDITOR
-        isKomaMode = testKomaMode;
+        if (multiplayer == null) isKomaMode = testKomaMode;
 #endif
         // 開始時に重力と摩擦をセット
         ApplyPhysicsMode();
@@ -50,11 +51,45 @@ public class SwordController : MonoBehaviour
         // {
         //     JumpAndSpin();
         // }
+
+        // ▼【N人対応】毎フレーム、生存中で最も近い相手を自動でターゲットにする
+        // (本物のマルチプレイ中はMultiplayerManager.UpdateTargets()が専用ロジックでenemyTargetを決めるため、ここでは触らない)
+        if (multiplayer == null) RefreshEnemyTarget();
+    }
+
+    // ▼【N人対応】NetworkManagerが持つ全プレイヤーの中から、自分以外・生存中・最も近い相手を探す
+    // (MultiplayerManager管理下ではない、ローカルデバッグ用の2〜4人プレイでのみ使われる)
+    void RefreshEnemyTarget()
+    {
+        if (NetworkManager.Instance == null) return;
+
+        GameObject[] swords = NetworkManager.Instance.playerSwords;
+        Transform nearest = null;
+        float nearestDist = float.MaxValue;
+
+        for (int i = 0; i < swords.Length; i++)
+        {
+            GameObject obj = swords[i];
+            if (obj == null || obj == gameObject || !obj.activeInHierarchy) continue;
+
+            SwordBattle otherBattle = obj.GetComponent<SwordBattle>();
+            if (otherBattle != null && otherBattle.IsDead) continue;
+
+            float dist = (obj.transform.position - transform.position).sqrMagnitude;
+            if (dist < nearestDist)
+            {
+                nearestDist = dist;
+                nearest = obj.transform;
+            }
+        }
+
+        if (nearest != null) enemyTarget = nearest;
     }
 
 
     void FixedUpdate()
     {
+        if (multiplayer != null && (!multiplayer.IsHost || !multiplayer.IsPlaying)) return;
         // 独楽モードで、自分に操作権限がある時だけ自動で動かす
         if (isKomaMode && swordRigidbody != null && swordRigidbody.bodyType == RigidbodyType2D.Dynamic)
         {

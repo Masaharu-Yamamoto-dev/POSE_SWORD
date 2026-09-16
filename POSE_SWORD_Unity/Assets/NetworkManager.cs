@@ -19,19 +19,27 @@ public class SwordSyncData {
 [System.Serializable]
 public class SyncMessage {
     public string type = "SYNC";
-    public SwordSyncData hostSword;
-    public SwordSyncData clientSword;
+    public SwordSyncData[] swords; // ▼ インデックス = プレイヤーID(0〜playerCount-1)
 }
 
 [System.Serializable]
 public class InputMessage {
     public string type = "INPUT";
     public string action = "SWIPE";
+    public int playerIndex; // ▼ どのプレイヤーの操作かをホストが判別するために必要
+}
+
+[System.Serializable]
+public class PlayerInfoData {
+    public int myIndex;
+    public int playerCount;
+    public int isHost; // 1 or 0
 }
 
 public class NetworkManager : MonoBehaviour
 {
     public static NetworkManager Instance;
+    public const int MaxPlayers = 4;
 
     [Header("ステージ設定")]
     public GameObject swordStage;
@@ -42,18 +50,20 @@ public class NetworkManager : MonoBehaviour
 
     [Header("ネットワーク設定")]
     public bool isHost = true;
-    public GameObject hostSword;
-    public GameObject clientSword;
+    [Tooltip("インデックス = プレイヤーID(0〜3)。使わないスロットはnullのままでよい")]
+    public GameObject[] playerSwords = new GameObject[MaxPlayers];
+    [Tooltip("自分が操作するプレイヤーのインデックス")]
+    public int myPlayerIndex = 0;
+    [Tooltip("今の部屋の対戦人数(2〜4)")]
+    public int playerCount = 2;
 
     [Header("30fps・ラグ対策設定")]
     private float syncTimer = 0f;
     private float syncInterval = 0.0333f; // ▼ タイマーの基準を 0.0333秒 (30fps) に設定！
 
-    // CLIENT補間用ターゲット
-    private Vector3 hostTargetPos;
-    private Quaternion hostTargetRot;
-    private Vector3 clientTargetPos;
-    private Quaternion clientTargetRot;
+    // CLIENT補間用ターゲット(インデックス=プレイヤーID)
+    private Vector3[] targetPos = new Vector3[MaxPlayers];
+    private Quaternion[] targetRot = new Quaternion[MaxPlayers];
     private bool isFirstSync = true;
     private bool hasSyncTarget = false;
 
@@ -67,34 +77,55 @@ public class NetworkManager : MonoBehaviour
         ApplyModeSettings();
     }
 
-    public void SetHostMode(int isHostInt)
+    public void SetPlayerInfo(string jsonString)
     {
-        isHost = (isHostInt == 1);
+        PlayerInfoData info = JsonUtility.FromJson<PlayerInfoData>(jsonString);
+        myPlayerIndex = info.myIndex;
+        playerCount = Mathf.Clamp(info.playerCount, 2, MaxPlayers);
+        isHost = (info.isHost == 1);
         ApplyModeSettings();
-        Debug.Log($"🎮 モード設定適用: isHost={isHost}");
+        Debug.Log($"🎮 プレイヤー情報設定: myIndex={myPlayerIndex}, playerCount={playerCount}, isHost={isHost}");
+    }
+
+    // ▼【デバッグ用】C#側から直接呼べる簡易版(SceneControllerのautoTestOnStartから使用)
+    public void SetPlayerInfoDirect(int myIndex, int count, bool hostFlag)
+    {
+        myPlayerIndex = myIndex;
+        playerCount = Mathf.Clamp(count, 2, MaxPlayers);
+        isHost = hostFlag;
+        ApplyModeSettings();
+    }
+
+    public GameObject GetMySword()
+    {
+        if (myPlayerIndex < 0 || myPlayerIndex >= playerSwords.Length) return null;
+        return playerSwords[myPlayerIndex];
     }
 
     public void ApplyModeSettings()
     {
-        if (isHost)
+        for (int i = 0; i < playerSwords.Length; i++)
         {
-            if (hostSword != null) hostSword.GetComponent<SwordController>().isLocalControlled = true;
-            if (clientSword != null) clientSword.GetComponent<SwordController>().isLocalControlled = false;
-        }
-        else
-        {
-            if (hostSword != null)
+            GameObject obj = playerSwords[i];
+            if (obj == null) continue;
+
+            var controller = obj.GetComponent<SwordController>();
+            bool isMine = (i == myPlayerIndex);
+
+            if (isHost)
             {
-                hostSword.GetComponent<Rigidbody2D>().bodyType = RigidbodyType2D.Kinematic;
-                hostSword.GetComponent<SwordController>().isLocalControlled = false;
+                // ホストは全プレイヤー分の物理演算を担うため、Rigidbodyのモードはインスペクタ設定のまま(Dynamic)
+                if (controller != null) controller.isLocalControlled = isMine;
             }
-            if (clientSword != null)
+            else
             {
-                clientSword.GetComponent<Rigidbody2D>().bodyType = RigidbodyType2D.Kinematic;
-                clientSword.GetComponent<SwordController>().isLocalControlled = true;
+                var rb = obj.GetComponent<Rigidbody2D>();
+                if (rb != null) rb.bodyType = RigidbodyType2D.Kinematic;
+                if (controller != null) controller.isLocalControlled = isMine;
             }
-            Debug.Log("🌐 Clientモードで起動：物理演算を停止し、操作と受信待機します");
         }
+
+        Debug.Log($"🌐 モード設定適用: isHost={isHost}, myPlayerIndex={myPlayerIndex}, playerCount={playerCount}");
     }
 
     public void SendData(string type, string jsonString)
@@ -104,38 +135,38 @@ public class NetworkManager : MonoBehaviour
         #endif
     }
 
-    // HOST：タイマーで正確に30fpsに間引いて送信
+    // HOST：タイマーで正確に30fpsに間引いて送信(全プレイヤー分)
     void FixedUpdate()
     {
-        if (!isHost || hostSword == null || clientSword == null) return;
+        if (!isHost) return;
 
         syncTimer += Time.fixedDeltaTime;
         if (syncTimer < syncInterval) return;
         syncTimer -= syncInterval; // 溢れた時間を引くことで高精度な30fpsを維持
 
-        SyncMessage sync = new SyncMessage
+        SwordSyncData[] swordsData = new SwordSyncData[playerCount];
+        for (int i = 0; i < playerCount; i++)
         {
-            hostSword = GetSyncData(hostSword),
-            clientSword = GetSyncData(clientSword)
-        };
+            if (playerSwords[i] == null) continue;
+            swordsData[i] = GetSyncData(playerSwords[i]);
+        }
+
+        SyncMessage sync = new SyncMessage { swords = swordsData };
         SendData("SYNC", JsonUtility.ToJson(sync));
     }
 
-    // CLIENT：30fps通信の隙間のコマを、毎フレームLerpでヌルヌル追従
+    // CLIENT：30fps通信の隙間のコマを、毎フレームLerpでヌルヌル追従(全プレイヤー分)
     void Update()
     {
         if (isHost || !hasSyncTarget) return;
 
         float t = Time.deltaTime * 25f;
-        if (hostSword != null)
+        for (int i = 0; i < playerCount; i++)
         {
-            hostSword.transform.position = Vector3.Lerp(hostSword.transform.position, hostTargetPos, t);
-            hostSword.transform.rotation = Quaternion.Lerp(hostSword.transform.rotation, hostTargetRot, t);
-        }
-        if (clientSword != null)
-        {
-            clientSword.transform.position = Vector3.Lerp(clientSword.transform.position, clientTargetPos, t);
-            clientSword.transform.rotation = Quaternion.Lerp(clientSword.transform.rotation, clientTargetRot, t);
+            GameObject obj = playerSwords[i];
+            if (obj == null) continue;
+            obj.transform.position = Vector3.Lerp(obj.transform.position, targetPos[i], t);
+            obj.transform.rotation = Quaternion.Lerp(obj.transform.rotation, targetRot[i], t);
         }
     }
 
@@ -168,10 +199,12 @@ public class NetworkManager : MonoBehaviour
     public void ReceiveInput(string jsonString)
     {
         InputMessage msg = JsonUtility.FromJson<InputMessage>(jsonString);
-        GameObject enemyObj = isHost ? clientSword : hostSword;
-        if (enemyObj != null)
+        if (msg.playerIndex < 0 || msg.playerIndex >= playerSwords.Length) return;
+
+        GameObject targetObj = playerSwords[msg.playerIndex];
+        if (targetObj != null)
         {
-            SwordBattle battle = enemyObj.GetComponent<SwordBattle>();
+            SwordBattle battle = targetObj.GetComponent<SwordBattle>();
             if (battle != null)
             {
                 battle.ExecuteRemoteAction(msg.action);
@@ -184,40 +217,41 @@ public class NetworkManager : MonoBehaviour
         if (isHost) return;
 
         SyncMessage sync = JsonUtility.FromJson<SyncMessage>(jsonString);
+        if (sync.swords == null) return;
+
+        int count = Mathf.Min(sync.swords.Length, playerCount, playerSwords.Length);
 
         // 初回のみ瞬時にスナップ（位置ズレでの開幕フライング感を解消）
         if (isFirstSync)
         {
-            if (hostSword != null)
+            for (int i = 0; i < count; i++)
             {
-                hostSword.transform.position = new Vector3(sync.hostSword.x, sync.hostSword.y, hostSword.transform.position.z);
-                hostSword.transform.rotation = Quaternion.Euler(0, 0, sync.hostSword.rotation);
-                hostTargetPos = hostSword.transform.position;
-                hostTargetRot = hostSword.transform.rotation;
-            }
-            if (clientSword != null)
-            {
-                clientSword.transform.position = new Vector3(sync.clientSword.x, sync.clientSword.y, clientSword.transform.position.z);
-                clientSword.transform.rotation = Quaternion.Euler(0, 0, sync.clientSword.rotation);
-                clientTargetPos = clientSword.transform.position;
-                clientTargetRot = clientSword.transform.rotation;
+                GameObject obj = playerSwords[i];
+                SwordSyncData data = sync.swords[i];
+                if (obj == null || data == null) continue;
+
+                obj.transform.position = new Vector3(data.x, data.y, obj.transform.position.z);
+                obj.transform.rotation = Quaternion.Euler(0, 0, data.rotation);
+                targetPos[i] = obj.transform.position;
+                targetRot[i] = obj.transform.rotation;
             }
             isFirstSync = false;
         }
 
-        // 座標・回転はターゲット（目的地）を更新するだけ
-        if (hostSword != null)
-            hostTargetPos = new Vector3(sync.hostSword.x, sync.hostSword.y, hostSword.transform.position.z);
-        if (clientSword != null)
-            clientTargetPos = new Vector3(sync.clientSword.x, sync.clientSword.y, clientSword.transform.position.z);
+        for (int i = 0; i < count; i++)
+        {
+            GameObject obj = playerSwords[i];
+            SwordSyncData data = sync.swords[i];
+            if (obj == null || data == null) continue;
 
-        hostTargetRot = Quaternion.Euler(0, 0, sync.hostSword.rotation);
-        clientTargetRot = Quaternion.Euler(0, 0, sync.clientSword.rotation);
+            // 座標・回転はターゲット（目的地）を更新するだけ
+            targetPos[i] = new Vector3(data.x, data.y, obj.transform.position.z);
+            targetRot[i] = Quaternion.Euler(0, 0, data.rotation);
+
+            // HP・SP・状態（位置以外）は即時反映
+            ApplyNonPositionSync(obj, data);
+        }
         hasSyncTarget = true;
-
-        // HP・SP・状態（位置以外）は即時反映
-        ApplyNonPositionSync(hostSword, sync.hostSword);
-        ApplyNonPositionSync(clientSword, sync.clientSword);
     }
 
     void ApplyNonPositionSync(GameObject obj, SwordSyncData data)
@@ -260,6 +294,12 @@ public class NetworkManager : MonoBehaviour
                     case 3: // 剣：大回転斬りダッシュ
                         sr.color = new Color(0.5f, 1f, 1f);   // 水色
                         break;
+                    case 4: // 剣：巨大化一回転
+                        sr.color = new Color(1f, 0.3f, 0.3f); // 赤色
+                        break;
+                    case 5: // 剣：分身突進
+                        sr.color = new Color(0.3f, 0.6f, 1f); // 青色
+                        break;
                     default: // 通常状態
                         sr.color = Color.white;
                         break;
@@ -279,8 +319,13 @@ public class NetworkManager : MonoBehaviour
     {
         SwordController.isKomaMode = (modeStr == "1");
 
-        if (hostSword != null) hostSword.GetComponent<SwordController>().ApplyPhysicsMode();
-        if (clientSword != null) clientSword.GetComponent<SwordController>().ApplyPhysicsMode();
+        for (int i = 0; i < playerSwords.Length; i++)
+        {
+            GameObject obj = playerSwords[i];
+            if (obj == null) continue;
+            var controller = obj.GetComponent<SwordController>();
+            if (controller != null) controller.ApplyPhysicsMode();
+        }
 
         if (swordStage != null) swordStage.SetActive(!SwordController.isKomaMode);
         if (komaStage != null) komaStage.SetActive(SwordController.isKomaMode);
