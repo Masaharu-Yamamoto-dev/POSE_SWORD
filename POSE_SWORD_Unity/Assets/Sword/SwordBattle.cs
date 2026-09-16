@@ -207,17 +207,17 @@ public static bool matchEnded = false;
     public void DealDamageTo(SwordBattle target, int damage, Vector2 hitPoint, bool isCrit = false, bool isWeakPoint = false)
     {
         if (target == null || target == this || !target.IsAlive) return;
-        if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage);
+        if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, isCrit || isWeakPoint);
         else target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
     }
 
-    public void ApplyMultiplayerHealth(int health)
+    public void ApplyMultiplayerHealth(int health, bool wasCrit = false)
     {
         if (MultiplayerOwner == null || isDead) return;
         int damage = Mathf.Max(0, hp - health);
         if (damage > 0)
         {
-            PlayClientDamageEffect(damage);
+            PlayClientDamageEffect(damage, wasCrit);
             if (MultiplayerOwner.IsHost) currentSp = Mathf.Min(maxSp, currentSp + 100f * damage / maxHp * damageSpMultiplier);
         }
         hp = Mathf.Clamp(health, 0, maxHp); UpdateUI();
@@ -225,16 +225,20 @@ public static bool matchEnded = false;
         isDead = true; isDashing = false; currentDashType = 0;
         StopUltimateAura();
         StopAllCoroutines(); controller.enabled = false; controller.isLocalControlled = false;
-        rb.simulated = false;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = false;
         if (spriteRenderer != null) spriteRenderer.color = new Color(.2f, .2f, .2f);
         if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
-        StartCoroutine(HideEliminatedSword());
-    }
-    IEnumerator HideEliminatedSword()
-    {
-        yield return new WaitForSecondsRealtime(.8f);
-        gameObject.SetActive(false);
+        // ▼【修正】ローカルのDefeatRoutineと同じく、その場で静止させず天高く吹き飛ばして回転させる
+        // (以前はrb.simulated=falseで即座に静止させていたため、脱落の派手さがマルチプレイだけ失われていた)。
+        // またローカルは脱落後も剣を消さず、倒れたままの姿を残して他の生存者の試合を続けるため、
+        // 以前あった0.8秒後に非表示にする処理(HideEliminatedSword)も削除した
+        if (rb != null)
+        {
+            rb.gravityScale = 2f;
+            rb.linearVelocity = Vector2.zero;
+            rb.AddForce(new Vector2(Random.Range(-500f, 500f), 2000f), ForceMode2D.Impulse);
+            rb.AddTorque(5000f, ForceMode2D.Impulse);
+        }
     }
 
     // ▼【修正】dashType 4(巨大化一回転)・5(分身突進)・6(リーフシールド発動)の色分けと、
@@ -415,9 +419,30 @@ public static bool matchEnded = false;
             specialAttackButton.gameObject.SetActive(false);
     }
 
+    // ▼【修正】ローカルはBattleCameraが常に有効なのでcam.TriggerShakeがそのまま効くが、
+    // マルチプレイ中はBattleCameraを無効化してMultiplayerManager自身がカメラを制御しているため、
+    // 呼び先をそちらに振り分ける共通口（呼び出し側の見た目は変えなくていいようにする）
+    void ShakeCamera(float duration, float magnitude)
+    {
+        if (MultiplayerOwner != null) { MultiplayerOwner.TriggerShake(duration, magnitude); return; }
+        BattleCamera cam = Camera.main != null ? Camera.main.GetComponent<BattleCamera>() : null;
+        if (cam != null) cam.TriggerShake(duration, magnitude);
+    }
+
+    // ▼【新規追加】柄迫り合い・壁バウンドなどダメージを伴わない衝突演出は、Host側のOnCollisionEnter2Dでしか
+    // 発生しないためゲスト側の画面には何も表示されなかった。MultiplayerManagerのSYNCに乗せて届いた合図で、
+    // ゲスト側でも同じ火花・効果音だけを一度だけ再生する
+    public void PlayClashEffect()
+    {
+        if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, transform.position, Quaternion.identity);
+        if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+    }
+
     void OnCollisionEnter2D(Collision2D collision)
     {
-        if (MultiplayerOwner != null && (!MultiplayerOwner.IsHost || !MultiplayerOwner.IsPlaying)) return;
+        // ▼【修正】ローカルはカウントダウン中も衝突判定(弾き・鍔迫り合いの火花)が普通に働くため、
+        // マルチプレイのカウントダウン中も同様に動かす（ダメージ確定はQueueHit側がIsPlayingで別途ガード済み）
+        if (MultiplayerOwner != null && (!MultiplayerOwner.IsHost || !MultiplayerOwner.IsSimulating)) return;
         if (isDead) return;
         bool wasDashing = isDashing;
         
@@ -448,10 +473,11 @@ public static bool matchEnded = false;
                     // 壁に当たった音とエフェクト
                     if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
                     if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
-                    
+
                     // 画面も軽く揺らす
-                    BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
-                    if (cam != null) cam.TriggerShake(0.1f, 0.2f);
+                    ShakeCamera(0.1f, 0.2f);
+                    // ▼ オンライン対戦ではこの演出はHost側でしか起きないため、ゲスト側にも一度きりのVFX/SEとして知らせる
+                    if (MultiplayerOwner != null) MultiplayerOwner.NotifyClash(PlayerId);
                 }
                 // ダッシュは終わらせず、ここで処理を抜ける（反射し続ける）
                 return;
@@ -478,6 +504,7 @@ public static bool matchEnded = false;
                 // 火花を出して音を鳴らす
                 if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
                 if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+                if (MultiplayerOwner != null) MultiplayerOwner.NotifyClash(PlayerId);
 
                 if (rb != null)
                 {
@@ -541,8 +568,8 @@ public static bool matchEnded = false;
                 }
                 
                 // 画面を激しく揺らしてブレイク成功を演出
-                BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
-                if (cam != null) cam.TriggerShake(0.2f, 0.4f);
+                ShakeCamera(0.2f, 0.4f);
+                if (MultiplayerOwner != null) MultiplayerOwner.NotifyClash(PlayerId);
             }
 
 
@@ -637,7 +664,7 @@ public static bool matchEnded = false;
                 }
                     // ▼変更：TakeDamageの結果（倒したかどうか）を受け取る
                     bool killedTarget = false;
-                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage);
+                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, isCrit || isWeakPoint);
                     else killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
 
                     // ▼追加：もし自分が勝者になったなら、弾き飛ぶのをキャンセル！
@@ -812,7 +839,7 @@ public static bool matchEnded = false;
         Time.timeScale = 0f;
     }
 
-    public void PlayClientDamageEffect(int damage)
+    public void PlayClientDamageEffect(int damage, bool isCrit = false)
     {
         if (isDead || matchEnded) return;
 
@@ -822,7 +849,9 @@ public static bool matchEnded = false;
         // ⭕ 修正後：通信に頼らず、届いたダメージの大きさで通常音とクリティカル音をスマートに分岐！
         // ▼【新規追加】TakeDamage()はマルチプレイ中は呼ばれない（HPはMatchRules経由で直接反映される）ため、
         // ここでヒットエフェクトも出さないとマルチプレイでは誰の画面にも斬撃エフェクトが表示されなかった
-        if (damage >= 100)
+        // ▼【修正】isCritはQueueHit経由でHostが判定した本物のクリティカル/弱点ヒット情報。
+        // 以前はダメージ量(100以上)だけで代用しており、実際のクリティカル判定とズレていた
+        if (isCrit || damage >= 100)
         {
             if (critHitSound != null) audioSource.PlayOneShot(critHitSound);
             if (critEffectPrefab != null) Instantiate(critEffectPrefab, transform.position, Quaternion.identity);
@@ -843,10 +872,12 @@ public static bool matchEnded = false;
         }
 
         // ---（以下、カメラシェイクや決着音の既存コードがそのまま続きます）---
-        if (damage >= 20)
+        if (damage >= 20 || isCrit)
         {
-            BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
-            if (cam != null) cam.TriggerShake(0.1f, 0.3f);
+            // ▼【修正】ローカルのTakeDamage()と同じく、大ダメージ・クリティカル・弱点ヒットで一瞬止める
+            // ヒットストップ演出を追加(以前はTakeDamage()経由でしか発生せず、マルチプレイでは常に無音で通過していた)
+            StartCoroutine(HitStopRoutine(0.1f));
+            ShakeCamera(0.1f, 0.3f);
 
             if (BackgroundManager.Instance != null)
             {

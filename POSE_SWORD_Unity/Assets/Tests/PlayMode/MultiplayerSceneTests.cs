@@ -58,7 +58,9 @@ public class MultiplayerSceneTests
         Assert.IsTrue(Playing, "The eliminated host must keep simulating the other three players.");
         var hostSword = GameObject.Find("Sword_p0").GetComponent(RuntimeType("SwordBattle"));
         Assert.AreEqual(0, (int)hostSword.GetType().GetField("hp").GetValue(hostSword));
-        Assert.IsFalse(hostSword.GetComponent<Rigidbody2D>().simulated);
+        // Eliminated players now ragdoll away like the local single-player DefeatRoutine instead of
+        // freezing in place, so their Rigidbody2D stays simulated (physics keeps carrying it off).
+        Assert.IsTrue(hostSword.GetComponent<Rigidbody2D>().simulated);
         foreach (string id in new[] { "p1", "p2" }) Call("ForfeitMultiplayer", "{\"matchId\":\"first\",\"playerId\":\"" + id + "\"}");
         yield return new WaitForFixedUpdate();
         Assert.IsFalse(Playing);

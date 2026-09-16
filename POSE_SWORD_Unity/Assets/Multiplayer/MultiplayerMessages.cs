@@ -31,6 +31,12 @@ using UnityEngine;
     public int hp, dashType;
     public bool isDashing;
     public string targetPlayerId;
+    // ▼【新規追加】ダメージを伴わない柄迫り合い・壁バウンドなどの演出はHost側のOnCollisionEnter2Dでしか
+    // 発生しないため、ゲスト側にも一度きりのVFX/SEとして伝えるための単調増加カウンタ(増えたら1回再生)
+    public int clashSeq;
+    // ▼【新規追加】このプレイヤーが直近でクリティカル/弱点ヒットを受けたかどうかを、
+    // clashSeqと同じ単調増加カウンタ方式でゲストに伝える(増えたらそのSYNC由来のダメージはクリティカル扱い)
+    public int critSeq;
 }
 // ▼【新規追加】分身突進（hiltType:"2"）・リーフシールド（hiltType:"3"）など、
 // 本体以外に複数体表示する"付随体"1体分の見た目同期用データ

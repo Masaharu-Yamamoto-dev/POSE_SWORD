@@ -89,7 +89,10 @@ public class SwordController : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (multiplayer != null && (!multiplayer.IsHost || !multiplayer.IsPlaying)) return;
+        // ▼【修正】ローカルは配置直後から独楽が回り続けるため、マルチプレイのカウントダウン中も
+        // (IsPlayingではなくIsSimulatingで)同じように回転させる。相手への追尾力はSwordBattle.isRoundStarted
+        // 側のガードでこれまで通りGO!が出るまで働かない
+        if (multiplayer != null && (!multiplayer.IsHost || !multiplayer.IsSimulating)) return;
         // 独楽モードで、自分に操作権限がある時だけ自動で動かす
         if (isKomaMode && swordRigidbody != null && swordRigidbody.bodyType == RigidbodyType2D.Dynamic)
         {

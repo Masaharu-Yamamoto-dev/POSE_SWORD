@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Runtime.InteropServices;
@@ -133,7 +134,16 @@ public class NetworkManager : MonoBehaviour
         #if UNITY_WEBGL && !UNITY_EDITOR
             SendToReact(type, jsonString);
         #endif
+        // ▼【新規追加】本番(WebGL)ではReact/サーバー側がこのメッセージを受け取って処理するが、
+        // エディタ内ではそもそも送信すらされない。MultiplayerLocalTestHarness等のデバッグ用
+        // ループバックがここを購読して、送信されるはずだったメッセージを横取りできるようにする
+        #if UNITY_EDITOR
+            EditorSendDataHook?.Invoke(type, jsonString);
+        #endif
     }
+    #if UNITY_EDITOR
+    public static event Action<string, string> EditorSendDataHook;
+    #endif
 
     // HOST：タイマーで正確に30fpsに間引いて送信(全プレイヤー分)
     void FixedUpdate()

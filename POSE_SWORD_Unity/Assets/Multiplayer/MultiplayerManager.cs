@@ -14,6 +14,10 @@ public class MultiplayerManager : MonoBehaviour
 {
     public bool IsHost { get; private set; }
     public bool IsPlaying { get { return phase == "PLAYING"; } }
+    // ▼【修正】ローカル(シングルプレイ)は開始直後から物理演算が常に動いており、独楽はカウントダウン中も
+    // その場で回り続け、剣は重力で沈む。以前はIsPlayingになるまでPhysics2D.Simulate自体を呼んでおらず、
+    // マルチプレイだけカウントダウン中に完全静止していた。COUNTDOWN中もシミュレーションを進めるための判定
+    public bool IsSimulating { get { return phase == "COUNTDOWN" || IsPlaying; } }
     public bool Active { get { return config != null; } }
     private MultiplayerConfig config;
     private MatchRules rules;
@@ -34,6 +38,17 @@ public class MultiplayerManager : MonoBehaviour
     private readonly Dictionary<string, GameObject> cloneVisuals = new Dictionary<string, GameObject>();
     // ▼【新規追加】剣本体(syncTargets)と同様に、分身・シールドの見た目も毎フレーム補間で追従させるための目標値
     private readonly Dictionary<string, MultiplayerCloneState> cloneSyncTargets = new Dictionary<string, MultiplayerCloneState>();
+    // ▼【新規追加】BattleCameraはマルチプレイ中は無効化しているため、代わりにこのマネージャー自身の
+    // LateUpdate()でシェイク量を消費する（TriggerShakeはローカルのBattleCamera.TriggerShakeと同じ役割）
+    private float shakeDuration, shakeMagnitude;
+    private Vector3 lockedCameraPosition;
+    private bool hasLockedCameraPosition;
+    // ▼【新規追加】ダメージを伴わない柄迫り合い・壁バウンドの演出をSYNCでゲストにも伝えるための単調増加カウンタ
+    private readonly Dictionary<string, int> clashSeq = new Dictionary<string, int>();
+    // ▼【新規追加】QueueHitで受け取ったクリティカル/弱点情報を、同一tick内でApplyMultiplayerHealthへ渡すための一時置き場
+    private readonly Dictionary<string, bool> criticalHitThisTick = new Dictionary<string, bool>();
+    // ▼【新規追加】↑と同じクリティカル情報を、clashSeqと同じ単調増加カウンタ方式でSYNC経由でもゲストへ伝える
+    private readonly Dictionary<string, int> critSeq = new Dictionary<string, int>();
     // ▼【修正】シーンに元々ある PL1Bar〜PL4Bar（HP赤/緑二重ゲージ・名前・SPバー）とカットイン・必殺技ボタンが
     // 乗っているCanvas。以前は多人数対応時に全Canvasを無効化していたため、これらが丸ごと表示されなくなっていた。
     // このCanvasだけは無効化対象から除外し、各プレイヤーのUI要素をここへ配線して使う
@@ -78,15 +93,18 @@ public class MultiplayerManager : MonoBehaviour
             // ▼【重要】playerSwords[0]/[1]（旧1v1用テンプレート）自身も、シーンロード時に自分のTryUltimateを
             // この共有ボタンへリスナー登録済み。Canvasを無効化しなくなった今、isLocalControlledをfalseにして
             // TryUltimate側の既存ガード（自分の操作キャラでなければ即return）で無害化しておく
-            var template0Controller = network.playerSwords[0].GetComponent<SwordController>();
-            if (template0Controller != null) template0Controller.isLocalControlled = false;
-            if (network.playerSwords[1] != null)
+            // ▼【修正】0/1だけでなく2/3も同様に処理する。SceneController.autoTestOnStartが有効なまま
+            // 4人用のdebugBattleJsonFileでベースのオートテストが一瞬先に走ると、3・4人目用に動的生成された
+            // 剣(playerSwords[2]/[3])が非表示にされず残り、MultiplayerManagerが新しく生成する3・4人目の剣と
+            // 同じスポーン座標に重なって表示されてしまっていた
+            for (int i = 0; i < network.playerSwords.Length; i++)
             {
-                var template1Controller = network.playerSwords[1].GetComponent<SwordController>();
-                if (template1Controller != null) template1Controller.isLocalControlled = false;
+                var templateSword = network.playerSwords[i];
+                if (templateSword == null) continue;
+                var templateController = templateSword.GetComponent<SwordController>();
+                if (templateController != null) templateController.isLocalControlled = false;
+                templateSword.SetActive(false);
             }
-            network.playerSwords[0].SetActive(false);
-            if (network.playerSwords[1] != null) network.playerSwords[1].SetActive(false);
             SwordController.isKomaMode = config.gameMode == "1";
             // ▼【修正】以前は両方とも非表示にして、コードで生成した簡易な壁4枚だけのアリーナに差し替えていたが、
             // それだと背景美術も、SceneController側で校正済みの3〜4人用スポーン座標の前提となる床の高さ等も失われていた。
@@ -111,7 +129,11 @@ public class MultiplayerManager : MonoBehaviour
             rules = new MatchRules(config.players.Select(p => p.playerId).ToArray(), config.players.Select(p => p.swordData.hp).ToArray());
             // ▼ 壁も含めて自作していた即席アリーナをやめ、SceneController側の校正済み座標(GetSpawnPositions)を使う
             Vector3[] spawnPositions = scene.GetSpawnPositions(config.players.Length);
-            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], scene.hostGenerator, spawnPositions[player.spawnIndex]);
+            // ▼【修正】刀身の太さは、ローカル(3・4人目の動的生成)と同じくSceneController.generators[0]の値を基準にする。
+            // 以前はhostGeneratorという別枠の値を使っており、Inspector設定次第でローカルとサイズがズレていた
+            float bladeWidth = scene.generators != null && scene.generators.Length > 0 && scene.generators[0] != null
+                ? scene.generators[0].targetBladeWidth : scene.hostGenerator.targetBladeWidth;
+            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], bladeWidth, spawnPositions[player.spawnIndex]);
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
             StartCoroutine(CompleteInitialization());
         }
@@ -136,7 +158,7 @@ public class MultiplayerManager : MonoBehaviour
         config.players = config.players.OrderBy(p => p.slotIndex).ToArray();
     }
 
-    void CreateSword(MultiplayerPlayerConfig player, GameObject template, SwordGenerator sourceGenerator, Vector3 spawnPosition)
+    void CreateSword(MultiplayerPlayerConfig player, GameObject template, float bladeWidth, Vector3 spawnPosition)
     {
         var obj = Instantiate(template, arena.transform);
         obj.name = "Sword_" + player.playerId;
@@ -158,9 +180,12 @@ public class MultiplayerManager : MonoBehaviour
         rb.simulated = false;
         rb.bodyType = IsHost ? RigidbodyType2D.Dynamic : RigidbodyType2D.Kinematic;
         var blade = obj.transform.Find("Blade");
-        var generator = obj.AddComponent<SwordGenerator>();
+        // ▼【修正】SceneController側の3・4人目動的生成(CreateDynamicPlayerSword)と同じく、
+        // テンプレートに既にSwordGeneratorが付いていればそれを再利用する（無条件AddComponentは二重生成の恐れがあった）
+        var generator = obj.GetComponent<SwordGenerator>();
+        if (generator == null) generator = obj.AddComponent<SwordGenerator>();
         generator.generateOnStart = false;
-        generator.targetBladeWidth = sourceGenerator.targetBladeWidth;
+        generator.targetBladeWidth = bladeWidth;
         generator.targetSpriteRenderer = blade.GetComponent<SpriteRenderer>();
         generator.bladeCollider = blade.GetComponent<PolygonCollider2D>();
         generator.swordRigidbody = rb;
@@ -168,21 +193,10 @@ public class MultiplayerManager : MonoBehaviour
         generator.handleObject = controller.handleObject;
         generator.GenerateSwordFromJson(JsonUtility.ToJson(player.swordData));
         if (!generator.LastGenerationSucceeded) throw new InvalidOperationException("Could not generate player sword.");
-        // Keep extreme photo aspect ratios inside the arena and clear of spawn neighbours.
-        var renderer = generator.targetSpriteRenderer;
-        float height = renderer.bounds.size.y;
-        if (height > 8f) blade.localScale *= 8f / height;
         controller.ApplyPhysicsMode();
         swords.Add(player.playerId, battle); bodies.Add(player.playerId, rb);
         sequences[player.playerId] = 0; inputTimes[player.playerId] = -100;
         targets[player.playerId] = null;
-        var marker = new GameObject("PlayerNumber").AddComponent<TextMeshPro>();
-        marker.transform.SetParent(obj.transform, false);
-        marker.transform.localPosition = new Vector3(0, -0.8f, -0.2f);
-        marker.text = "P" + (player.slotIndex + 1);
-        marker.fontSize = 6; marker.alignment = TextAlignmentOptions.Center;
-        if (sourceGenerator.swordBattle.nameText != null) marker.font = sourceGenerator.swordBattle.nameText.font;
-        marker.color = battle.PlayerMainColor;
         obj.SetActive(true);
     }
 
@@ -238,6 +252,10 @@ public class MultiplayerManager : MonoBehaviour
         var msg = JsonUtility.FromJson<MultiplayerCommand>(json);
         if (!Matches(msg) || !IsHost || phase != "LOADING") return;
         phase = "COUNTDOWN"; countdownEnd = Time.unscaledTime + 3;
+        // ▼【修正】ローカルは剣・独楽ともに配置直後から物理演算が動いており、独楽はカウントダウン中も
+        // その場で回り続け、剣は重力で沈む。以前はPLAYINGになるまで物理を凍結しており、
+        // マルチプレイだけカウントダウン中は完全に静止して見えていた
+        foreach (var rb in bodies.Values) rb.simulated = true;
     }
 
     void Update()
@@ -246,7 +264,6 @@ public class MultiplayerManager : MonoBehaviour
         if (IsHost && phase == "COUNTDOWN" && Time.unscaledTime >= countdownEnd)
         {
             phase = "PLAYING"; SwordBattle.isRoundStarted = true;
-            foreach (var rb in bodies.Values) rb.simulated = true;
             Emit("PLAYING", new MultiplayerCommand { matchId = config.matchId });
         }
         if (IsHost && (phase == "COUNTDOWN" || IsPlaying) && Time.unscaledTime >= nextSync)
@@ -281,15 +298,27 @@ public class MultiplayerManager : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (!IsHost || !IsPlaying) return;
+        // ▼【修正】カウントダウン中も(PLAYING同様に)物理演算だけは進める。ダメージ判定・勝敗判定は
+        // 引き続きIsPlayingになってからのみ行う（QueueHit側もIsPlayingガード済みなので二重に安全）
+        if (!IsHost || !IsSimulating) return;
         UpdateTargets(false);
         foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing;
         Physics2D.Simulate(Time.fixedDeltaTime);
+        if (!IsPlaying) return;
         rules.ResolveStep(++physicsTick, hits, forfeits);
         hits.Clear(); forfeits.Clear();
-        foreach (var score in rules.Players) swords[score.PlayerId].ApplyMultiplayerHealth(score.Hp);
+        foreach (var score in rules.Players)
+        {
+            bool wasCrit = criticalHitThisTick.Remove(score.PlayerId);
+            if (wasCrit) critSeq[score.PlayerId] = critSeq.TryGetValue(score.PlayerId, out var seq) ? seq + 1 : 1;
+            swords[score.PlayerId].ApplyMultiplayerHealth(score.Hp, wasCrit);
+        }
+        criticalHitThisTick.Clear();
         if (rules.Ended)
         {
+            // ▼ ちょうど今決着したプレイヤーのApplyMultiplayerHealthで加えた吹っ飛ばしの力を、
+            // 完全停止する前に一度だけ反映させる(ローカルのDefeatRoutineも力を加えた直後にまだ動ける)
+            Physics2D.Simulate(Time.fixedDeltaTime);
             // Deliver final HP/death state before the separately acknowledged result.
             Emit("SYNC", Snapshot());
             var result = new MultiplayerResult { matchId = config.matchId, winnerId = rules.WinnerId, draw = rules.Draw,
@@ -301,13 +330,35 @@ public class MultiplayerManager : MonoBehaviour
         }
     }
 
-    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage)
+    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage, bool isCrit = false)
     {
         if (!IsHost || !IsPlaying || target.MultiplayerOwner != this || !rules.Get(target.PlayerId).Alive) return;
         // Two dashes clashing in koma mode break each other's guard.
         bool blocked = invulnerable.ContainsKey(target.PlayerId) && invulnerable[target.PlayerId];
         bool clash = SwordController.isKomaMode && invulnerable.ContainsKey(attacker.PlayerId) && invulnerable[attacker.PlayerId];
-        if (!blocked || clash) hits.Add(new Hit(attacker.PlayerId, target.PlayerId, damage));
+        if (!blocked || clash)
+        {
+            hits.Add(new Hit(attacker.PlayerId, target.PlayerId, damage));
+            // ▼【新規追加】クリティカル/弱点情報はMatchRulesのHitには乗らない(複数攻撃者の同時ヒットで
+            // 合算されるため)ので、ここで別途覚えておいてこのtickのApplyMultiplayerHealthに渡す
+            if (isCrit) criticalHitThisTick[target.PlayerId] = true;
+        }
+    }
+
+    // ▼【新規追加】ローカルのBattleCamera.TriggerShakeと同じ役割。BattleCameraはマルチプレイ中は
+    // 無効化されているため、代わりにこのマネージャーが自分のLateUpdate()でシェイクを消費する
+    public void TriggerShake(float duration, float magnitude)
+    {
+        shakeDuration = duration; shakeMagnitude = magnitude;
+    }
+
+    // ▼【新規追加】柄迫り合い・壁バウンドなどダメージを伴わない衝突演出は、Host側のOnCollisionEnter2Dでしか
+    // 起きないためゲスト側の画面には何も表示されない。SYNCで単調増加カウンタとして配信し、
+    // ゲスト側は値が増えたことを検知して同じ演出(PlayClashEffect)を一度だけ再生する
+    public void NotifyClash(string playerId)
+    {
+        if (playerId == null) return;
+        clashSeq[playerId] = clashSeq.TryGetValue(playerId, out var seq) ? seq + 1 : 1;
     }
 
     // ▼【新規追加】分身突進・リーフシールドなどの付随体1体をSYNC配信対象として登録し、識別用IDを返す
@@ -388,7 +439,9 @@ public class MultiplayerManager : MonoBehaviour
                     hp = sword.hp, sp = sword.currentSp, isDashing = sword.isDashing, dashType = sword.currentDashType,
                     // ▼ 巨大化一回転(hiltType:"1")の拡大がクライアント側にも見えるよう、剣本体のスケールも同期する
                     scale = sword.transform.localScale.x,
-                    targetPlayerId = targets[p.playerId] };
+                    targetPlayerId = targets[p.playerId],
+                    clashSeq = clashSeq.TryGetValue(p.playerId, out var cseq) ? cseq : 0,
+                    critSeq = critSeq.TryGetValue(p.playerId, out var crseq) ? crseq : 0 };
             }).ToArray(),
             // ▼【新規追加】分身突進・リーフシールドなどの付随体の位置をクライアントへ配信する
             clones = activeClones.Where(kv => kv.Value.obj != null).Select(kv => new MultiplayerCloneState {
@@ -411,9 +464,15 @@ public class MultiplayerManager : MonoBehaviour
         {
             var sword = swords[data.playerId];
             if (receivedTick < 0) { sword.transform.position = new Vector3(data.x, data.y, 0); sword.transform.rotation = Quaternion.Euler(0, 0, data.rotation); }
+            // ▼【新規追加】クリティカル演出・柄迫り合い等の演出は増分(カウンタが増えたか)でしか検知できないため、
+            // 上書きする前の直近の値と比較する。初回同期時は前回値が無い(比較対象なし)ので発火しない
+            syncTargets.TryGetValue(data.playerId, out var previous);
+            bool wasCrit = previous != null && data.critSeq > previous.critSeq;
+            bool clashed = previous != null && data.clashSeq > previous.clashSeq;
             syncTargets[data.playerId] = data;
             sword.currentCenterPosition = new Vector3(data.centerX, data.centerY, 0);
-            sword.ApplyMultiplayerHealth(data.hp);
+            sword.ApplyMultiplayerHealth(data.hp, wasCrit);
+            if (clashed) sword.PlayClashEffect();
             sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale);
             targets[data.playerId] = data.targetPlayerId;
         }
@@ -472,19 +531,40 @@ public class MultiplayerManager : MonoBehaviour
 
     void LateUpdate()
     {
-        if (config == null || Camera.main == null || phase == "RESULT") return;
-        var alive = swords.Values.Where(s => s.IsAlive).ToArray();
-        if (alive.Length == 0) return;
-        Bounds bounds = new Bounds(alive[0].transform.position, Vector3.zero);
-        foreach (var sword in alive)
-            foreach (var renderer in sword.GetComponentsInChildren<SpriteRenderer>()) bounds.Encapsulate(renderer.bounds);
+        if (config == null || Camera.main == null) return;
         var camera = Camera.main;
-        float size = Mathf.Max(8, bounds.extents.y + 4, (bounds.extents.x + 4) / camera.aspect);
-        // Reserve the upper part of the viewport for React's four health panels.
-        var position = new Vector3(bounds.center.x, bounds.center.y + size * .16f, -10);
-        float t = 1 - Mathf.Exp(-5 * Time.unscaledDeltaTime);
-        camera.transform.position = Vector3.Lerp(camera.transform.position, position, t);
-        camera.orthographicSize = Mathf.Lerp(camera.orthographicSize, size * 1.2f, t);
+        Vector3 basePosition;
+        if (phase == "RESULT")
+        {
+            // ▼【修正】ローカルのBattleCamera.StopTracking()と同じく、決着した瞬間の位置で固定する
+            // (以前はここで即returnしていたため、シェイクも一切乗らなかった)
+            if (!hasLockedCameraPosition) { lockedCameraPosition = camera.transform.position; hasLockedCameraPosition = true; }
+            basePosition = lockedCameraPosition;
+            camera.transform.position = basePosition;
+        }
+        else
+        {
+            hasLockedCameraPosition = false;
+            var alive = swords.Values.Where(s => s.IsAlive).ToArray();
+            if (alive.Length == 0) return;
+            Bounds bounds = new Bounds(alive[0].transform.position, Vector3.zero);
+            foreach (var sword in alive)
+                foreach (var renderer in sword.GetComponentsInChildren<SpriteRenderer>()) bounds.Encapsulate(renderer.bounds);
+            float size = Mathf.Max(8, bounds.extents.y + 4, (bounds.extents.x + 4) / camera.aspect);
+            // Reserve the upper part of the viewport for React's four health panels.
+            var position = new Vector3(bounds.center.x, bounds.center.y + size * .16f, -10);
+            float t = 1 - Mathf.Exp(-5 * Time.unscaledDeltaTime);
+            camera.transform.position = Vector3.Lerp(camera.transform.position, position, t);
+            camera.orthographicSize = Mathf.Lerp(camera.orthographicSize, size * 1.2f, t);
+            basePosition = camera.transform.position;
+        }
+        // ▼【新規追加】ローカルのBattleCamera.LateUpdate()末尾と同じシェイク処理。BattleCameraはマルチプレイ中
+        // 無効化されているため、代わりにこのマネージャー自身でTriggerShakeの値を消費する
+        if (shakeDuration > 0)
+        {
+            camera.transform.position = basePosition + (Vector3)UnityEngine.Random.insideUnitCircle * shakeMagnitude;
+            shakeDuration -= Time.unscaledDeltaTime;
+        }
     }
 
     [UnityEngine.Scripting.Preserve]
@@ -494,7 +574,17 @@ public class MultiplayerManager : MonoBehaviour
         if (config == null || result == null || result.matchId != config.matchId || phase == "RESULT") return;
         phase = "RESULT"; SwordBattle.matchEnded = true; SwordBattle.isRoundStarted = false;
         foreach (var sword in swords.Values) { sword.StopAllCoroutines(); bodies[sword.PlayerId].simulated = false; }
-        Time.timeScale = 1;
+        // ▼【修正】ローカルのDefeatRoutine後半(カメラロック・シェイク・スローモーション・完全停止)と同じ決着演出。
+        // カメラロック自体はLateUpdate()がphase=="RESULT"を見て自動的に行う
+        TriggerShake(1.5f, 1.2f);
+        StartCoroutine(MatchEndCinematic());
+    }
+
+    IEnumerator MatchEndCinematic()
+    {
+        Time.timeScale = 0.15f;
+        yield return new WaitForSecondsRealtime(2.5f);
+        Time.timeScale = 0f;
     }
     [UnityEngine.Scripting.Preserve]
     public void StopMultiplayer(string json)
@@ -516,6 +606,8 @@ public class MultiplayerManager : MonoBehaviour
         activeClones.Clear();
         foreach (var visual in cloneVisuals.Values) if (visual != null) Destroy(visual);
         cloneVisuals.Clear();
+        clashSeq.Clear(); criticalHitThisTick.Clear(); critSeq.Clear();
+        shakeDuration = 0f; hasLockedCameraPosition = false;
         config = null; rules = null; phase = "IDLE";
         Time.timeScale = 1; SwordBattle.isRoundStarted = false; SwordBattle.matchEnded = false;
         if (AudioManager.Instance != null) AudioManager.Instance.ResetSoundEffects();
