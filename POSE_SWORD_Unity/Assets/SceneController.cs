@@ -304,7 +304,8 @@ public class SceneController : MonoBehaviour
     }
 
     // ▼【N人対応】人数・モードに応じたスポーン座標を返す(2人時は従来のleft/rightをそのまま使用)
-    Vector3[] GetSpawnPositions(int playerCount)
+    // MultiplayerManagerからも同じ校正済みの座標を使うため公開している
+    public Vector3[] GetSpawnPositions(int playerCount)
     {
         bool koma = SwordController.isKomaMode;
         switch (playerCount)

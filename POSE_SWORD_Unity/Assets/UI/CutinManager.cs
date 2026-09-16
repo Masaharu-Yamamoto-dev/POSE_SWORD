@@ -61,7 +61,11 @@ public class CutinManager : MonoBehaviour
             backgroundBar.GetComponent<Image>().color = barColor;
         }
 
+        // ▼【修正】直前のカットインが演出の途中（Time.timeScaleを変更した状態）で強制中断されると、
+        // 後始末のコード（6.終了処理）が一切実行されずtimeScaleが遅いまま固まってしまう。
+        // 新しいカットインを始める前に、念のため等速へ戻しておく
         StopAllCoroutines();
+        if (Time.timeScale != 1f && !SwordBattle.matchEnded) Time.timeScale = 1f;
         StartCoroutine(PersonaStyleCutinRoutine(useSlowMotion));
     }
 

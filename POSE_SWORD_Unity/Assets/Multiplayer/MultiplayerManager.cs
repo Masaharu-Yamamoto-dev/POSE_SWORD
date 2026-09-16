@@ -27,7 +27,6 @@ public class MultiplayerManager : MonoBehaviour
     private readonly List<Hit> hits = new List<Hit>();
     private readonly HashSet<string> forfeits = new HashSet<string>();
     private GameObject arena;
-    private Sprite wallSprite;
     // ▼【新規追加】分身突進・リーフシールドなど、本体以外の"付随体"をSYNCでクライアントへ配信するための登録簿（Host側で使用）
     private readonly Dictionary<string, (GameObject obj, string ownerId, Color color)> activeClones = new Dictionary<string, (GameObject, string, Color)>();
     private int cloneIdSeq;
@@ -88,15 +87,18 @@ public class MultiplayerManager : MonoBehaviour
             }
             network.playerSwords[0].SetActive(false);
             if (network.playerSwords[1] != null) network.playerSwords[1].SetActive(false);
-            if (network.swordStage != null) network.swordStage.SetActive(false);
-            if (network.komaStage != null) network.komaStage.SetActive(false);
+            SwordController.isKomaMode = config.gameMode == "1";
+            // ▼【修正】以前は両方とも非表示にして、コードで生成した簡易な壁4枚だけのアリーナに差し替えていたが、
+            // それだと背景美術も、SceneController側で校正済みの3〜4人用スポーン座標の前提となる床の高さ等も失われていた。
+            // ゲームモードに応じた本来のステージ（床・壁のコライダー込み）をそのまま使う
+            if (network.swordStage != null) network.swordStage.SetActive(!SwordController.isKomaMode);
+            if (network.komaStage != null) network.komaStage.SetActive(SwordController.isKomaMode);
             foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
                 if (canvas != hudCanvas) canvas.enabled = false;
             foreach (var tutorial in FindObjectsByType<TutorialManager>(FindObjectsSortMode.None)) tutorial.enabled = false;
             if (BackgroundManager.Instance != null) BackgroundManager.Instance.enabled = false;
             if (CutinManager.Instance != null) CutinManager.Instance.StopAllCoroutines();
             Time.timeScale = 1;
-            SwordController.isKomaMode = config.gameMode == "1";
             SwordBattle.isRoundStarted = false;
             SwordBattle.matchEnded = false;
             battleCamera = Camera.main == null ? null : Camera.main.GetComponent<BattleCamera>();
@@ -106,9 +108,10 @@ public class MultiplayerManager : MonoBehaviour
             Physics2D.simulationMode = SimulationMode2D.Script;
             ownsSimulation = true;
             arena = new GameObject("MultiplayerArena");
-            BuildArena();
             rules = new MatchRules(config.players.Select(p => p.playerId).ToArray(), config.players.Select(p => p.swordData.hp).ToArray());
-            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], scene.hostGenerator);
+            // ▼ 壁も含めて自作していた即席アリーナをやめ、SceneController側の校正済み座標(GetSpawnPositions)を使う
+            Vector3[] spawnPositions = scene.GetSpawnPositions(config.players.Length);
+            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], scene.hostGenerator, spawnPositions[player.spawnIndex]);
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
             StartCoroutine(CompleteInitialization());
         }
@@ -133,11 +136,11 @@ public class MultiplayerManager : MonoBehaviour
         config.players = config.players.OrderBy(p => p.slotIndex).ToArray();
     }
 
-    void CreateSword(MultiplayerPlayerConfig player, GameObject template, SwordGenerator sourceGenerator)
+    void CreateSword(MultiplayerPlayerConfig player, GameObject template, SwordGenerator sourceGenerator, Vector3 spawnPosition)
     {
         var obj = Instantiate(template, arena.transform);
         obj.name = "Sword_" + player.playerId;
-        obj.transform.position = SpawnPosition(player.spawnIndex);
+        obj.transform.position = spawnPosition;
         obj.transform.rotation = Quaternion.identity;
         var battle = obj.GetComponent<SwordBattle>();
         battle.frameImage = null; // PL{n}Bar側に対応する枠要素が無いため配線しない
@@ -218,33 +221,6 @@ public class MultiplayerManager : MonoBehaviour
         return null;
     }
 
-    // Two to four players share one arena: spread them evenly instead of assuming four seats.
-    Vector3 SpawnPosition(int slot)
-    {
-        int count = config.players.Length;
-        if (count == 2) return new Vector3(slot == 0 ? -8 : 8, 0, 0);
-        if (config.gameMode == "0") return new Vector3(-15 + slot * (30f / (count - 1)), 0, 0);
-        if (count == 3) return new Vector3(slot == 0 ? 0 : slot == 1 ? -9 : 9, slot == 0 ? 7 : -5, 0);
-        return new Vector3(slot % 2 == 0 ? -8 : 8, slot < 2 ? -6 : 6, 0);
-    }
-
-    void BuildArena()
-    {
-        wallSprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0, 0, Texture2D.whiteTexture.width, Texture2D.whiteTexture.height), new Vector2(.5f, .5f), Texture2D.whiteTexture.width);
-        float bottom = config.gameMode == "0" ? -4 : -14;
-        float top = 24;
-        Wall(new Vector2(0, bottom), new Vector2(50, 1));
-        Wall(new Vector2(0, top), new Vector2(50, 1));
-        Wall(new Vector2(-24, (bottom + top) / 2), new Vector2(1, top - bottom));
-        Wall(new Vector2(24, (bottom + top) / 2), new Vector2(1, top - bottom));
-    }
-    void Wall(Vector2 position, Vector2 size)
-    {
-        var wall = new GameObject("ArenaWall"); wall.transform.SetParent(arena.transform);
-        wall.transform.position = position; wall.transform.localScale = size;
-        wall.AddComponent<BoxCollider2D>();
-        var renderer = wall.AddComponent<SpriteRenderer>(); renderer.sprite = wallSprite; renderer.color = new Color(.2f, .22f, .27f);
-    }
 
     IEnumerator CompleteInitialization()
     {
@@ -533,7 +509,6 @@ public class MultiplayerManager : MonoBehaviour
         StopAllCoroutines();
         foreach (var sword in swords.Values) if (sword != null) { sword.StopAllCoroutines(); sword.gameObject.SetActive(false); }
         if (arena != null) { arena.SetActive(false); Destroy(arena); }
-        if (wallSprite != null) Destroy(wallSprite);
         if (ownsSimulation) { Physics2D.simulationMode = previousSimulationMode; ownsSimulation = false; }
         swords.Clear(); bodies.Clear(); targets.Clear(); sequences.Clear(); inputTimes.Clear();
         hits.Clear(); forfeits.Clear(); invulnerable.Clear(); syncTargets.Clear();
