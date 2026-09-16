@@ -86,7 +86,7 @@ public static bool matchEnded = false;
     public float leafShieldOrbitRadius = 2.5f; // 本体からの周回半径
     public float leafShieldOrbitSpeed = 150f; // 周回速度（度/秒）
     public float leafShieldHpRatio = 1f / 3f; // 各シールドのHP（本体の最大HPに対する割合）
-    public float leafShieldDamageMultiplier = 1f; // シールドが与えるダメージの攻撃力倍率（本体のattack基準）
+    public float leafShieldReflectMultiplier = 2f; // シールドが被弾した時、受けたダメージの何倍を相手に返すか
 
     // 突進状態の管理用
 // 突進状態の管理用
@@ -876,6 +876,11 @@ public static bool matchEnded = false;
     // ▼【新規追加】必殺技専用ボタン/スペースキー用：SPが必殺技分たまっている時だけ発動する
     public void TryUltimate()
     {
+        // ▼【修正】specialAttackButtonはP1〜P4全員のSwordBattleが同じ1つのUIボタンを共有しており、
+        // 各インスタンスがInitializeComponents()で自分のTryUltimateをonClickに登録するため、
+        // ボタンを1回押すと全員分のTryUltimate()が呼ばれてしまう。
+        // 自分が操作しているキャラでなければ即座に何もしないようにして、他人の必殺技が暴発しないようにする
+        if (controller == null || !controller.isLocalControlled) return;
         if (MultiplayerOwner != null) { MultiplayerOwner.SubmitLocalUltimate(); return; }
         if (isDead || matchEnded || isDashing || !isRoundStarted) return;
         if (currentSp < UltimateThreshold) return;
@@ -1254,7 +1259,6 @@ public static bool matchEnded = false;
         if (isAuthoritative && spriteRenderer != null)
         {
             float shieldHp = Mathf.Max(1f, maxHp * leafShieldHpRatio);
-            int shieldDamage = Mathf.Max(Mathf.RoundToInt(attack * leafShieldDamageMultiplier), 1);
             float sectorSize = 360f / Mathf.Max(1, leafShieldCount);
 
             for (int i = 0; i < leafShieldCount; i++)
@@ -1272,7 +1276,7 @@ public static bool matchEnded = false;
                 col.radius = 0.5f;
 
                 LeafShieldOrb orb = shieldObj.AddComponent<LeafShieldOrb>();
-                orb.Setup(this, i * sectorSize, leafShieldOrbitRadius, leafShieldOrbitSpeed, shieldHp, shieldDamage, leafShieldDuration);
+                orb.Setup(this, i * sectorSize, leafShieldOrbitRadius, leafShieldOrbitSpeed, shieldHp, leafShieldReflectMultiplier, leafShieldDuration);
 
                 // ▼ オンライン対戦では、この分身をMultiplayerManagerに登録し、位置をSYNCでクライアントへ配信する
                 if (MultiplayerOwner != null)

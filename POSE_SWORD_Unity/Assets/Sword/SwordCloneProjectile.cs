@@ -42,7 +42,10 @@ public class SwordCloneProjectile : MonoBehaviour
             if (dealsDamage)
             {
                 Vector2 hitPoint = collision.GetContact(0).point;
-                target.TakeDamage(damage, hitPoint, true, false);
+                // ▼【修正】target.TakeDamage()を直接呼ぶと、targetがマルチプレイ中(MultiplayerOwner != null)の時に
+                // 何もせず握りつぶしてしまう（HPはQueueHit経由のMatchRulesでのみ確定するため）。
+                // GiantSpin/LeafShieldと同様にDealDamageTo()を通すことで、オンラインでも正しくダメージが反映されるようにする
+                owner.DealDamageTo(target, damage, hitPoint, true, false);
             }
             Destroy(gameObject);
             return;
