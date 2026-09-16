@@ -2275,6 +2275,13 @@ MonoBehaviour:
   cloneDamageMultiplier: 3
   cloneLifeTime: 3
   cloneSpawnStagger: 0.08
+  leafShieldCount: 3
+  leafShieldDuration: 15
+  leafShieldOrbitRadius: 2.5
+  leafShieldRadius: 0.7
+  leafShieldOrbitSpeed: 150
+  leafShieldHpRatio: 0.33333334
+  leafShieldReflectMultiplier: 2
   isDashing: 0
   isDashShooting: 0
   currentDashType: 0
@@ -3536,6 +3543,13 @@ MonoBehaviour:
   cloneDamageMultiplier: 3
   cloneLifeTime: 3
   cloneSpawnStagger: 0.08
+  leafShieldCount: 3
+  leafShieldDuration: 10
+  leafShieldOrbitRadius: 4
+  leafShieldRadius: 0.7
+  leafShieldOrbitSpeed: 150
+  leafShieldHpRatio: 0.33333334
+  leafShieldReflectMultiplier: 2
   isDashing: 0
   isDashShooting: 0
   currentDashType: 0

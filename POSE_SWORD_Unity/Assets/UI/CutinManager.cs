@@ -40,7 +40,10 @@ public class CutinManager : MonoBehaviour
     }
 
     // ▼【変更】playerColorを追加：BackgroundBarは技の色(themeColor)ではなく、プレイヤーのメインカラー(P1赤/P2青/P3黄/P4緑)で塗る
-    public void PlayCutin(Sprite sprite, string swordName, string skillName, Color themeColor, Color playerColor)
+    // ▼【新規追加】useSlowMotion：Time.timeScaleを使ったスローモーションを適用するかどうか。
+    // マルチプレイ中はホストの物理シミュレーション頻度まで一緒に下がって全員の試合が止まってしまうため、
+    // オンライン対戦時はfalseを渡し、演出（画像・テキスト・シェイク・効果音）だけを等速で再生する
+    public void PlayCutin(Sprite sprite, string swordName, string skillName, Color themeColor, Color playerColor, bool useSlowMotion = true)
     {
         if (swordImage != null)
         {
@@ -63,10 +66,10 @@ public class CutinManager : MonoBehaviour
         }
 
         StopAllCoroutines();
-        StartCoroutine(PersonaStyleCutinRoutine());
+        StartCoroutine(PersonaStyleCutinRoutine(useSlowMotion));
     }
 
-    IEnumerator PersonaStyleCutinRoutine()
+    IEnumerator PersonaStyleCutinRoutine(bool useSlowMotion)
     {
         // ▼【新規追加】カットイン開始と同時に専用の音を鳴らす！
         if (cutinSound != null && audioSource != null)
@@ -147,7 +150,7 @@ public class CutinManager : MonoBehaviour
 
         // 6. 終了処理
         cutinCanvasGroup.alpha = 0f;
-        if (!SwordBattle.matchEnded) 
+        if (useSlowMotion && !SwordBattle.matchEnded)
         {
             Time.timeScale = 1f;
         }

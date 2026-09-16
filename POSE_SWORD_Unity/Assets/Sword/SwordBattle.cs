@@ -83,7 +83,8 @@ public static bool matchEnded = false;
     public float cloneSpawnStagger = 0.08f; // 分身が1体ずつ出現する間隔（秒）
     public int leafShieldCount = 3; // リーフシールド（hiltType:"3"）の展開枚数
     public float leafShieldDuration = 15f; // リーフシールドの持続時間（秒）
-    public float leafShieldOrbitRadius = 2.5f; // 本体からの周回半径
+    public float leafShieldOrbitRadius = 3.5f; // 本体からの周回半径（＝防御圏の広さ）
+    public float leafShieldRadius = 0.7f; // シールド1枚あたりの当たり判定の大きさ
     public float leafShieldOrbitSpeed = 150f; // 周回速度（度/秒）
     public float leafShieldHpRatio = 1f / 3f; // 各シールドのHP（本体の最大HPに対する割合）
     public float leafShieldReflectMultiplier = 2f; // シールドが被弾した時、受けたダメージの何倍を相手に返すか
@@ -263,11 +264,31 @@ public static bool matchEnded = false;
         // 技はホストだけが実行するので、同期で種別が変わった瞬間にこちらでもカットインを出す
         if (dashType != currentDashType) PlayCutinFor(dashType);
         currentSp = Mathf.Clamp(sp, 0, maxSp); isDashing = dashing; currentDashType = dashType;
+        if (dashType != previousDashType) TryPlayUltimateCutin(dashType);
         if (spriteRenderer != null) spriteRenderer.color = dashType == 1 ? new Color(1, .5f, .5f) :
             dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) :
             dashType == 4 ? new Color(1f, .3f, .3f) : dashType == 5 ? new Color(.3f, .6f, 1f) :
             dashType == 6 ? new Color(.4f, .95f, .5f) : Color.white;
         if (scale > 0f) transform.localScale = Vector3.one * scale;
+    }
+
+    // ▼【新規追加】dashType(2〜6)に対応する必殺技のカットインを、スローモーションなしで再生する
+    // （Host自身の画面は各Routine内で直接PlayCutinを呼んでいるので、ここはClient専用の経路）
+    void TryPlayUltimateCutin(int dashType)
+    {
+        if (CutinManager.Instance == null || spriteRenderer == null) return;
+        string skillName;
+        Color themeColor;
+        switch (dashType)
+        {
+            case 2: skillName = "竜巻猛突!!"; themeColor = new Color(1f, 0.8f, 0.2f); break;
+            case 3: skillName = "大回転斬!!"; themeColor = new Color(0.5f, 1f, 1f); break;
+            case 4: skillName = "巨大回転斬!!"; themeColor = new Color(1f, 0.3f, 0.3f); break;
+            case 5: skillName = "影武者突撃!!"; themeColor = new Color(0.3f, 0.6f, 1f); break;
+            case 6: skillName = "リーフシールド!!"; themeColor = new Color(0.4f, 0.95f, 0.5f); break;
+            default: return;
+        }
+        CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, themeColor, PlayerMainColor, false);
     }
 
     void FixedUpdate()
@@ -1282,7 +1303,7 @@ public static bool matchEnded = false;
 
                 CircleCollider2D col = shieldObj.AddComponent<CircleCollider2D>();
                 col.isTrigger = true;
-                col.radius = 0.5f;
+                col.radius = leafShieldRadius;
 
                 LeafShieldOrb orb = shieldObj.AddComponent<LeafShieldOrb>();
                 orb.Setup(this, i * sectorSize, leafShieldOrbitRadius, leafShieldOrbitSpeed, shieldHp, leafShieldReflectMultiplier, leafShieldDuration);
