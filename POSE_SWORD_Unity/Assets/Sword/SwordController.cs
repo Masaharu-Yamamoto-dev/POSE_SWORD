@@ -53,10 +53,12 @@ public class SwordController : MonoBehaviour
         // }
 
         // ▼【N人対応】毎フレーム、生存中で最も近い相手を自動でターゲットにする
-        RefreshEnemyTarget();
+        // (本物のマルチプレイ中はMultiplayerManager.UpdateTargets()が専用ロジックでenemyTargetを決めるため、ここでは触らない)
+        if (multiplayer == null) RefreshEnemyTarget();
     }
 
     // ▼【N人対応】NetworkManagerが持つ全プレイヤーの中から、自分以外・生存中・最も近い相手を探す
+    // (MultiplayerManager管理下ではない、ローカルデバッグ用の2〜4人プレイでのみ使われる)
     void RefreshEnemyTarget()
     {
         if (NetworkManager.Instance == null) return;

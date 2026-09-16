@@ -128,12 +128,16 @@ export class HostRoom {
   acceptInput(connectionId, message, now) {
     const playerId = this.playerForConnection(connectionId);
     if (this.phase !== 'PLAYING' || !playerId || !this.get(playerId)?.connected ||
-        message?.matchId !== this.matchId || !Number.isSafeInteger(message.seq) || message.seq < 1 ||
-        message.action !== 'PRIMARY' || !['LEFT', 'RIGHT'].includes(message.direction)) return null;
+        message?.matchId !== this.matchId || !Number.isSafeInteger(message.seq) || message.seq < 1) return null;
+    const isPrimary = message.action === 'PRIMARY' && ['LEFT', 'RIGHT'].includes(message.direction);
+    const isUltimate = message.action === 'ULTIMATE';
+    if (!isPrimary && !isUltimate) return null;
     const prev = this.inputs.get(playerId);
     if (prev && (message.seq <= prev.seq || now - prev.time < 40)) return null;
     this.inputs.set(playerId, { seq: message.seq, time: now });
-    return { playerId, matchId: this.matchId, seq: message.seq, action: 'PRIMARY', direction: message.direction };
+    return isPrimary
+      ? { playerId, matchId: this.matchId, seq: message.seq, action: 'PRIMARY', direction: message.direction }
+      : { playerId, matchId: this.matchId, seq: message.seq, action: 'ULTIMATE' };
   }
 
   removeConnection(connectionId) {

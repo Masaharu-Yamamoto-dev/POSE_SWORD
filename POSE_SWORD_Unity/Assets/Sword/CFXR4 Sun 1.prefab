@@ -4858,7 +4858,7 @@ GameObject:
   - component: {fileID: 1206498299807332548}
   - component: {fileID: 8336275602659357518}
   m_Layer: 0
-  m_Name: CFXR4 Sun
+  m_Name: CFXR4 Sun 1
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -4874,7 +4874,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 1, y: 1, z: 2}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1206498299248906753}
@@ -6157,16 +6157,16 @@ ParticleSystem:
       maxGradient:
         serializedVersion: 2
         key0: {r: 1, g: 1, b: 1, a: 1}
-        key1: {r: 1, g: 0.80558854, b: 0.305, a: 1}
-        key2: {r: 0.7372549, g: 0.38244438, b: 0.20784314, a: 1}
+        key1: {r: 0.1882353, g: 0.10617304, b: 0, a: 1}
+        key2: {r: 0.1882353, g: 0.10617304, b: 0, a: 1}
         key3: {r: 0.1882353, g: 0.10617304, b: 0, a: 1}
         key4: {r: 0, g: 0, b: 0, a: 0}
         key5: {r: 0, g: 0, b: 0, a: 0}
         key6: {r: 0, g: 0, b: 0, a: 0}
         key7: {r: 0, g: 0, b: 0, a: 0}
         ctime0: 6554
-        ctime1: 16384
-        ctime2: 39321
+        ctime1: 65342
+        ctime2: 52428
         ctime3: 52428
         ctime4: 52685
         ctime5: 0
@@ -6181,8 +6181,8 @@ ParticleSystem:
         atime6: 0
         atime7: 0
         m_Mode: 0
-        m_ColorSpace: -1
-        m_NumColorKeys: 4
+        m_ColorSpace: 0
+        m_NumColorKeys: 2
         m_NumAlphaKeys: 2
       minGradient:
         serializedVersion: 2
@@ -9882,7 +9882,7 @@ Light:
   serializedVersion: 11
   m_Type: 2
   m_Color: {r: 1, g: 0.6207441, b: 0.20392156, a: 1}
-  m_Intensity: 6.9431243
+  m_Intensity: 32.795116
   m_Range: 8
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208

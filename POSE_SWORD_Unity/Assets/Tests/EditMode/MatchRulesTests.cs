@@ -5,16 +5,28 @@ using PoseSword.Multiplayer;
 public class MatchRulesTests
 {
     [Test]
-    public void ActionsAreChosenByHostSpAndRoundState()
+    public void PrimaryActionIsChosenByHostSpAndRoundState()
     {
-        Assert.IsNull(BattlePolicies.Action(true, 100, false, true, false, true));
-        Assert.IsNull(BattlePolicies.Action(true, 100, true, false, false, true));
-        Assert.IsNull(BattlePolicies.Action(true, 100, true, true, true, true));
-        Assert.IsNull(BattlePolicies.Action(true, 19, true, true, false, true));
-        Assert.AreEqual("KomaDash", BattlePolicies.Action(true, 20, true, true, false, true));
-        Assert.AreEqual("Tornado", BattlePolicies.Action(true, 70, true, true, false, true));
-        Assert.AreEqual("SwordDash", BattlePolicies.Action(false, 100, true, true, false, true));
-        Assert.AreEqual("JumpLeft", BattlePolicies.Action(false, 99, true, true, false, false));
+        Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, false, true, false, true));
+        Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, false, false, true));
+        Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, true, true, true));
+        Assert.IsNull(BattlePolicies.PrimaryAction(true, 19, true, true, false, true));
+        Assert.AreEqual("KomaDash", BattlePolicies.PrimaryAction(true, 20, true, true, false, true));
+        // 通常入力(クリック/タップ)では、SPが必殺技分たまっていても剣モードは常にジャンプのみ
+        Assert.AreEqual("JumpRight", BattlePolicies.PrimaryAction(false, 100, true, true, false, true));
+        Assert.AreEqual("JumpLeft", BattlePolicies.PrimaryAction(false, 99, true, true, false, false));
+    }
+
+    [Test]
+    public void UltimateActionRequiresSpThresholdAndRoundState()
+    {
+        Assert.IsNull(BattlePolicies.UltimateAction(true, 100, false, true, false));
+        Assert.IsNull(BattlePolicies.UltimateAction(true, 100, true, false, false));
+        Assert.IsNull(BattlePolicies.UltimateAction(true, 100, true, true, true));
+        Assert.IsNull(BattlePolicies.UltimateAction(true, 69, true, true, false));
+        Assert.AreEqual("Tornado", BattlePolicies.UltimateAction(true, 70, true, true, false));
+        Assert.IsNull(BattlePolicies.UltimateAction(false, 99, true, true, false));
+        Assert.AreEqual("SwordDash", BattlePolicies.UltimateAction(false, 100, true, true, false));
     }
 
     [Test]

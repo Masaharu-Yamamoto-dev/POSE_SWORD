@@ -6,5 +6,5 @@ public class SwordData
     public int weight;
     public int hp;
     public string imageStr; // 👈 imageData から imageStr に変更
-    public int handleId; // 必殺技の種類（未指定時は0＝デフォルトの必殺技）
+    public string hiltType; // 柄の種類＝必殺技の種類（未指定時は"0"＝デフォルトの必殺技）
 }

@@ -16,11 +16,20 @@ namespace PoseSword.Multiplayer
 
     public static class BattlePolicies
     {
-        public static string Action(bool koma, float sp, bool started, bool alive, bool dashing, bool right)
+        // ▼ 通常クリック/タップ用：SPが必殺技分たまっていてもここでは発動しない（ジャンプ・小ダッシュのみ）
+        public static string PrimaryAction(bool koma, float sp, bool started, bool alive, bool dashing, bool right)
         {
             if (!started || !alive || dashing || float.IsNaN(sp) || float.IsInfinity(sp)) return null;
-            if (koma) return sp >= 70 ? "Tornado" : sp >= 20 ? "KomaDash" : null;
-            return sp >= 100 ? "SwordDash" : right ? "JumpRight" : "JumpLeft";
+            if (koma) return sp >= 20 ? "KomaDash" : null;
+            return right ? "JumpRight" : "JumpLeft";
+        }
+
+        // ▼ 必殺技専用ボタン/スペースキー用：SPが必殺技分たまっている時だけ発動する
+        public static string UltimateAction(bool koma, float sp, bool started, bool alive, bool dashing)
+        {
+            if (!started || !alive || dashing || float.IsNaN(sp) || float.IsInfinity(sp)) return null;
+            if (koma) return sp >= 70 ? "Tornado" : null;
+            return sp >= 100 ? "SwordDash" : null;
         }
 
         public static string Target(string self, float x, float y, IEnumerable<TargetCandidate> candidates,

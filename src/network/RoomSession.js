@@ -239,8 +239,12 @@ export class RoomSession {
     } else if (type === 'LOAD_FAILED') {
       if (this.isHost) this.abort('ゲームの初期化に失敗しました。'); else this.sendToHost('LOAD_FAILED', data);
     } else if (type === 'INPUT' && this.room.phase === 'PLAYING') {
-      if (!['LEFT', 'RIGHT'].includes(data.direction) || data.action !== 'PRIMARY') return;
-      const input = { matchId: data.matchId, seq: ++this.sequence, action: 'PRIMARY', direction: data.direction };
+      const isPrimary = data.action === 'PRIMARY' && ['LEFT', 'RIGHT'].includes(data.direction);
+      const isUltimate = data.action === 'ULTIMATE';
+      if (!isPrimary && !isUltimate) return;
+      const input = isPrimary
+        ? { matchId: data.matchId, seq: ++this.sequence, action: 'PRIMARY', direction: data.direction }
+        : { matchId: data.matchId, seq: ++this.sequence, action: 'ULTIMATE' };
       if (this.isHost) this.command('ReceiveMultiplayerInput', { ...input, playerId: 'p0' });
       else this.sendToHost('INPUT', input);
     } else if (this.isHost && type === 'PLAYING') {
