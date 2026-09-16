@@ -237,14 +237,32 @@ public static bool matchEnded = false;
         gameObject.SetActive(false);
     }
 
+    // 技の種別とカットインの見た目の対応。発動した本人の画面でも、同期を受け取った側でも同じ表を使う。
+    // 1(通常ダッシュ)はカットインなし。
+    void PlayCutinFor(int dashType)
+    {
+        if (CutinManager.Instance == null || spriteRenderer == null) return;
+        string skillName;
+        Color color;
+        switch (dashType)
+        {
+            case 2: skillName = "竜巻猛突!!"; color = new Color(1f, 0.8f, 0.2f); break;
+            case 3: skillName = "大回転斬!!"; color = new Color(0.5f, 1f, 1f); break;
+            case 4: skillName = "巨大回転斬!!"; color = new Color(1f, 0.3f, 0.3f); break;
+            case 5: skillName = "影武者突撃!!"; color = new Color(0.3f, 0.6f, 1f); break;
+            case 6: skillName = "リーフシールド!!"; color = new Color(0.4f, 0.95f, 0.5f); break;
+            default: return;
+        }
+        CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, color, PlayerMainColor);
+    }
+
     // ▼【修正】dashType 4(巨大化一回転)・5(分身突進)・6(リーフシールド発動)の色分けと、
     // 巨大化のスケールをクライアント側にも反映する
     public void ApplyMultiplayerVisuals(float sp, bool dashing, int dashType, float scale)
     {
         if (!IsAlive) return;
-        // ▼【新規追加】Client側はUltimateRoutine()自体をローカル実行しない（Host権威でのみ実行される）ため、
-        // カットインもここで再生する。dashTypeが必殺技の値に変わった瞬間（0/1→2〜6）だけ発火させる
-        int previousDashType = currentDashType;
+        // 技はホストだけが実行するので、同期で種別が変わった瞬間にこちらでもカットインを出す
+        if (dashType != currentDashType) PlayCutinFor(dashType);
         currentSp = Mathf.Clamp(sp, 0, maxSp); isDashing = dashing; currentDashType = dashType;
         if (dashType != previousDashType) TryPlayUltimateCutin(dashType);
         if (spriteRenderer != null) spriteRenderer.color = dashType == 1 ? new Color(1, .5f, .5f) :
@@ -1026,10 +1044,7 @@ public static bool matchEnded = false;
 
         Debug.Log($"🌪️ 独楽モード：超必殺【竜巻】発動！ (消費SP: {consumedSp:F0})");
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f), PlayerMainColor, MultiplayerOwner == null);
-        }
+        PlayCutinFor(currentDashType);
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
 
@@ -1078,10 +1093,7 @@ public static bool matchEnded = false;
 
         // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f), PlayerMainColor, MultiplayerOwner == null);
-        }
+        PlayCutinFor(currentDashType);
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.3f, 0.3f);
 
@@ -1158,10 +1170,7 @@ public static bool matchEnded = false;
 
         // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "影武者突撃!!", cloneColor, PlayerMainColor, MultiplayerOwner == null);
-        }
+        PlayCutinFor(currentDashType);
 
         if (spriteRenderer != null) spriteRenderer.color = cloneColor;
 
@@ -1270,10 +1279,7 @@ public static bool matchEnded = false;
 
         // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
         // 他の剣モード必殺技と同様にローカル/テストモード時だけ再生する
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "リーフシールド!!", shieldColor, PlayerMainColor, MultiplayerOwner == null);
-        }
+        PlayCutinFor(currentDashType);
 
         if (spriteRenderer != null) spriteRenderer.color = shieldColor;
 
@@ -1398,10 +1404,7 @@ public static bool matchEnded = false;
         currentSp = 0f;
         dashDamageBonus = 5.0f; 
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f), PlayerMainColor, MultiplayerOwner == null);
-        }
+        PlayCutinFor(currentDashType);
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
