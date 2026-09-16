@@ -51,6 +51,39 @@ public class SwordController : MonoBehaviour
         // {
         //     JumpAndSpin();
         // }
+
+        // ▼【N人対応】毎フレーム、生存中で最も近い相手を自動でターゲットにする
+        // (本物のマルチプレイ中はMultiplayerManager.UpdateTargets()が専用ロジックでenemyTargetを決めるため、ここでは触らない)
+        if (multiplayer == null) RefreshEnemyTarget();
+    }
+
+    // ▼【N人対応】NetworkManagerが持つ全プレイヤーの中から、自分以外・生存中・最も近い相手を探す
+    // (MultiplayerManager管理下ではない、ローカルデバッグ用の2〜4人プレイでのみ使われる)
+    void RefreshEnemyTarget()
+    {
+        if (NetworkManager.Instance == null) return;
+
+        GameObject[] swords = NetworkManager.Instance.playerSwords;
+        Transform nearest = null;
+        float nearestDist = float.MaxValue;
+
+        for (int i = 0; i < swords.Length; i++)
+        {
+            GameObject obj = swords[i];
+            if (obj == null || obj == gameObject || !obj.activeInHierarchy) continue;
+
+            SwordBattle otherBattle = obj.GetComponent<SwordBattle>();
+            if (otherBattle != null && otherBattle.IsDead) continue;
+
+            float dist = (obj.transform.position - transform.position).sqrMagnitude;
+            if (dist < nearestDist)
+            {
+                nearestDist = dist;
+                nearest = obj.transform;
+            }
+        }
+
+        if (nearest != null) enemyTarget = nearest;
     }
 
 

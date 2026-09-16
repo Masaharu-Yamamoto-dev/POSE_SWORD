@@ -123,7 +123,7 @@ public class TutorialManager : MonoBehaviour
     {
         if (NetworkManager.Instance == null) return;
 
-        GameObject mySwordObj = NetworkManager.Instance.isHost ? NetworkManager.Instance.hostSword : NetworkManager.Instance.clientSword;
+        GameObject mySwordObj = NetworkManager.Instance.GetMySword();
 
         if (mySwordObj != null)
         {

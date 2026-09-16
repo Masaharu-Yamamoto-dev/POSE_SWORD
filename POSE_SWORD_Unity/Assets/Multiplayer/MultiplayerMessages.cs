@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 
 [Serializable] public class MultiplayerPlayerConfig
 {
@@ -26,10 +27,19 @@ using System;
 [Serializable] public class MultiplayerPlayerState
 {
     public string playerId;
-    public float x, y, rotation, centerX, centerY, sp;
+    public float x, y, rotation, centerX, centerY, sp, scale;
     public int hp, dashType;
     public bool isDashing;
     public string targetPlayerId;
+}
+// ▼【新規追加】分身突進（hiltType:"2"）・リーフシールド（hiltType:"3"）など、
+// 本体以外に複数体表示する"付随体"1体分の見た目同期用データ
+[Serializable] public class MultiplayerCloneState
+{
+    public string id;
+    public string ownerId;
+    public float x, y, rotation;
+    public Color color;
 }
 [Serializable] public class MultiplayerSync
 {
@@ -38,6 +48,7 @@ using System;
     public string phase;
     public float countdownRemaining;
     public MultiplayerPlayerState[] players;
+    public MultiplayerCloneState[] clones;
 }
 [Serializable] public class MultiplayerScore
 {

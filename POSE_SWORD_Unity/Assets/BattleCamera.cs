@@ -2,8 +2,8 @@ using UnityEngine;
 
 public class BattleCamera : MonoBehaviour
 {
-    public Transform player;
-    public Transform enemy;
+    [Tooltip("戦闘中に画角へ収める全プレイヤー(2〜4人)。SceneControllerが試合開始時にセットする")]
+    public Transform[] combatants;
     public Camera cam;
 
     [Header("カメラの設定")]
@@ -88,28 +88,49 @@ public class BattleCamera : MonoBehaviour
         // 1. 戦闘中：通常追従モード
         if (isTracking)
         {
-            if (player == null || enemy == null) return;
+            // ▼【N人対応】生存中の全プレイヤーのバウンディングボックスで画角を決める
+            // (2人の場合は従来通り、2点間の距離ベースのズームと完全に一致する)
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minY = float.MaxValue, maxY = float.MinValue;
+            int aliveCount = 0;
 
-            // ▼【修正】生の position ではなく、重心を考慮した安全な座標を取得する
-            Vector3 playerPos = GetSafePosition(player);
-            Vector3 enemyPos = GetSafePosition(enemy);
+            if (combatants != null)
+            {
+                for (int i = 0; i < combatants.Length; i++)
+                {
+                    Transform t = combatants[i];
+                    if (t == null || !t.gameObject.activeInHierarchy) continue;
 
-            Vector3 centerPoint = (playerPos + enemyPos) / 2f;
+                    SwordBattle battle = t.GetComponent<SwordBattle>();
+                    if (battle != null && battle.IsDead) continue;
+
+                    Vector3 pos = GetSafePosition(t);
+                    minX = Mathf.Min(minX, pos.x);
+                    maxX = Mathf.Max(maxX, pos.x);
+                    minY = Mathf.Min(minY, pos.y);
+                    maxY = Mathf.Max(maxY, pos.y);
+                    aliveCount++;
+                }
+            }
+
+            if (aliveCount == 0) return;
+
+            Vector3 centerPoint = new Vector3((minX + maxX) / 2f, (minY + maxY) / 2f, 0f);
             if (!SwordController.isKomaMode)
             {
-                targetY = Mathf.Max(baseY, centerPoint.y * 0.3f); 
+                targetY = Mathf.Max(baseY, centerPoint.y * 0.3f);
             }
             else
             {
                 targetY = centerPoint.y;
             }
             Vector3 targetPosition = new Vector3(centerPoint.x, targetY, -10f);
-            
+
             currentBasePosition = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 5f);
             transform.position = currentBasePosition;
 
-            float distance = Vector2.Distance(playerPos, enemyPos);
-            float targetSize = Mathf.Clamp(distance * zoomMultiplier + margin, minSize, maxSize);
+            float diagonal = Vector2.Distance(new Vector2(minX, minY), new Vector2(maxX, maxY));
+            float targetSize = Mathf.Clamp(diagonal * zoomMultiplier + margin, minSize, maxSize);
             cam.orthographicSize = Mathf.Lerp(cam.orthographicSize, targetSize, Time.deltaTime * zoomSpeed);
         }
         // 2. 開幕カウントダウン：演出用フォーカスモード

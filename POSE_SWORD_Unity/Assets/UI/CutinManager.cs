@@ -35,27 +35,28 @@ public class CutinManager : MonoBehaviour
         if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
     }
 
-    public void PlayCutin(Sprite sprite, string swordName, string skillName, Color themeColor)
+    // ▼【変更】playerColorを追加：BackgroundBarは技の色(themeColor)ではなく、プレイヤーのメインカラー(P1赤/P2青/P3黄/P4緑)で塗る
+    public void PlayCutin(Sprite sprite, string swordName, string skillName, Color themeColor, Color playerColor)
     {
-        if (swordImage != null) 
+        if (swordImage != null)
         {
             swordImage.sprite = sprite;
-            swordImage.preserveAspect = true; 
+            swordImage.preserveAspect = true;
         }
 
         if (swordNameText != null) swordNameText.text = swordName;
-        if (skillNameText != null) 
+        if (skillNameText != null)
         {
             skillNameText.text = skillName;
             skillNameText.color = themeColor;
         }
 
-        // if (backgroundBar != null && backgroundBar.GetComponent<Image>() != null)
-        // {
-        //     Color barColor = themeColor * 0.7f;
-        //     barColor.a = 0.9f;
-        //     backgroundBar.GetComponent<Image>().color = barColor;
-        // }
+        if (backgroundBar != null && backgroundBar.GetComponent<Image>() != null)
+        {
+            Color barColor = playerColor * 0.7f;
+            barColor.a = 0.9f;
+            backgroundBar.GetComponent<Image>().color = barColor;
+        }
 
         StopAllCoroutines();
         StartCoroutine(PersonaStyleCutinRoutine());

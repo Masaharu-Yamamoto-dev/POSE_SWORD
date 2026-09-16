@@ -77,7 +77,7 @@ public class SwordGenerator : MonoBehaviour
             float actualWeight = Mathf.Lerp(7f, 25f, weightRatio);
             
             // HPはそのまま、攻撃力は変換した値をセット
-            swordBattle.SetupStatus(data.name, data.hp, actualAttack);
+            swordBattle.SetupStatus(data.name, data.hp, actualAttack, data.hiltType);
 
             if (swordRigidbody != null)
             {
@@ -156,6 +156,7 @@ public class SwordGenerator : MonoBehaviour
 
                 // 独楽モードかどうかで、柄の表示/非表示を切り替える
                 if (handleObject != null)
+                // s
                 {
                     handleObject.SetActive(!SwordController.isKomaMode);
                     Debug.Log($"✅ 柄の表示状態を更新しました: {!SwordController.isKomaMode}");
