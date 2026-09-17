@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { Unity, useUnityContext } from 'react-unity-webgl';
 import './BattleArena.css';
 
-// 2〜4人共通の対戦画面。プレイ中はUnity側の描画のみを表示する。
 export default function BattleArena({ bridge, view, onLoadFailed }) {
   const { unityProvider, sendMessage, isLoaded, initialisationError, loadingProgression } = useUnityContext({
     loaderUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.loader.js',
@@ -10,11 +9,42 @@ export default function BattleArena({ bridge, view, onLoadFailed }) {
     frameworkUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.framework.js',
     codeUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.wasm',
   });
+  
   const room = view?.room;
   const matchId = room?.matchId;
 
   useEffect(() => {
-    bridge.setSender(isLoaded ? sendMessage : null);
+    const interceptedSendMessage = (gameObject, methodName, param) => {
+      if (typeof param === 'string' && param.includes('swordData')) {
+        try {
+          let data = JSON.parse(param);
+
+          console.log("【BattleArena側】Unityに届く直前のデータ:", data);
+          
+          console.log(`[React -> Unity 送信データ] ${methodName}:`, data);
+
+          const playersArray = Array.isArray(data) ? data : (data.players || [data]);
+          playersArray.forEach((p, idx) => {
+            const sword = p.swordData || p;
+            console.log(`--- プレイヤー ${idx + 1} ---`);
+            console.log("  ・名前:", sword.name);
+            console.log("  ・柄 (hiltType):", sword.hiltType);
+            console.log("  ・3本リスト (swords):", sword.swords);
+            console.log("  ・装備インデックス (equippedIndex):", sword.equippedIndex);
+          });
+          console.groupEnd();
+
+          param = JSON.stringify(data);
+        } catch (e) {
+          console.error("JSON parse error:", e);
+        }
+      }
+      
+      sendMessage(gameObject, methodName, param);
+    };
+
+    bridge.setSender(isLoaded ? interceptedSendMessage : null);
+    
     return () => bridge.setSender(null);
   }, [bridge, isLoaded, sendMessage]);
 
