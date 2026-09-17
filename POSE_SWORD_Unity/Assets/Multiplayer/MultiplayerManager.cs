@@ -27,6 +27,10 @@ public class MultiplayerManager : MonoBehaviour
     private readonly List<Hit> hits = new List<Hit>();
     private readonly HashSet<string> forfeits = new HashSet<string>();
     private GameObject arena;
+    private bool stageVisible;   // 元のステージを出しているか（出すなら囲いの壁は描かない）
+    private SceneController sceneController;   // シーンに作り込まれたHUDを使うために保持する
+    private NetworkManager networkManager;
+    private bool useSceneHud;    // シーンのHUDを使えるか（使えないときだけ簡易HUDを生成する）
     private Sprite wallSprite;
     // ▼【新規追加】分身突進・リーフシールドなど、本体以外の"付随体"をSYNCでクライアントへ配信するための登録簿（Host側で使用）
     private readonly Dictionary<string, (GameObject obj, string ownerId, Color color)> activeClones = new Dictionary<string, (GameObject, string, Color)>();
@@ -35,6 +39,10 @@ public class MultiplayerManager : MonoBehaviour
     private readonly Dictionary<string, GameObject> cloneVisuals = new Dictionary<string, GameObject>();
     // Unity側のゲーム画面にも(Reactの4パネルとは別に)簡易HPバーを重ねて表示するためのHUD
     private GameObject hudRoot;
+    private TextMeshProUGUI hudStatusText;   // countdownText が無い場合の予備表示
+    private TextMeshProUGUI countdownLabel;  // シーン既存のカウントダウン表示（元の見た目）
+    private float syncedCountdown;           // ゲストがホストから受け取る残り秒数
+    private float goUntil;                   // 「GO!」を出しておく時刻
     private readonly Dictionary<string, Slider> hudHpBars = new Dictionary<string, Slider>();
     private readonly Dictionary<string, TextMeshProUGUI> hudHpTexts = new Dictionary<string, TextMeshProUGUI>();
     private string phase = "IDLE";
@@ -69,14 +77,40 @@ public class MultiplayerManager : MonoBehaviour
             network.isHost = IsHost;
             scene.hostGenerator.generateOnStart = false;
             scene.clientGenerator.generateOnStart = false;
-            network.playerSwords[0].SetActive(false);
-            if (network.playerSwords[1] != null) network.playerSwords[1].SetActive(false);
-            if (network.swordStage != null) network.swordStage.SetActive(false);
-            if (network.komaStage != null) network.komaStage.SetActive(false);
+            // 起動時の自動テスト(autoTestOnStart)が3・4人目の剣を作っていることがあるので消す。
+            // これを残すと2人対戦でも剣が4本出て、描画も物理も無駄に重くなる。
+            scene.ClearDynamicSpawns();
+            foreach (var sword in network.playerSwords) if (sword != null) sword.SetActive(false);
+            // 元のステージをモードに合わせて出す（NetworkManager と同じ規則）
+            bool koma = config.gameMode == "1";
+            if (network.swordStage != null) network.swordStage.SetActive(!koma);
+            if (network.komaStage != null) network.komaStage.SetActive(koma);
+            stageVisible = (network.swordStage != null && !koma) || (network.komaStage != null && koma);
             foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsSortMode.None)) canvas.enabled = false;
             foreach (var tutorial in FindObjectsByType<TutorialManager>(FindObjectsSortMode.None)) tutorial.enabled = false;
             if (BackgroundManager.Instance != null) BackgroundManager.Instance.enabled = false;
-            if (CutinManager.Instance != null) { CutinManager.Instance.StopAllCoroutines(); CutinManager.Instance.enabled = false; }
+            // 元からあるカウントダウン表示をそのまま使う（進行の管理はこちらで持つ）。
+            sceneController = scene;
+            networkManager = network;
+            // シーンに作り込まれたHPバーがあればそれを使う。無いときだけ簡易HUDを生成する。
+            var firstHud = network.playerSwords[0] != null ? network.playerSwords[0].GetComponent<SwordBattle>() : null;
+            useSceneHud = firstHud != null && firstHud.hpBar != null;
+
+            countdownLabel = scene.countdownText;
+            if (countdownLabel != null)
+            {
+                countdownLabel.gameObject.SetActive(true);
+                ShowCanvasOf(countdownLabel);
+            }
+
+            // カットインは出す。ただし時間は止めない（ホストが FixedUpdate で物理を進めているため）。
+            CutinManager.scaleTimeDuringCutin = false;
+            if (CutinManager.Instance != null)
+            {
+                CutinManager.Instance.StopAllCoroutines();
+                CutinManager.Instance.enabled = true;
+                ShowCanvasOf(CutinManager.Instance.cutinCanvasGroup);
+            }
             Time.timeScale = 1;
             SwordController.isKomaMode = config.gameMode == "1";
             SwordBattle.isRoundStarted = false;
@@ -91,7 +125,8 @@ public class MultiplayerManager : MonoBehaviour
             BuildArena();
             rules = new MatchRules(config.players.Select(p => p.playerId).ToArray(), config.players.Select(p => p.swordData.hp).ToArray());
             foreach (var player in config.players) CreateSword(player, network.playerSwords[0], scene.hostGenerator);
-            BuildHud();
+            HideUnusedHud(config.players.Length);
+            if (!useSceneHud) BuildHud();
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
             StartCoroutine(CompleteInitialization());
         }
@@ -123,8 +158,7 @@ public class MultiplayerManager : MonoBehaviour
         obj.transform.position = SpawnPosition(player.spawnIndex);
         obj.transform.rotation = Quaternion.identity;
         var battle = obj.GetComponent<SwordBattle>();
-        battle.hpBar = null; battle.delayHpBar = null; battle.nameText = null; battle.hpText = null;
-        battle.spGaugeBar = null; battle.spText = null; battle.frameImage = null;
+        AssignHud(battle, player.slotIndex);
         battle.playerNumber = player.slotIndex + 1;
         battle.ConfigureMultiplayer(this, player.playerId);
         var controller = obj.GetComponent<SwordController>();
@@ -163,92 +197,143 @@ public class MultiplayerManager : MonoBehaviour
     }
 
     // ReactのHUDとは別に、Unityのゲーム画面自体にも人数分(2〜4枚)のHPバーパネルを重ねて表示する
-    void BuildHud()
+    // シーンに作り込まれたHPバーへスロットごとに配線する。SceneController の単体プレイ時と同じ規則。
+    // 0・1番は1対1用のUI、2・3番は Editor で配置した HudTemplate を使う。
+    void AssignHud(SwordBattle battle, int slot)
     {
-        var canvasObj = new GameObject("MultiplayerHud", typeof(RectTransform));
-        var canvas = canvasObj.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvasObj.AddComponent<CanvasScaler>();
-        hudRoot = canvasObj;
+        battle.hpBar = null; battle.delayHpBar = null; battle.nameText = null; battle.hpText = null;
+        battle.spGaugeBar = null; battle.spText = null; battle.frameImage = null;
+        if (!useSceneHud) return;
 
-        int count = config.players.Length;
-        float panelWidth = 0.94f / count;
-        for (int i = 0; i < count; i++)
+        if (slot <= 1)
         {
-            var player = config.players[i];
-            Color color = SwordBattle.PlayerColors[i % SwordBattle.PlayerColors.Length];
-            float x0 = 0.03f + i * panelWidth;
-            float x1 = x0 + panelWidth - 0.02f;
+            var swords = networkManager != null ? networkManager.playerSwords : null;
+            var source = swords != null && slot < swords.Length && swords[slot] != null
+                ? swords[slot].GetComponent<SwordBattle>() : null;
+            if (source == null) return;
+            battle.hpBar = source.hpBar; battle.delayHpBar = source.delayHpBar;
+            battle.nameText = source.nameText; battle.hpText = source.hpText;
+            battle.spGaugeBar = source.spGaugeBar; battle.spText = source.spText;
+            battle.frameImage = source.frameImage;
+        }
+        else
+        {
+            var template = HudTemplateFor(slot);
+            if (template == null || template.hpBar == null) return;
+            battle.hpBar = template.hpBar; battle.delayHpBar = template.delayHpBar;
+            battle.nameText = template.nameText; battle.hpText = template.hpText;
+            battle.spGaugeBar = template.spGaugeBar; battle.spText = template.spText;
+            SceneController.SetHudTemplateVisible(template, true);
+        }
 
-            // 一番外側＝メインカラーの枠。数px内側に本体の暗い背景を重ねて縁取りにする。
-            var panel = new GameObject("HpPanel_" + player.playerId, typeof(RectTransform));
-            panel.transform.SetParent(canvasObj.transform, false);
-            var panelRt = panel.GetComponent<RectTransform>();
-            panelRt.anchorMin = new Vector2(x0, 0.87f);
-            panelRt.anchorMax = new Vector2(x1, 0.98f);
-            panelRt.offsetMin = Vector2.zero; panelRt.offsetMax = Vector2.zero;
-            var panelBorder = panel.AddComponent<Image>();
-            panelBorder.color = color;
+        ShowCanvasOf(battle.hpBar);
+        ShowCanvasOf(battle.spGaugeBar);
+    }
 
-            var contentObj = new GameObject("Content", typeof(RectTransform));
-            contentObj.transform.SetParent(panel.transform, false);
-            var contentRt = contentObj.GetComponent<RectTransform>();
-            contentRt.anchorMin = Vector2.zero; contentRt.anchorMax = Vector2.one;
-            contentRt.offsetMin = new Vector2(3, 3); contentRt.offsetMax = new Vector2(-3, -3);
-            var panelBg = contentObj.AddComponent<Image>();
-            panelBg.color = new Color(0f, 0f, 0f, 0.55f);
+    HudTemplate HudTemplateFor(int slot)
+    {
+        if (sceneController == null) return null;
+        return slot == 2 ? sceneController.p3HudTemplate : slot == 3 ? sceneController.p4HudTemplate : null;
+    }
 
-            var nameObj = new GameObject("Name", typeof(RectTransform));
-            nameObj.transform.SetParent(contentObj.transform, false);
-            var nameText = nameObj.AddComponent<TextMeshProUGUI>();
-            nameText.text = "P" + (i + 1) + " " + player.swordData.name;
-            nameText.fontSize = 14; nameText.color = color; nameText.alignment = TextAlignmentOptions.MidlineLeft;
-            var nameRt = nameObj.GetComponent<RectTransform>();
-            StretchFull(nameRt); nameRt.anchorMin = new Vector2(0.06f, 0.62f); nameRt.anchorMax = new Vector2(0.94f, 1f);
-
-            var sliderObj = new GameObject("HpSlider", typeof(RectTransform));
-            sliderObj.transform.SetParent(contentObj.transform, false);
-            var sliderRt = sliderObj.GetComponent<RectTransform>();
-            sliderRt.anchorMin = new Vector2(0.06f, 0.32f); sliderRt.anchorMax = new Vector2(0.94f, 0.60f);
-            sliderRt.offsetMin = Vector2.zero; sliderRt.offsetMax = Vector2.zero;
-            var slider = sliderObj.AddComponent<Slider>();
-            slider.interactable = false; slider.transition = Selectable.Transition.None;
-            slider.minValue = 0; slider.maxValue = Mathf.Max(1, player.swordData.hp); slider.wholeNumbers = true;
-
-            var sliderBg = new GameObject("Background", typeof(RectTransform));
-            sliderBg.transform.SetParent(sliderObj.transform, false);
-            StretchFull(sliderBg.GetComponent<RectTransform>());
-            var sliderBgImg = sliderBg.AddComponent<Image>(); sliderBgImg.color = new Color(1f, 1f, 1f, 0.15f);
-
-            var fillArea = new GameObject("Fill Area", typeof(RectTransform));
-            fillArea.transform.SetParent(sliderObj.transform, false);
-            StretchFull(fillArea.GetComponent<RectTransform>());
-
-            var fillObj = new GameObject("Fill", typeof(RectTransform));
-            fillObj.transform.SetParent(fillArea.transform, false);
-            StretchFull(fillObj.GetComponent<RectTransform>());
-            var fillImg = fillObj.AddComponent<Image>(); fillImg.color = color;
-            slider.fillRect = fillObj.GetComponent<RectTransform>();
-            slider.targetGraphic = fillImg;
-            slider.direction = Slider.Direction.LeftToRight;
-            slider.value = player.swordData.hp;
-
-            var hpTextObj = new GameObject("HpText", typeof(RectTransform));
-            hpTextObj.transform.SetParent(contentObj.transform, false);
-            var hpText = hpTextObj.AddComponent<TextMeshProUGUI>();
-            hpText.fontSize = 11; hpText.color = Color.white; hpText.alignment = TextAlignmentOptions.MidlineLeft;
-            var hpTextRt = hpTextObj.GetComponent<RectTransform>();
-            StretchFull(hpTextRt); hpTextRt.anchorMin = new Vector2(0.06f, 0f); hpTextRt.anchorMax = new Vector2(0.94f, 0.30f);
-
-            hudHpBars[player.playerId] = slider;
-            hudHpTexts[player.playerId] = hpText;
+    // 参加していないスロットのHPバーは消す（古い数値が残って見えるため）。
+    void HideUnusedHud(int playerCount)
+    {
+        if (!useSceneHud) return;
+        for (int slot = playerCount; slot < 4; slot++)
+        {
+            if (slot <= 1)
+            {
+                var swords = networkManager != null ? networkManager.playerSwords : null;
+                var source = swords != null && slot < swords.Length && swords[slot] != null
+                    ? swords[slot].GetComponent<SwordBattle>() : null;
+                if (source == null) continue;
+                if (source.hpBar != null) source.hpBar.gameObject.SetActive(false);
+                if (source.delayHpBar != null) source.delayHpBar.gameObject.SetActive(false);
+                if (source.spGaugeBar != null) source.spGaugeBar.gameObject.SetActive(false);
+            }
+            else SceneController.SetHudTemplateVisible(HudTemplateFor(slot), false);
         }
     }
 
-    static void StretchFull(RectTransform rt)
+    // 一度全部消したCanvasのうち、対戦中も使うものだけ表示に戻す。
+    void ShowCanvasOf(Component element)
     {
-        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
-        rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+        if (element == null) return;
+        var canvas = element.GetComponentInParent<Canvas>(true);
+        if (canvas != null) canvas.enabled = true;
+    }
+
+    void BuildHud()
+    {
+        battle.hpBar = null; battle.delayHpBar = null; battle.nameText = null; battle.hpText = null;
+        battle.spGaugeBar = null; battle.spText = null;
+        Transform bar = hudCanvas != null ? hudCanvas.transform.Find("PL" + (slotIndex + 1) + "Bar") : null;
+        if (bar == null) return;
+
+        Transform green = FindChildEndingWith(bar, "HPBarGreen");
+        Transform red = FindChildEndingWith(bar, "HPBarRed");
+        Transform sp = FindChildEndingWith(bar, "SPBar");
+        if (green != null)
+        {
+            battle.hpBar = green.GetComponent<Slider>();
+            battle.hpText = green.Find("HPText (TMP)")?.GetComponent<TextMeshProUGUI>();
+            battle.nameText = green.Find("NameText (TMP)")?.GetComponent<TextMeshProUGUI>();
+        }
+        if (red != null) battle.delayHpBar = red.GetComponent<Slider>();
+        if (sp != null)
+        {
+            battle.spGaugeBar = sp.GetComponent<Slider>();
+            battle.spText = sp.Find("SPText (TMP)")?.GetComponent<TextMeshProUGUI>();
+        }
+
+        // 中央の状況表示。シーンに既存のカウントダウン表示があればそちらを使うので作らない。
+        if (countdownLabel != null) return;
+        var statusObj = new GameObject("StatusText", typeof(RectTransform));
+        statusObj.transform.SetParent(canvasObj.transform, false);
+        var statusRt = statusObj.GetComponent<RectTransform>();
+        statusRt.anchorMin = new Vector2(0.1f, 0.4f);
+        statusRt.anchorMax = new Vector2(0.9f, 0.6f);
+        statusRt.offsetMin = Vector2.zero; statusRt.offsetMax = Vector2.zero;
+        hudStatusText = statusObj.AddComponent<TextMeshProUGUI>();
+        hudStatusText.alignment = TextAlignmentOptions.Center;
+        hudStatusText.enableAutoSizing = true;
+        hudStatusText.fontSizeMin = 20; hudStatusText.fontSizeMax = 160;
+        hudStatusText.color = Color.white;
+        hudStatusText.text = string.Empty;
+    }
+
+    // 開始前の待機とカウントダウン。元からある表示があればそれを使い、無ければ生成した予備に出す。
+    void UpdateStatusText()
+    {
+        var label = countdownLabel != null ? countdownLabel : hudStatusText;
+        if (label == null) return;
+        if (phase == "LOADING")
+        {
+            label.text = "他のプレイヤーを待っています…";
+            goUntil = 0f;
+        }
+        else if (phase == "COUNTDOWN")
+        {
+            float remaining = IsHost ? countdownEnd - Time.unscaledTime : syncedCountdown;
+            label.text = Mathf.Max(1, Mathf.CeilToInt(remaining)).ToString();
+            goUntil = Time.unscaledTime + 0.8f;   // 開始直後に「GO!」を出すための猶予
+        }
+        else if (IsPlaying && Time.unscaledTime < goUntil)
+        {
+            label.text = "GO!";
+        }
+        else
+        {
+            label.text = string.Empty;
+        }
+    }
+
+    static Transform FindChildEndingWith(Transform parent, string suffix)
+    {
+        foreach (Transform child in parent)
+            if (child.name.EndsWith(suffix)) return child;
+        return null;
     }
 
     // Two to four players share one arena: spread them evenly instead of assuming four seats.
@@ -271,11 +356,14 @@ public class MultiplayerManager : MonoBehaviour
         Wall(new Vector2(-24, (bottom + top) / 2), new Vector2(1, top - bottom));
         Wall(new Vector2(24, (bottom + top) / 2), new Vector2(1, top - bottom));
     }
+    // 壁は場外へ飛び出さないための当たり判定。元のステージを出しているときは、
+    // 見た目がぶつかるので描画しない（判定だけ残す）。
     void Wall(Vector2 position, Vector2 size)
     {
         var wall = new GameObject("ArenaWall"); wall.transform.SetParent(arena.transform);
         wall.transform.position = position; wall.transform.localScale = size;
         wall.AddComponent<BoxCollider2D>();
+        if (stageVisible) return;
         var renderer = wall.AddComponent<SpriteRenderer>(); renderer.sprite = wallSprite; renderer.color = new Color(.2f, .22f, .27f);
     }
 
@@ -300,6 +388,7 @@ public class MultiplayerManager : MonoBehaviour
     void Update()
     {
         if (config == null) return;
+        UpdateStatusText();
         if (IsHost && phase == "COUNTDOWN" && Time.unscaledTime >= countdownEnd)
         {
             phase = "PLAYING"; SwordBattle.isRoundStarted = true;
@@ -313,25 +402,26 @@ public class MultiplayerManager : MonoBehaviour
         }
         if (!IsHost)
         {
+            // ▼【修正】位置と回転で追従速度を分ける。巨大化一回転(1080°/秒)のような速い回転は、
+            // 位置と同じ補間レート(25)だと定常的な追従遅れ(角速度/レート ≈ 1080/25 ≈ 43°)が生じ、
+            // クライアント側では「あまり回っていない」ように見えていた。回転だけ大幅に追従を速くして
+            // (1080/150 ≈ 7°まで遅れを圧縮)、実際の回転速度に近い見た目にする
+            float posT = 1 - Mathf.Exp(-25 * Time.unscaledDeltaTime);
+            float rotT = 1 - Mathf.Exp(-150 * Time.unscaledDeltaTime);
             foreach (var pair in syncTargets)
             {
                 var sword = swords[pair.Key]; var state = pair.Value;
-                sword.transform.position = Vector3.Lerp(sword.transform.position, new Vector3(state.x, state.y, 0), 1 - Mathf.Exp(-25 * Time.unscaledDeltaTime));
-                sword.transform.rotation = Quaternion.Slerp(sword.transform.rotation, Quaternion.Euler(0, 0, state.rotation), 1 - Mathf.Exp(-25 * Time.unscaledDeltaTime));
+                sword.transform.position = Vector3.Lerp(sword.transform.position, new Vector3(state.x, state.y, 0), posT);
+                sword.transform.rotation = Quaternion.Slerp(sword.transform.rotation, Quaternion.Euler(0, 0, state.rotation), rotT);
             }
-        }
-        UpdateHud();
-    }
-
-    // ホスト・クライアントどちらでも、その時点のSwordBattle.hp/currentSpをそのままHUDに反映する
-    void UpdateHud()
-    {
-        foreach (var pair in hudHpBars)
-        {
-            if (!swords.TryGetValue(pair.Key, out var battle)) continue;
-            pair.Value.value = battle.hp;
-            if (hudHpTexts.TryGetValue(pair.Key, out var text))
-                text.text = $"HP {battle.hp} / SP {Mathf.FloorToInt(battle.currentSp)}" + (battle.IsAlive ? "" : " — 脱落");
+            // ▼ 分身・リーフシールドの見た目も、剣本体と同じ補間で滑らかに追従させる
+            foreach (var pair in cloneSyncTargets)
+            {
+                if (!cloneVisuals.TryGetValue(pair.Key, out var obj) || obj == null) continue;
+                var state = pair.Value;
+                obj.transform.position = Vector3.Lerp(obj.transform.position, new Vector3(state.x, state.y, 0), posT);
+                obj.transform.rotation = Quaternion.Slerp(obj.transform.rotation, Quaternion.Euler(0, 0, state.rotation), rotT);
+            }
         }
     }
 
@@ -463,6 +553,7 @@ public class MultiplayerManager : MonoBehaviour
             sync.players.Any(p => p == null || p.playerId == null || !swords.ContainsKey(p.playerId)) ||
             sync.players.Select(p => p.playerId).Distinct().Count() != config.players.Length) return;
         phase = sync.phase; SwordBattle.isRoundStarted = IsPlaying;
+        syncedCountdown = sync.countdownRemaining;
         foreach (var data in sync.players)
         {
             var sword = swords[data.playerId];
@@ -478,7 +569,8 @@ public class MultiplayerManager : MonoBehaviour
     }
 
     // ▼【新規追加】Hostから届いた分身の一覧に合わせて、クライアント側の見た目専用オブジェクトを
-    // 生成・移動・削除する（物理演算は使わず、位置をそのまま反映するだけ）
+    // 生成・削除する。位置・回転は即座にスナップさせず、Update()側で剣本体と同じ補間で滑らかに追従させる
+    // （新規出現時だけは目標位置にスナップして、原点から一瞬で飛んでくるのを防ぐ）
     void SyncClones(MultiplayerCloneState[] cloneStates)
     {
         var incomingIds = new HashSet<string>();
@@ -493,15 +585,17 @@ public class MultiplayerManager : MonoBehaviour
                     obj = CreateCloneVisual(c.ownerId, c.color);
                     if (obj == null) continue;
                     cloneVisuals[c.id] = obj;
+                    obj.transform.position = new Vector3(c.x, c.y, 0);
+                    obj.transform.rotation = Quaternion.Euler(0, 0, c.rotation);
                 }
-                obj.transform.position = new Vector3(c.x, c.y, 0);
-                obj.transform.rotation = Quaternion.Euler(0, 0, c.rotation);
+                cloneSyncTargets[c.id] = c;
             }
         }
         foreach (var id in cloneVisuals.Keys.Where(id => !incomingIds.Contains(id)).ToList())
         {
             if (cloneVisuals[id] != null) Destroy(cloneVisuals[id]);
             cloneVisuals.Remove(id);
+            cloneSyncTargets.Remove(id);
         }
     }
 
@@ -563,11 +657,15 @@ public class MultiplayerManager : MonoBehaviour
         foreach (var sword in swords.Values) if (sword != null) { sword.StopAllCoroutines(); sword.gameObject.SetActive(false); }
         if (arena != null) { arena.SetActive(false); Destroy(arena); }
         if (wallSprite != null) Destroy(wallSprite);
+        CutinManager.scaleTimeDuringCutin = true;
+        stageVisible = false; useSceneHud = false; sceneController = null; networkManager = null;
+        if (countdownLabel != null) countdownLabel.text = string.Empty;
+        hudStatusText = null; countdownLabel = null; syncedCountdown = 0; goUntil = 0;
         if (hudRoot != null) { hudRoot.SetActive(false); Destroy(hudRoot); }
         if (ownsSimulation) { Physics2D.simulationMode = previousSimulationMode; ownsSimulation = false; }
         swords.Clear(); bodies.Clear(); targets.Clear(); sequences.Clear(); inputTimes.Clear();
         hits.Clear(); forfeits.Clear(); invulnerable.Clear(); syncTargets.Clear();
-        hudHpBars.Clear(); hudHpTexts.Clear();
+        cloneSyncTargets.Clear();
         activeClones.Clear();
         foreach (var visual in cloneVisuals.Values) if (visual != null) Destroy(visual);
         cloneVisuals.Clear();

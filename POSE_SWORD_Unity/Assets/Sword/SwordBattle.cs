@@ -83,7 +83,8 @@ public static bool matchEnded = false;
     public float cloneSpawnStagger = 0.08f; // 分身が1体ずつ出現する間隔（秒）
     public int leafShieldCount = 3; // リーフシールド（hiltType:"3"）の展開枚数
     public float leafShieldDuration = 15f; // リーフシールドの持続時間（秒）
-    public float leafShieldOrbitRadius = 2.5f; // 本体からの周回半径
+    public float leafShieldOrbitRadius = 3.5f; // 本体からの周回半径（＝防御圏の広さ）
+    public float leafShieldRadius = 0.7f; // シールド1枚あたりの当たり判定の大きさ
     public float leafShieldOrbitSpeed = 150f; // 周回速度（度/秒）
     public float leafShieldHpRatio = 1f / 3f; // 各シールドのHP（本体の最大HPに対する割合）
     public float leafShieldReflectMultiplier = 2f; // シールドが被弾した時、受けたダメージの何倍を相手に返すか
@@ -236,17 +237,58 @@ public static bool matchEnded = false;
         gameObject.SetActive(false);
     }
 
+    // 技の種別とカットインの見た目の対応。発動した本人の画面でも、同期を受け取った側でも同じ表を使う。
+    // 1(通常ダッシュ)はカットインなし。
+    void PlayCutinFor(int dashType)
+    {
+        if (CutinManager.Instance == null || spriteRenderer == null) return;
+        string skillName;
+        Color color;
+        switch (dashType)
+        {
+            case 2: skillName = "竜巻猛突!!"; color = new Color(1f, 0.8f, 0.2f); break;
+            case 3: skillName = "大回転斬!!"; color = new Color(0.5f, 1f, 1f); break;
+            case 4: skillName = "巨大回転斬!!"; color = new Color(1f, 0.3f, 0.3f); break;
+            case 5: skillName = "影武者突撃!!"; color = new Color(0.3f, 0.6f, 1f); break;
+            case 6: skillName = "リーフシールド!!"; color = new Color(0.4f, 0.95f, 0.5f); break;
+            default: return;
+        }
+        CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, color, PlayerMainColor);
+    }
+
     // ▼【修正】dashType 4(巨大化一回転)・5(分身突進)・6(リーフシールド発動)の色分けと、
     // 巨大化のスケールをクライアント側にも反映する
     public void ApplyMultiplayerVisuals(float sp, bool dashing, int dashType, float scale)
     {
         if (!IsAlive) return;
+        // 技はホストだけが実行するので、同期で種別が変わった瞬間にこちらでもカットインを出す
+        if (dashType != currentDashType) PlayCutinFor(dashType);
         currentSp = Mathf.Clamp(sp, 0, maxSp); isDashing = dashing; currentDashType = dashType;
+        if (dashType != previousDashType) TryPlayUltimateCutin(dashType);
         if (spriteRenderer != null) spriteRenderer.color = dashType == 1 ? new Color(1, .5f, .5f) :
             dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) :
             dashType == 4 ? new Color(1f, .3f, .3f) : dashType == 5 ? new Color(.3f, .6f, 1f) :
             dashType == 6 ? new Color(.4f, .95f, .5f) : Color.white;
         if (scale > 0f) transform.localScale = Vector3.one * scale;
+    }
+
+    // ▼【新規追加】dashType(2〜6)に対応する必殺技のカットインを、スローモーションなしで再生する
+    // （Host自身の画面は各Routine内で直接PlayCutinを呼んでいるので、ここはClient専用の経路）
+    void TryPlayUltimateCutin(int dashType)
+    {
+        if (CutinManager.Instance == null || spriteRenderer == null) return;
+        string skillName;
+        Color themeColor;
+        switch (dashType)
+        {
+            case 2: skillName = "竜巻猛突!!"; themeColor = new Color(1f, 0.8f, 0.2f); break;
+            case 3: skillName = "大回転斬!!"; themeColor = new Color(0.5f, 1f, 1f); break;
+            case 4: skillName = "巨大回転斬!!"; themeColor = new Color(1f, 0.3f, 0.3f); break;
+            case 5: skillName = "影武者突撃!!"; themeColor = new Color(0.3f, 0.6f, 1f); break;
+            case 6: skillName = "リーフシールド!!"; themeColor = new Color(0.4f, 0.95f, 0.5f); break;
+            default: return;
+        }
+        CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, themeColor, PlayerMainColor, false);
     }
 
     void FixedUpdate()
@@ -1002,10 +1044,7 @@ public static bool matchEnded = false;
 
         Debug.Log($"🌪️ 独楽モード：超必殺【竜巻】発動！ (消費SP: {consumedSp:F0})");
 
-        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f), PlayerMainColor);
-        }
+        PlayCutinFor(currentDashType);
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
 
@@ -1054,10 +1093,7 @@ public static bool matchEnded = false;
 
         // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
-        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f), PlayerMainColor);
-        }
+        PlayCutinFor(currentDashType);
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.3f, 0.3f);
 
@@ -1134,10 +1170,7 @@ public static bool matchEnded = false;
 
         // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
-        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "影武者突撃!!", cloneColor, PlayerMainColor);
-        }
+        PlayCutinFor(currentDashType);
 
         if (spriteRenderer != null) spriteRenderer.color = cloneColor;
 
@@ -1246,10 +1279,7 @@ public static bool matchEnded = false;
 
         // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
         // 他の剣モード必殺技と同様にローカル/テストモード時だけ再生する
-        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "リーフシールド!!", shieldColor, PlayerMainColor);
-        }
+        PlayCutinFor(currentDashType);
 
         if (spriteRenderer != null) spriteRenderer.color = shieldColor;
 
@@ -1273,7 +1303,7 @@ public static bool matchEnded = false;
 
                 CircleCollider2D col = shieldObj.AddComponent<CircleCollider2D>();
                 col.isTrigger = true;
-                col.radius = 0.5f;
+                col.radius = leafShieldRadius;
 
                 LeafShieldOrb orb = shieldObj.AddComponent<LeafShieldOrb>();
                 orb.Setup(this, i * sectorSize, leafShieldOrbitRadius, leafShieldOrbitSpeed, shieldHp, leafShieldReflectMultiplier, leafShieldDuration);
@@ -1374,10 +1404,7 @@ public static bool matchEnded = false;
         currentSp = 0f;
         dashDamageBonus = 5.0f; 
 
-        if (MultiplayerOwner == null && CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f), PlayerMainColor);
-        }
+        PlayCutinFor(currentDashType);
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)

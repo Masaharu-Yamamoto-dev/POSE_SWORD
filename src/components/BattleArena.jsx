@@ -4,10 +4,12 @@ import './BattleArena.css';
 
 export default function BattleArena({ bridge, view, onLoadFailed }) {
   const { unityProvider, sendMessage, isLoaded, initialisationError, loadingProgression } = useUnityContext({
-    loaderUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.loader.js',
-    dataUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.data',
-    frameworkUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.framework.js',
-    codeUrl: '/POSE_SWORD_Unity/Builds/ver3.0/Build/ver3.0.wasm',
+    // ビルドはバージョン付きのフォルダに置く。差し替えるときはここだけ変える。
+    // 古いビルドを残しておけば、問題があれば戻せる。
+    loaderUrl: '/multiplayer/ver3.2/Build/ver3.2.loader.js',
+    dataUrl: '/multiplayer/ver3.2/Build/ver3.2.data',
+    frameworkUrl: '/multiplayer/ver3.2/Build/ver3.2.framework.js',
+    codeUrl: '/multiplayer/ver3.2/Build/ver3.2.wasm',
   });
   
   const room = view?.room;
@@ -52,16 +54,12 @@ export default function BattleArena({ bridge, view, onLoadFailed }) {
     if (initialisationError) onLoadFailed(matchId);
   }, [initialisationError, matchId, onLoadFailed]);
 
-  const waiting = room?.players.filter(p => !p.loaded) ?? [];
 
   return (
     <section className="mp-arena">
       <Unity unityProvider={unityProvider} style={{ width: '100%', height: '100%' }} tabIndex={0} />
+      {/* 対戦中の表示はUnity側が持つ。ここはゲーム本体の取得中だけ（Unityがまだ動いていないため）。 */}
       {!isLoaded && <div className="mp-loading">ゲームを読み込み中… {Math.round(loadingProgression * 100)}%</div>}
-      {room?.phase === 'LOADING' && isLoaded && (
-        <p className="mp-loading">読み込み待ち：{waiting.map(p => `P${p.slotIndex + 1} ${p.swordData.name}`).join('・')}</p>
-      )}
-      {room?.phase === 'COUNTDOWN' && <p className="mp-status">{Math.ceil(view?.sync?.countdownRemaining ?? 3)}</p>}
     </section>
   );
 }

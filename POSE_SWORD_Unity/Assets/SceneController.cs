@@ -95,15 +95,21 @@ public class SceneController : MonoBehaviour
 
     void Start()
     {
+        // ▼ 起動時の自動テストはEditor専用。ビルドで走らせると、マルチプレイの初期化と
+        // 実行順を争って「デモ用の剣」がそのまま残る（READY送信と本Start()の順序は保証されない）。
+#if UNITY_EDITOR
         if (autoTestOnStart && debugBattleJsonFile != null && !string.IsNullOrEmpty(debugBattleJsonFile.text))
         {
             if (NetworkManager.Instance != null) NetworkManager.Instance.SetPlayerInfoDirect(0, 2, true);
             StartBattle(debugBattleJsonFile.text);
         }
+#endif
     }
 
     void Update()
     {
+        // ▼ こちらもEditor専用。対戦中に誰かがTキーを押すとテスト対戦が割り込んでしまう。
+#if UNITY_EDITOR
         // 起動後も「T」キーを押せば、インスペクタの数値を反映して何度でもカウントダウンからやり直せます
         if (Input.GetKeyDown(KeyCode.T))
         {
@@ -113,6 +119,19 @@ public class SceneController : MonoBehaviour
                 StartBattle(debugBattleJsonFile.text);
             }
         }
+#endif
+    }
+
+    // ▼ 動的生成した3・4人目の剣とHPバーを片付ける。
+    // 起動時の自動テスト(autoTestOnStart)で作られたものを、対戦開始前に消す用途でも使う。
+    public void ClearDynamicSpawns()
+    {
+        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
+        dynamicSwords.Clear();
+        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
+        dynamicHudPieces.Clear();
+        SetHudTemplateVisible(p3HudTemplate, false);
+        SetHudTemplateVisible(p4HudTemplate, false);
     }
 
     public void StartBattle(string jsonString)
@@ -127,10 +146,7 @@ public class SceneController : MonoBehaviour
         Vector3[] positions = GetSpawnPositions(playerCount);
 
         // ▼ 前回のStartBattle()で3・4人目用に動的生成したもの(剣・HPバー)を破棄してから作り直す
-        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
-        dynamicSwords.Clear();
-        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
-        dynamicHudPieces.Clear();
+        ClearDynamicSpawns();
 
         if (NetworkManager.Instance != null)
         {
@@ -323,7 +339,7 @@ public class SceneController : MonoBehaviour
 
     // ▼ p3HudTemplate/p4HudTemplate(PL3Bar/PL4Barなど、Editorで配置した実物のHPバー一式)の表示/非表示を切り替える。
     // 2人プレイなど、その人数の試合で使わない時は非表示にし、実際にその枠が参加する試合の時だけ表示する。
-    static void SetHudTemplateVisible(HudTemplate template, bool visible)
+    public static void SetHudTemplateVisible(HudTemplate template, bool visible)
     {
         if (template == null) return;
         if (template.hpBar != null) template.hpBar.gameObject.SetActive(visible);
