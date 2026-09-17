@@ -13,8 +13,49 @@ export function validateSword(sword) {
       typeof sword.imageStr !== 'string' || !sword.imageStr || sword.imageStr.length > MAX_IMAGE_LENGTH) {
     throw new Error('武器データが不正です。再錬成してください。');
   }
-  const { name, hp, attack, weight, imageStr } = sword;
-  return { name, hp, attack, weight, imageStr };
+
+  // 1. 柄（hiltType）の取得
+  const hiltType = typeof sword.hiltType === 'string' ? sword.hiltType : 'default';
+
+  // 2. 装備インデックス（equippedIndex）の取得
+  const equippedIndex = Number.isInteger(sword.equippedIndex) && sword.equippedIndex >= 0 && sword.equippedIndex <= 2 
+    ? sword.equippedIndex 
+    : 0;
+
+  // 3. 3本分の配列（swords）の構築
+  let swords = [];
+  if (Array.isArray(sword.swords)) {
+    swords = sword.swords.map(s => {
+      if (!s) return { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: 'default', isEmpty: true };
+      return {
+        name: typeof s.name === 'string' ? s.name : 'empty',
+        hp: Number.isInteger(s.hp) ? s.hp : 1,
+        attack: Number.isInteger(s.attack) ? s.attack : 1,
+        weight: Number.isInteger(s.weight) ? s.weight : 1,
+        imageStr: typeof s.imageStr === 'string' ? s.imageStr : '',
+        hiltType: typeof s.hiltType === 'string' ? s.hiltType : 'default',
+        isEmpty: Boolean(s.isEmpty)
+      };
+    });
+  } else {
+    swords = [
+      { name: sword.name, hp: sword.hp, attack: sword.attack, weight: sword.weight, imageStr: sword.imageStr, hiltType, isEmpty: false },
+      { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: 'default', isEmpty: true },
+      { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: 'default', isEmpty: true }
+    ];
+  }
+
+  // 4. すべての拡張データを含めて返す（ここで確実に返却する！）
+  return {
+    name: sword.name,
+    hp: sword.hp,
+    attack: sword.attack,
+    weight: sword.weight,
+    imageStr: sword.imageStr,
+    hiltType: hiltType,
+    swords: swords,
+    equippedIndex: equippedIndex
+  };
 }
 
 // The host owns this model. Transport identities never come from packet playerId fields.

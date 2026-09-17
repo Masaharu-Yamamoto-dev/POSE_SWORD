@@ -13,34 +13,34 @@ export const HILT_DATABASE = {
     attackBonus: 0,
     weightBonus: 0,
     skillName: "大旋風斬",
-    skillDescription: "敵目掛けて回転突進する必中必殺の一撃"
+    skillDescription: "敵に目掛けて回転突進する、必中必殺の一撃!"
   },
-  "hilt_2": {
-    name: "かっちょいい柄",
-    imageSrc: "/hilts/fire_dragon.png",
+  "handle_1": {
+    name: "武骨な柄",
+    imageSrc: "/sword_handle_1.png",
     hpBonus: 10,
     attackBonus: 25,
     weightBonus: 5,
     skillName: "でっかくなるやつ",
-    skillDescription: "巨大化して周囲を薙ぎ払う。複数KOして気持ちよくなろう"
+    skillDescription: "巨大化して周囲を薙ぎ払う。複数KOも狙えるロマン技!"
   },
-  "hilt_3": {
-    name: "分身する柄",
-    imageSrc: "/hilts/light_feather.png",
+  "handle_2": {
+    name: "悪魔の柄",
+    imageSrc: "/sword_handle_2.png",
     hpBonus: 0,
     attackBonus: 5,
     weightBonus: -3,
     skillName: "分身飛ばすやつ",
-    skillDescription: "自分の分身を飛ばして攻撃。敵の間合いの外から撃って泣かせよう"
+    skillDescription: "自分の分身を飛ばして攻撃する、武士道皆無の珍技!"
   },
-  "hilt_4": {
-    name: "リフ氏柄",
-    imageSrc: "/hilts/light_feather.png",
+  "handle_3": {
+    name: "大翼の柄",
+    imageSrc: "/sword_handle_3.png",
     hpBonus: 0,
     attackBonus: 5,
     weightBonus: -3,
     skillName: "分身シールド",
-    skillDescription: "自分の分身を周囲に展開する、攻防一体の妙手"
+    skillDescription: "自分の分身を周囲に展開する、攻防一体の妙技!"
   }
 };
 
