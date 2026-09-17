@@ -78,7 +78,10 @@ public class CutinManager : MonoBehaviour
         }
 
         // 1. スローモーション＆全体表示
-        if (useSlowMotion) Time.timeScale = timeScaleDuringCutin;
+        // ▼【修正】ここが決着シーンの一撃でなくても、matchEndedが既にtrue（＝他の対戦で
+        // 試合がもう終わっている）ならスローを開始しない。開始してしまうと、このカットインの
+        // 終了処理（6.）はmatchEnded中はtimeScaleを戻さない仕様のため、そのままスローで固まってしまう
+        if (useSlowMotion && !SwordBattle.matchEnded) Time.timeScale = timeScaleDuringCutin;
         cutinCanvasGroup.alpha = 1f;
 
         backgroundBar.anchoredPosition = new Vector2(1500f, 500f); 

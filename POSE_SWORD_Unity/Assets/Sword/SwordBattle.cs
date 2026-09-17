@@ -96,6 +96,13 @@ public static bool matchEnded = false;
     private float dashDamageBonus = 1.0f;
     private bool hasHitDuringGiantSpin = false;
 
+    // ▼【新規追加】オレ達シールド(旧リーフシールド)が展開されている間の本体無敵管理。
+    // シールドのCollider2DはisTrigger(=当たっても攻撃側の移動を止めない)なので、これが無いと
+    // シールドで反射ダメージを受けた直後にそのまま本体まで刺さって、本体側もダメージを受けてしまう。
+    // 展開中の枚(GameObject)の数をここで数え、1枚でも残っていれば本体への通常ダメージを無効化する
+    [HideInInspector] public int activeLeafShieldCount = 0;
+    public bool HasActiveLeafShield => activeLeafShieldCount > 0;
+
     // ▼【新規追加】現在のダッシュ技の種類 (0:なし, 1:小ダッシュ, 2:竜巻, 3:大回転, 4:巨大化一回転, 5:分身突進)
     [HideInInspector] public int currentDashType = 0;
 
@@ -224,7 +231,14 @@ public static bool matchEnded = false;
         if (hp > 0) return;
         isDead = true; isDashing = false; currentDashType = 0;
         StopUltimateAura();
-        StopAllCoroutines(); controller.enabled = false; controller.isLocalControlled = false;
+        // ▼【修正】撃破に値する一撃(damage>=20等)は直前のPlayClientDamageEffectでHitStopRoutineを
+        // 開始しており、Time.timeScaleを0.05にした直後にここのStopAllCoroutines()が
+        // それを巻き込んで強制停止させてしまう。HitStopRoutine側の後処理(等速へ戻す)が
+        // 一度も実行されず、3〜4人戦でまだ試合が終わっていない撃破でもスローのまま固まっていた。
+        // 試合自体が終わった場合はMatchEndCinematicが改めてtimeScaleを制御するのでmatchEndedの時は触らない
+        StopAllCoroutines();
+        if (!matchEnded) Time.timeScale = 1f;
+        controller.enabled = false; controller.isLocalControlled = false;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = false;
         if (spriteRenderer != null) spriteRenderer.color = new Color(.2f, .2f, .2f);
         if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
@@ -270,8 +284,8 @@ public static bool matchEnded = false;
             case 2: skillName = "竜巻猛突!!"; themeColor = new Color(1f, 0.8f, 0.2f); break;
             case 3: skillName = "大回転斬!!"; themeColor = new Color(0.5f, 1f, 1f); break;
             case 4: skillName = "巨大回転斬!!"; themeColor = new Color(1f, 0.3f, 0.3f); break;
-            case 5: skillName = "影武者突撃!!"; themeColor = new Color(0.3f, 0.6f, 1f); break;
-            case 6: skillName = "リーフシールド!!"; themeColor = new Color(0.4f, 0.95f, 0.5f); break;
+            case 5: skillName = "オレ達アタック!!"; themeColor = new Color(0.3f, 0.6f, 1f); break;
+            case 6: skillName = "オレ達シールド!!"; themeColor = new Color(0.4f, 0.95f, 0.5f); break;
             default: return;
         }
         CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, themeColor, PlayerMainColor, false);
@@ -717,7 +731,12 @@ public static bool matchEnded = false;
             Debug.Log("🛡️ 突進中につき無敵！攻撃を弾いた！");
             // ※もし「キンッ！」という弾き音（パリィ音）があればここで鳴らすと最高です
             // if (parrySound != null) audioSource.PlayOneShot(parrySound);
-            return false; 
+            return false;
+        }
+        if (HasActiveLeafShield)
+        {
+            Debug.Log("🍃 オレ達シールド展開中につき本体無敵！攻撃はシールドの反射に任せる！");
+            return false;
         }
 
         float damagePercentage = ((float)damage / maxHp) * 100f; 
@@ -789,11 +808,16 @@ public static bool matchEnded = false;
     IEnumerator HitStopRoutine(float duration)
     {
         if (matchEnded) yield break;
-        Time.timeScale = 0.05f; 
-        yield return new WaitForSecondsRealtime(duration); 
-        if (!isDead && !matchEnded) 
+        Time.timeScale = 0.05f;
+        yield return new WaitForSecondsRealtime(duration);
+        // ▼【修正】ここのisDeadは「このヒットストップを始めた本人が死んだか」でしかなく、「試合全体が
+        // 終わったか」ではない。マルチプレイのApplyMultiplayerHealthは致命打でも先にHitStopRoutineを
+        // 開始してからisDead=trueにするため、3〜4人戦で決着がついていない撃破でもここがfalseのままに
+        // なり、Time.timeScaleが0.05に固まって戻らなくなっていた。本当に戻すべきでないのはmatchEnded
+        // (＝試合全体の決着)の時だけなので、isDeadでの判定はやめる
+        if (!matchEnded)
         {
-            Time.timeScale = 1f; 
+            Time.timeScale = 1f;
         }
     }
 
@@ -830,10 +854,16 @@ public static bool matchEnded = false;
         }
 
         // スローモーション発動
-        Time.timeScale = 0.15f;
-
-        // 2.5秒間（現実時間）劇的なスローモーションと画面揺れを見せる
-        yield return new WaitForSecondsRealtime(2.5f);
+        // ▼【修正】値を一度セットするだけだと、この直後に他の剣（無関係な必殺技カットインなど）が
+        // Time.timeScaleを上書きした場合、そのまま中途半端な速度で固まってしまう。
+        // 2.5秒間、毎フレーム押し戻すことで、決着後の演出中はこの値を確実に保つ
+        float holdTimer = 0f;
+        while (holdTimer < 2.5f)
+        {
+            Time.timeScale = 0.15f;
+            holdTimer += Time.unscaledDeltaTime;
+            yield return null;
+        }
 
         // ゲーム完全停止
         Time.timeScale = 0f;
@@ -1191,7 +1221,7 @@ public static bool matchEnded = false;
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "影武者突撃!!", cloneColor, PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達アタック!!", cloneColor, PlayerMainColor, MultiplayerOwner == null);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = cloneColor;
@@ -1303,7 +1333,7 @@ public static bool matchEnded = false;
         // 他の剣モード必殺技と同様にローカル/テストモード時だけ再生する
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "リーフシールド!!", shieldColor, PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達シールド!!", shieldColor, PlayerMainColor, MultiplayerOwner == null);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = shieldColor;

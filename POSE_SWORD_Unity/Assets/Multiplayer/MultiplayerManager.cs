@@ -19,6 +19,12 @@ public class MultiplayerManager : MonoBehaviour
     // マルチプレイだけカウントダウン中に完全静止していた。COUNTDOWN中もシミュレーションを進めるための判定
     public bool IsSimulating { get { return phase == "COUNTDOWN" || IsPlaying; } }
     public bool Active { get { return config != null; } }
+    public string Phase => phase;
+    // ▼【新規追加】React側ではカウントダウンを表示しないため、Host自身はcountdownEndから直接計算し、
+    // Client側はHostからSYNCで届く値(receivedCountdownRemaining)をそのまま使う
+    public float CountdownRemaining => IsHost
+        ? (phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0f)
+        : receivedCountdownRemaining;
     private MultiplayerConfig config;
     private MatchRules rules;
     private readonly Dictionary<string, SwordBattle> swords = new Dictionary<string, SwordBattle>();
@@ -53,9 +59,15 @@ public class MultiplayerManager : MonoBehaviour
     // 乗っているCanvas。以前は多人数対応時に全Canvasを無効化していたため、これらが丸ごと表示されなくなっていた。
     // このCanvasだけは無効化対象から除外し、各プレイヤーのUI要素をここへ配線して使う
     private Canvas hudCanvas;
+    // ▼【新規追加】Reactなど外部UI側ではカウントダウンを表示しないため、SceneController側の
+    // countdownText（ローカルデモと共用のTMP）をマルチプレイ中もそのまま使って表示する
+    private TMPro.TextMeshProUGUI countdownText;
+    private string countdownUiPhase = "IDLE"; // countdownText自体の表示状態(前フレームのphase)の追跡用
+    private float countdownGoHideAt;
     private string phase = "IDLE";
     private int physicsTick, syncTick, receivedTick = -1;
     private float countdownEnd, nextSync, nextTargetUpdate;
+    private float receivedCountdownRemaining;
     private SimulationMode2D previousSimulationMode;
     private bool ownsSimulation;
     private BattleCamera battleCamera;
@@ -79,8 +91,15 @@ public class MultiplayerManager : MonoBehaviour
             var network = GetComponent<NetworkManager>();
             if (scene == null || network == null || network.playerSwords.Length < 2 || network.playerSwords[0] == null || scene.hostGenerator == null)
                 throw new InvalidOperationException("Missing sword template in scene.");
+            // ▼【修正】autoTestOnStart(ローカルデモ)が先に走っていた場合、CountdownCameraRoutineを
+            // 道連れで止めるとcountdownTextが"3"のまま誰にも更新されず残ってしまっていた。
+            // マルチプレイ自身のCOUNTDOWNフェーズでこのテキストを引き継いで表示するので、ここでは
+            // 古いローカルデモの進行だけを止める（テキスト自体はUpdate()側で生きたまま更新する）
             scene.StopAllCoroutines();
             scene.autoTestOnStart = false;
+            countdownText = scene.countdownText;
+            countdownUiPhase = "IDLE";
+            if (countdownText != null) countdownText.gameObject.SetActive(false);
             network.enabled = false;
             network.isHost = IsHost;
             scene.hostGenerator.generateOnStart = false;
@@ -261,6 +280,7 @@ public class MultiplayerManager : MonoBehaviour
     void Update()
     {
         if (config == null) return;
+        UpdateCountdownUi();
         if (IsHost && phase == "COUNTDOWN" && Time.unscaledTime >= countdownEnd)
         {
             phase = "PLAYING"; SwordBattle.isRoundStarted = true;
@@ -296,13 +316,40 @@ public class MultiplayerManager : MonoBehaviour
         }
     }
 
+    // ▼【新規追加】React側ではカウントダウンを表示しないため、SceneController.countdownText
+    // （ローカルデモと共用のTMP）をマルチプレイ中もそのまま使って「3・2・1・GO!」を表示する。
+    // Host/Client問わず、毎フレームCountdownRemainingを反映するだけ
+    void UpdateCountdownUi()
+    {
+        if (countdownText == null) return;
+        if (phase == "COUNTDOWN")
+        {
+            if (countdownUiPhase != "COUNTDOWN") countdownText.gameObject.SetActive(true);
+            countdownText.text = Mathf.CeilToInt(CountdownRemaining).ToString();
+        }
+        else if (countdownUiPhase == "COUNTDOWN")
+        {
+            // ちょうどCOUNTDOWNを抜けた瞬間：GO!を一瞬見せてから消す
+            countdownText.text = "GO!";
+            countdownGoHideAt = Time.unscaledTime + 1f;
+        }
+        else if (countdownText.gameObject.activeSelf && Time.unscaledTime >= countdownGoHideAt)
+        {
+            countdownText.gameObject.SetActive(false);
+        }
+        countdownUiPhase = phase;
+    }
+
     void FixedUpdate()
     {
         // ▼【修正】カウントダウン中も(PLAYING同様に)物理演算だけは進める。ダメージ判定・勝敗判定は
         // 引き続きIsPlayingになってからのみ行う（QueueHit側もIsPlayingガード済みなので二重に安全）
         if (!IsHost || !IsSimulating) return;
         UpdateTargets(false);
-        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing;
+        // ▼【修正】オレ達シールド展開中も本体は無敵にする(SwordBattle.TakeDamage側の無敵判定と同じ条件)。
+        // これが無いと、Client側は正しいHPを受け取れても、Host自身のOnCollisionEnter2D→QueueHitでは
+        // シールドの反射に加えて本体にも通常ダメージが通ってしまっていた
+        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing || p.Value.HasActiveLeafShield;
         Physics2D.Simulate(Time.fixedDeltaTime);
         if (!IsPlaying) return;
         rules.ResolveStep(++physicsTick, hits, forfeits);
@@ -460,6 +507,7 @@ public class MultiplayerManager : MonoBehaviour
             sync.players.Any(p => p == null || p.playerId == null || !swords.ContainsKey(p.playerId)) ||
             sync.players.Select(p => p.playerId).Distinct().Count() != config.players.Length) return;
         phase = sync.phase; SwordBattle.isRoundStarted = IsPlaying;
+        receivedCountdownRemaining = sync.countdownRemaining;
         foreach (var data in sync.players)
         {
             var sword = swords[data.playerId];
@@ -547,10 +595,21 @@ public class MultiplayerManager : MonoBehaviour
             hasLockedCameraPosition = false;
             var alive = swords.Values.Where(s => s.IsAlive).ToArray();
             if (alive.Length == 0) return;
-            Bounds bounds = new Bounds(alive[0].transform.position, Vector3.zero);
+            // ▼【修正】SpriteRenderer.boundsは見た目のAABBなので、キャラが回転すると
+            // (独楽モードのスピンなど)対角線の分だけ見かけ上のサイズが膨らんで、
+            // カメラの位置・ズームが毎フレーム細かくぐらついてしまう。BattleCamera.GetSafePositionと
+            // 同じく、回転に左右されない重心(currentCenterPosition)だけで画角を決める
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
             foreach (var sword in alive)
-                foreach (var renderer in sword.GetComponentsInChildren<SpriteRenderer>()) bounds.Encapsulate(renderer.bounds);
-            float size = Mathf.Max(8, bounds.extents.y + 4, (bounds.extents.x + 4) / camera.aspect);
+            {
+                Vector3 pos = sword.currentCenterPosition;
+                minX = Mathf.Min(minX, pos.x); maxX = Mathf.Max(maxX, pos.x);
+                minY = Mathf.Min(minY, pos.y); maxY = Mathf.Max(maxY, pos.y);
+            }
+            Bounds bounds = new Bounds(new Vector3((minX + maxX) / 2f, (minY + maxY) / 2f, 0f), Vector3.zero);
+            bounds.Encapsulate(new Vector3(minX - 4f, minY - 4f, 0f));
+            bounds.Encapsulate(new Vector3(maxX + 4f, maxY + 4f, 0f));
+            float size = Mathf.Max(8, bounds.extents.y, bounds.extents.x / camera.aspect);
             // Reserve the upper part of the viewport for React's four health panels.
             var position = new Vector3(bounds.center.x, bounds.center.y + size * .16f, -10);
             float t = 1 - Mathf.Exp(-5 * Time.unscaledDeltaTime);
@@ -582,8 +641,16 @@ public class MultiplayerManager : MonoBehaviour
 
     IEnumerator MatchEndCinematic()
     {
-        Time.timeScale = 0.15f;
-        yield return new WaitForSecondsRealtime(2.5f);
+        // ▼【修正】ローカルのDefeatRoutineと同じく、値を一度セットするだけだと他の剣の
+        // HitStopRoutineなどがこの直後にTime.timeScaleを上書きした場合、中途半端な速度で
+        // 固まる恐れがある。2.5秒間、毎フレーム押し戻すことで確実にこの値を保つ
+        float holdTimer = 0f;
+        while (holdTimer < 2.5f)
+        {
+            Time.timeScale = 0.15f;
+            holdTimer += Time.unscaledDeltaTime;
+            yield return null;
+        }
         Time.timeScale = 0f;
     }
     [UnityEngine.Scripting.Preserve]
@@ -610,6 +677,8 @@ public class MultiplayerManager : MonoBehaviour
         shakeDuration = 0f; hasLockedCameraPosition = false;
         config = null; rules = null; phase = "IDLE";
         Time.timeScale = 1; SwordBattle.isRoundStarted = false; SwordBattle.matchEnded = false;
+        if (countdownText != null) countdownText.gameObject.SetActive(false);
+        countdownText = null; countdownUiPhase = "IDLE";
         if (AudioManager.Instance != null) AudioManager.Instance.ResetSoundEffects();
     }
     void OnDestroy() { if (Active) StopCurrent(); }
