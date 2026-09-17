@@ -9,6 +9,9 @@ public class SwordBattle : MonoBehaviour
     public MultiplayerManager MultiplayerOwner { get; private set; }
     public string PlayerId { get; private set; }
     public bool IsAlive { get { return !isDead && hp > 0; } }
+    // ▼【新規追加】このテンプレートが最初から持っているtransform.localScale(1でない場合がある)。
+    // ConfigureMultiplayerで一度だけ記録し、ReviveFromDefeatで(Vector3.oneではなく)これへ戻す
+    private Vector3 baselineScale = Vector3.one;
     [Header("ステータス")]
     public string swordName = "ダミー剣";
     public int hp = 100;
@@ -38,6 +41,9 @@ public class SwordBattle : MonoBehaviour
     public TextMeshProUGUI hpText;   // ▼ 【変更】Text から TextMeshProUGUI に変更
     public Image frameImage;    // プレイヤーのメインカラーで塗る枠（HPパネルの縁など。Editor側で用意して割り当てる）
     public Button specialAttackButton; // 必殺技専用ボタン。自キャラのSPが条件を満たした時だけ表示する（Editor側で用意して割り当てる）
+    // ▼【新規追加】残機モード：HPパネル内に表示する「あと何本あるか」の小さいアイコン列。
+    // 今戦っている剣は含めない(残りの手持ちの剣だけ)。MultiplayerManager.WireHudBarが実行時に生成して渡す
+    [HideInInspector] public Image[] reserveSwordIcons;
 
     [Header("物理・ダメージ調整")]
     public float bounceForce = 500f;
@@ -181,6 +187,10 @@ public static bool matchEnded = false;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = true;
         rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0;
         lastPosition = transform.position; currentCenterPosition = transform.position;
+        // ▼【新規追加】このテンプレート本来のスケール(1でない場合がある)を、まだ何にも書き換えられていない
+        // このタイミングで一度だけ記録する。残機モードの持ち替え時(ReviveFromDefeat)に、Vector3.oneへ
+        // 決め打ちで戻すのではなくこの値へ戻すために使う
+        baselineScale = transform.localScale;
     }
 
     // ▼ 通常クリック/タップ由来の入力：必殺技はここでは発動しない（ジャンプ・小ダッシュのみ）
@@ -216,6 +226,26 @@ public static bool matchEnded = false;
         if (target == null || target == this || !target.IsAlive) return;
         if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, isCrit || isWeakPoint);
         else target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
+    }
+
+    // ▼【新規追加】残機モード：現在の剣が破壊された際、「倒された」状態だけを解除して次の剣に持ち替えさせる。
+    // ステータス(hp/maxHp/attack/hiltType)と見た目の刀身自体はMultiplayerManager側がこの直後に
+    // SwordGenerator.GenerateSwordFromJsonを呼び直すことで更新するので、ここでは死亡時に無効化した
+    // 見た目・当たり判定・操作を元に戻すだけでよい(ConfigureMultiplayerの死亡状態リセット部分と同等)
+    public void ReviveFromDefeat()
+    {
+        if (MultiplayerOwner == null) return;
+        isDead = false; isDashing = false; isDashShooting = false;
+        currentDashType = 0; currentSp = 0;
+        StopUltimateAura();
+        StopAllCoroutines();
+        controller.enabled = true;
+        foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = true;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+        // ▼【修正】Vector3.oneへ決め打ちで戻すと、テンプレート自体が1以外のスケールで作られている場合に
+        // 本来の見た目より小さく(または大きく)なってしまっていた。ConfigureMultiplayerで記録した
+        // このテンプレート本来のスケールへ戻す
+        transform.localScale = baselineScale;
     }
 
     public void ApplyMultiplayerHealth(int health, bool wasCrit = false)
@@ -368,6 +398,21 @@ public static bool matchEnded = false;
         bool shouldShow = !isDashing && currentSp >= UltimateThreshold;
         if (specialAttackButton.gameObject.activeSelf != shouldShow)
             specialAttackButton.gameObject.SetActive(shouldShow);
+    }
+
+    // ▼【新規追加】残機モード：HPパネル内の「あと何本あるか」アイコン列を、渡された残りの剣の
+    // 画像で更新する。今戦っている剣は含まない配列を渡す想定。本数が足りない枠は非表示にする
+    public void UpdateReserveSwordIcons(Sprite[] sprites)
+    {
+        if (reserveSwordIcons == null) return;
+        for (int i = 0; i < reserveSwordIcons.Length; i++)
+        {
+            var icon = reserveSwordIcons[i];
+            if (icon == null) continue;
+            Sprite sprite = sprites != null && i < sprites.Length ? sprites[i] : null;
+            icon.gameObject.SetActive(sprite != null);
+            if (sprite != null) icon.sprite = sprite;
+        }
     }
 
     // ▼追加：SwordGeneratorから正しいタイミングで呼ばれる初期化関数
@@ -1253,13 +1298,33 @@ public static bool matchEnded = false;
                 cloneObj.transform.position = spawnPos;
                 cloneObj.transform.rotation = transform.rotation;
 
+                // ▼【新規追加】分身たちに「今使っている自分の剣 + まだ使っていない手持ちの剣」の形を持たせる
+                // (i=0が現在の自分、以降は手持ちの他の剣)。既に使い終えて手放した剣は含めない。
+                // 残機モードのON/OFFに関わらず、手持ちの剣が1本・2本だけでも安全に動作する
+                // (GetLifeSpriteが範囲を丸めるので、その場合は同じ形が繰り返されるだけ)。
+                // 画像が取れない場合は従来通り現在の刀身と同じ見た目にフォールバックする
+                int lifeSpriteIndex = -1;
+                Sprite cloneSprite = spriteRenderer != null ? spriteRenderer.sprite : null;
+                if (MultiplayerOwner != null)
+                {
+                    int wantedIndex = MultiplayerOwner.GetCurrentLifeIndex(PlayerId) + i;
+                    var lifeSprite = MultiplayerOwner.GetLifeSprite(PlayerId, wantedIndex);
+                    if (lifeSprite != null) { cloneSprite = lifeSprite; lifeSpriteIndex = wantedIndex; }
+                }
+
                 if (spriteRenderer != null)
                 {
                     SpriteRenderer sr = cloneObj.AddComponent<SpriteRenderer>();
-                    sr.sprite = spriteRenderer.sprite;
+                    sr.sprite = cloneSprite;
                     sr.color = cloneColor;
                     sr.sortingLayerID = spriteRenderer.sortingLayerID;
                     sr.sortingOrder = spriteRenderer.sortingOrder;
+                    // ▼【新規追加】手持ちの剣は元画像のピクセルサイズがバラバラなため、現在の刀身と
+                    // 見た目の横幅が揃うようスケールを正規化する。当たり判定(cloneColliderRadius)は
+                    // 形状に関わらず固定なので、これをしないと見た目と判定がズレて「当たらない」ように見えていた
+                    float refWidth = spriteRenderer.sprite != null ? spriteRenderer.sprite.bounds.size.x : 0f;
+                    float cloneWidth = cloneSprite != null ? cloneSprite.bounds.size.x : 0f;
+                    if (refWidth > 0f && cloneWidth > 0f) cloneObj.transform.localScale = Vector3.one * (refWidth / cloneWidth);
                 }
 
                 CircleCollider2D cloneCollider = cloneObj.AddComponent<CircleCollider2D>();
@@ -1273,7 +1338,7 @@ public static bool matchEnded = false;
 
                 // ▼【新規追加】オンライン対戦では、Host権威の分身だけをMultiplayerManagerに登録し、
                 // その位置をSYNCでクライアントへ配信して見た目を再現できるようにする
-                string cloneId = (isAuthoritative && MultiplayerOwner != null) ? MultiplayerOwner.RegisterClone(cloneObj, PlayerId, cloneColor) : null;
+                string cloneId = (isAuthoritative && MultiplayerOwner != null) ? MultiplayerOwner.RegisterClone(cloneObj, PlayerId, cloneColor, lifeSpriteIndex) : null;
 
                 SwordCloneProjectile clone = cloneObj.AddComponent<SwordCloneProjectile>();
                 clone.Setup(this, isAuthoritative, cloneDamage, cloneLifeTime, MultiplayerOwner, cloneId);
@@ -1350,11 +1415,28 @@ public static bool matchEnded = false;
             {
                 GameObject shieldObj = new GameObject("LeafShield_" + i);
 
+                // ▼【新規追加】シールドたちに「今使っている自分の剣 + まだ使っていない手持ちの剣」の形を
+                // 持たせる(CloneRushRoutineと同じ考え方。残機モードのON/OFFに関わらず、手持ちが1・2本でも安全)
+                int lifeSpriteIndex = -1;
+                Sprite shieldSprite = spriteRenderer.sprite;
+                if (MultiplayerOwner != null)
+                {
+                    int wantedIndex = MultiplayerOwner.GetCurrentLifeIndex(PlayerId) + i;
+                    var lifeSprite = MultiplayerOwner.GetLifeSprite(PlayerId, wantedIndex);
+                    if (lifeSprite != null) { shieldSprite = lifeSprite; lifeSpriteIndex = wantedIndex; }
+                }
+
                 SpriteRenderer sr = shieldObj.AddComponent<SpriteRenderer>();
-                sr.sprite = spriteRenderer.sprite;
+                sr.sprite = shieldSprite;
                 sr.color = shieldColor;
                 sr.sortingLayerID = spriteRenderer.sortingLayerID;
                 sr.sortingOrder = spriteRenderer.sortingOrder;
+                // ▼【新規追加】手持ちの剣は元画像のピクセルサイズがバラバラなため、現在の刀身と見た目の
+                // 横幅が揃うようスケールを正規化する。当たり判定(leafShieldRadius)は形状に関わらず固定なので、
+                // これをしないと見た目が大きい個体ほど「当たらない」ように見えていた
+                float shieldRefWidth = spriteRenderer.sprite != null ? spriteRenderer.sprite.bounds.size.x : 0f;
+                float shieldSpriteWidth = shieldSprite != null ? shieldSprite.bounds.size.x : 0f;
+                if (shieldRefWidth > 0f && shieldSpriteWidth > 0f) shieldObj.transform.localScale = Vector3.one * (shieldRefWidth / shieldSpriteWidth);
 
                 CircleCollider2D col = shieldObj.AddComponent<CircleCollider2D>();
                 col.isTrigger = true;
@@ -1366,7 +1448,7 @@ public static bool matchEnded = false;
                 // ▼ オンライン対戦では、この分身をMultiplayerManagerに登録し、位置をSYNCでクライアントへ配信する
                 if (MultiplayerOwner != null)
                 {
-                    string id = MultiplayerOwner.RegisterClone(shieldObj, PlayerId, shieldColor);
+                    string id = MultiplayerOwner.RegisterClone(shieldObj, PlayerId, shieldColor, lifeSpriteIndex);
                     orb.SetNetworkId(MultiplayerOwner, id);
                 }
             }

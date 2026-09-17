@@ -30,6 +30,17 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
     [Tooltip("\"0\"=剣モード, \"1\"=独楽モード")]
     public string gameMode = "0";
 
+    [Header("残機・分身の見た目テスト")]
+    [Range(1, 3)]
+    [Tooltip("デバッグ用の剣データから、HPが異なる手持ちの剣を何本合成するか。2以上にすると分身系必殺技(オレ達" +
+        "アタック/オレ達シールド)が手持ちの剣の形を使う演出を確認できる(これはlivesModeのON/OFFに関わらず働く)。" +
+        "1のままなら従来通り1本だけで、1本しかない場合にバグらないかの確認にもなる")]
+    public int ownedSwordCount = 3;
+
+    [Tooltip("ONにすると、脱落時に次の剣のHPへ持ち替えて延命する(残機モード=MultiplayerConfig.livesMode)。" +
+        "OFFのままでもownedSwordCountを2以上にすれば分身の見た目バリエーションだけは確認できる")]
+    public bool livesMode = false;
+
     MultiplayerManager manager;
     SceneController scene;
     int localSeq;
@@ -87,7 +98,7 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
                 playerId = "p" + i,
                 slotIndex = i,
                 spawnIndex = i,
-                swordData = sword
+                swordData = ownedSwordCount > 1 ? BuildOwnedSwordsTestData(sword, ownedSwordCount) : sword
             };
         }
 
@@ -97,9 +108,40 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
             localPlayerId = "p0",
             isHost = true,
             gameMode = gameMode,
+            livesMode = livesMode,
             players = players
         };
         return JsonUtility.ToJson(config);
+    }
+
+    // ▼【新規追加】残機モード・分身の見た目テスト用に、デバッグ用の剣1本からHPが異なる手持ちの剣を
+    // その場でcount本(1〜3)合成する。本番はReact側(swordList)が既に持っている最大3本をswords[]として
+    // 送ってくるが、エディタ単体テストではその元データが無いため、ここで擬似的に作る
+    static SwordData BuildOwnedSwordsTestData(SwordData baseSword, int count)
+    {
+        count = Mathf.Clamp(count, 1, 3);
+        float[] hpRatios = { 1f, 0.7f, 0.5f };
+        var slots = new SwordSlotData[count];
+        for (int i = 0; i < count; i++)
+        {
+            slots[i] = new SwordSlotData
+            {
+                name = baseSword.name + (i == 0 ? "" : $" {i + 1}本目"),
+                attack = baseSword.attack,
+                weight = baseSword.weight,
+                hp = Mathf.Max(1, Mathf.RoundToInt(baseSword.hp * hpRatios[i])),
+                imageStr = baseSword.imageStr,
+                hiltType = baseSword.hiltType,
+                isEmpty = false
+            };
+        }
+        return new SwordData
+        {
+            name = slots[0].name, attack = slots[0].attack, weight = slots[0].weight, hp = slots[0].hp,
+            imageStr = slots[0].imageStr, hiltType = slots[0].hiltType,
+            equippedIndex = 0,
+            swords = slots
+        };
     }
 
     // ▼ NetworkManager.SendData経由で「本来はReact/サーバーへ送られるはずだった」メッセージを横取りする

@@ -5,7 +5,7 @@ import { MAX_PLAYERS, MIN_PLAYERS } from '../network/HostRoom';
 export default function LobbyScreen({
   view, roomId, isCopied, handleCopyId,
   swordList, mySwordData, equipSword,
-  onReady, onGameMode, onStart, onLeave, goToCrafting, error
+  onReady, onGameMode, onLivesMode, onStart, onLeave, goToCrafting, error
 }) {
   const room = view?.room;
   const me = room?.players.find(p => p.playerId === view.localPlayerId);
@@ -13,6 +13,7 @@ export default function LobbyScreen({
 
   const isHost = view.isHost;
   const gameMode = room.gameMode;
+  const livesMode = Boolean(room.livesMode);
   const seatLimit = room.seatLimit ?? MAX_PLAYERS;
   // ランダムマッチの部屋は準備ボタンを使わず、人数がそろえば自動で始まる。
   const auto = Boolean(room.autoStart);
@@ -158,18 +159,28 @@ export default function LobbyScreen({
             <div style={{ flex: 1, textAlign: 'left' }}>
               <h4 style={{ margin: '0 0 5px 0', fontSize: '22px' }}>
                 {gameMode === "1" ? "独楽（見下ろし）モード" : "剣（横視点・重力）モード"}
+                {livesMode && <span style={{ marginLeft: '8px', fontSize: '14px', color: '#c62828' }}>⚔️ 残機制</span>}
               </h4>
               <p style={{ margin: '0 0 15px 0', color: '#666', fontSize: '14px' }}>
                 {playerCount >= 3 ? "最後の1人になるまで戦う個人戦" : gameMode === "1" ? "独楽のようにぶつかり合う半自動戦闘モード" : "剣を振り回して戦うモード"}
+                {livesMode && "（所持している剣がすべて撃破されるまで敗北しません）"}
               </p>
 
               {isHost && !auto && (
-                <button
-                  style={{ padding: '8px 15px', backgroundColor: '#2196F3', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}
-                  onClick={() => onGameMode(gameMode === "1" ? "0" : "1")}
-                >
-                  ルールを変更する
-                </button>
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button
+                    style={{ padding: '8px 15px', backgroundColor: '#2196F3', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}
+                    onClick={() => onGameMode(gameMode === "1" ? "0" : "1")}
+                  >
+                    ルールを変更する
+                  </button>
+                  <button
+                    style={{ padding: '8px 15px', backgroundColor: livesMode ? '#c62828' : '#9e9e9e', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}
+                    onClick={() => onLivesMode(!livesMode)}
+                  >
+                    {livesMode ? "⚔️ 残機制: ON" : "残機制: OFF"}
+                  </button>
+                </div>
               )}
             </div>
           </div>

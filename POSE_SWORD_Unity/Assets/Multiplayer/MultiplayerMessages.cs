@@ -14,6 +14,9 @@ using UnityEngine;
     public string localPlayerId;
     public bool isHost;
     public string gameMode;
+    // ▼【新規追加】残機モード：剣/独楽どちらとも組み合わせられる独立したON/OFFフラグ。
+    // trueの時だけ各playerのswordData.swords[]を持ち替え用のライフとして使う
+    public bool livesMode;
     public MultiplayerPlayerConfig[] players;
 }
 [Serializable] public class MultiplayerCommand
@@ -37,6 +40,10 @@ using UnityEngine;
     // ▼【新規追加】このプレイヤーが直近でクリティカル/弱点ヒットを受けたかどうかを、
     // clashSeqと同じ単調増加カウンタ方式でゲストに伝える(増えたらそのSYNC由来のダメージはクリティカル扱い)
     public int critSeq;
+    // ▼【新規追加】残機モード：現在使用中の剣のインデックス(0始まり)と残りの剣の本数(現在の剣を含む)。
+    // ゲスト側はlifeIndexが増えたことを検知して、そのプレイヤーの持ち替え演出(剣の再生成・復活)を再現する
+    public int lifeIndex;
+    public int livesRemaining;
 }
 // ▼【新規追加】分身突進（hiltType:"2"）・リーフシールド（hiltType:"3"）など、
 // 本体以外に複数体表示する"付随体"1体分の見た目同期用データ
@@ -46,6 +53,9 @@ using UnityEngine;
     public string ownerId;
     public float x, y, rotation;
     public Color color;
+    // ▼【新規追加】残機モード：この分身が持ち主の何番目の剣(0=現在装備中)の形をしているか。
+    // -1は「残機モードでない、または特定の剣に紐付かない」ことを表し、持ち主の現在の刀身を使う
+    public int spriteIndex = -1;
 }
 [Serializable] public class MultiplayerSync
 {

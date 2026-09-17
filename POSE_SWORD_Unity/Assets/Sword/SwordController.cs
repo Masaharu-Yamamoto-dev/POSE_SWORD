@@ -26,6 +26,16 @@ public class SwordController : MonoBehaviour
     [Header("柄のオブジェクト（独楽モード時は消す）")]
     public GameObject handleObject;
 
+    // ▼【新規追加】柄(つか)の見た目：hiltTypeごとの画像。マルチプレイ複製元のこのコンポーネントに
+    // 設定しておくと、MultiplayerManager.CreateSwordが実行時に生成するSwordGeneratorへコピーする
+    // (SwordGeneratorはテンプレートに常設されておらず、複製時にAddComponentされるためInspectorで
+    // 直接設定した値を持てない。SwordControllerは常設なので、こちらに置いてコピーする方式にした)
+    [Header("柄（つか）の見た目：hiltTypeごとの画像(React側の武器庫の柄と対応)")]
+    public Sprite handleSprite0; // "0"(未指定/不明な値含む) = 普通の柄
+    public Sprite handleSprite1; // "1" = 武骨な柄
+    public Sprite handleSprite2; // "2" = 悪魔の柄
+    public Sprite handleSprite3; // "3" = 大翼の柄
+
     [Header("独楽モード用の力")]
     public float komaSpinTorque = -3000f; // 独楽の回転力
     public float komaHomingForce = 20f;   // 敵に向かっていく力

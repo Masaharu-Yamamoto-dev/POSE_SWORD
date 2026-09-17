@@ -324,7 +324,8 @@ public class SceneController : MonoBehaviour
 
     // ▼ p3HudTemplate/p4HudTemplate(PL3Bar/PL4Barなど、Editorで配置した実物のHPバー一式)の表示/非表示を切り替える。
     // 2人プレイなど、その人数の試合で使わない時は非表示にし、実際にその枠が参加する試合の時だけ表示する。
-    static void SetHudTemplateVisible(HudTemplate template, bool visible)
+    // ▼【修正】MultiplayerManager側でも(autoTestOnStartの名残を消すために)呼べるようpublicにした
+    public static void SetHudTemplateVisible(HudTemplate template, bool visible)
     {
         if (template == null) return;
         if (template.hpBar != null) template.hpBar.gameObject.SetActive(visible);
