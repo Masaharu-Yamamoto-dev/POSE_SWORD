@@ -18,6 +18,8 @@ using UnityEngine;
     public float hpMultiplier;
     public float attackMultiplier;
     public float spGainMultiplier;
+    // 剣の大きさに掛ける。当たり判定も一緒に大きくなる
+    public float scaleMultiplier;
     public float maxSp;
     public float suppressRadius;
     public float suppressDuration;

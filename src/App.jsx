@@ -11,18 +11,7 @@ import MatchmakingScreen from './screens/MatchmakingScreen';
 import BattleArena from './components/BattleArena.jsx';
 import { useRoom } from './network/useRoom.js';
 import { useRandomMatch } from './network/useRandomMatch.js';
-
-const PEER_ICE_CONFIG = {
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-    ]
-  }
-};
+import { useIceConfig } from './network/useIceConfig.js';
 
 const ACTIVE_PHASES = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 const ROOM_STEPS = ['LOBBY', 'PLAYING', 'RESULT'];
@@ -122,8 +111,10 @@ export default function PoseSwordWeb() {
   const [isFlash, setIsFlash] = useState(false);
 
   const resetToTitleRef = useRef(null);
+  // STUN/TURN は毎回サーバーに発行してもらう。固定の資格情報を埋め込まない。
+  const { peerOptions } = useIceConfig();
   const room = useRoom({
-    peerOptions: PEER_ICE_CONFIG,
+    peerOptions,
     onClosed: message => resetToTitleRef.current?.(message || "ロビーとの接続が終了しました。"),
   });
   const view = room.view;
