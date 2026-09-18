@@ -420,7 +420,7 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
         return <SwordListScreen swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} deleteSword={deleteSword} startNewCrafting={startNewCrafting} startRecapture={startRecapture} updateSword={updateSword} cancelList={cancelList} toggleSwordFlip={toggleSwordFlip} />;
 
       case "LOBBY":
-        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onSoloMode={room.setSoloMode} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
+        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onSoloMode={room.setSoloMode} onBossPlayer={room.setBossPlayer} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
 
       case "RESULT":
         return <ResultScreen view={view} onReturnToLobby={room.returnToLobby} onLeave={handleLeave}

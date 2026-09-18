@@ -108,6 +108,8 @@ export class HostRoom {
     this.gameMode = gameMode;
     this.livesMode = livesMode;
     this.soloMode = soloMode;
+    // 1vs3 で誰がボスをやるか。ホストが指名するまで null で、その間は開始できない。
+    this.bossPlayerId = null;
     this.phase = 'LOBBY';
     this.revision = 0;
     this.readyVersion = 0;
@@ -127,7 +129,7 @@ export class HostRoom {
   snapshot() {
     return structuredClone({ protocolVersion: PROTOCOL_VERSION, roomEpoch: this.roomEpoch,
       revision: this.revision, readyVersion: this.readyVersion, seatLimit: this.seatLimit, autoStart: this.autoStart, gameMode: this.gameMode,
-      livesMode: this.livesMode, soloMode: this.soloMode,
+      livesMode: this.livesMode, soloMode: this.soloMode, bossPlayerId: this.bossPlayerId,
       phase: this.phase, matchId: this.matchId, players: this.players });
   }
 
@@ -170,12 +172,28 @@ export class HostRoom {
     this.resetReady();
   }
 
-  // 1vs3：剣/独楽どちらとも組み合わせられる独立したON/OFFトグル。誰がボスになるかは開始時に抽選する。
+  // 1vs3：剣/独楽どちらとも組み合わせられる独立したON/OFFトグル。ボスはホストが指名する。
   setSoloMode(enabled) {
     if (this.phase !== 'LOBBY' || typeof enabled !== 'boolean') throw new Error('モードを変更できません。');
     this.soloMode = enabled;
     if (enabled) this.livesMode = false;
     this.resetReady();
+  }
+
+  // ボスの指名。誰がボスかは戦い方に直結するが、ここでは準備完了を解除しない
+  // （ホストが指名を試行錯誤するたびに全員がやり直しになるのを避けるため）。
+  setBossPlayer(playerId) {
+    const player = this.get(playerId);
+    if (this.phase !== 'LOBBY' || !player?.connected || !player.inLobby) {
+      throw new Error('ボスを指名できません。');
+    }
+    this.bossPlayerId = playerId;
+    this.revision++;
+  }
+
+  // 指名した人が抜けたら指名も外す。残ったままだと誰もいない席を指したまま開始できなくなる。
+  pruneBossPlayer() {
+    if (this.bossPlayerId && !this.get(this.bossPlayerId)) this.bossPlayerId = null;
   }
 
   updateSword(playerId, sword) {
@@ -194,8 +212,12 @@ export class HostRoom {
   }
 
   canStart() {
-    // 1vs3 は1人対3人が揃って初めて成立する。人数が欠けた状態では始めない。
-    if (this.soloMode && this.players.length !== SOLO_MODE_PLAYERS) return false;
+    // 1vs3 は1人対3人が揃い、かつボスが指名されて初めて成立する。
+    if (this.soloMode) {
+      if (this.players.length !== SOLO_MODE_PLAYERS) return false;
+      const boss = this.get(this.bossPlayerId);
+      if (!boss?.connected || !boss.inLobby) return false;
+    }
     return this.phase === 'LOBBY' && this.players.length >= MIN_PLAYERS && this.players.length <= this.seatLimit &&
       this.players.every(p => p.connected && p.inLobby && (this.autoStart || p.ready));
   }
@@ -255,6 +277,7 @@ export class HostRoom {
     }
     if (this.phase === 'PLAYING') return { kind: 'FORFEIT', playerId };
     this.players = this.players.filter(p => p.connected);
+    this.pruneBossPlayer();
     this.compactSlots();
     if (this.phase === 'RESULT' && this.players.every(p => p.inLobby)) this.phase = 'LOBBY';
     this.resetReady();
@@ -264,6 +287,7 @@ export class HostRoom {
   abort() {
     this.phase = 'LOBBY';
     this.players = this.players.filter(p => p.connected);
+    this.pruneBossPlayer();
     this.players.forEach(p => { p.inLobby = true; });
     this.compactSlots();
     this.resetReady();
@@ -282,6 +306,7 @@ export class HostRoom {
     if (!player?.connected) return false;
     player.inLobby = true;
     this.players = this.players.filter(p => p.connected);
+    this.pruneBossPlayer();
     this.compactSlots();
     if (this.players.every(p => p.inLobby)) this.phase = 'LOBBY';
     this.revision++;

@@ -202,6 +202,7 @@ export class RoomSession {
   setGameMode(mode) { if (!this.closed && this.isHost) { this.host.setGameMode(mode); this.publish(); } }
   setLivesMode(enabled) { if (!this.closed && this.isHost) { this.host.setLivesMode(enabled); this.publish(); } }
   setSoloMode(enabled) { if (!this.closed && this.isHost) { this.host.setSoloMode(enabled); this.publish(); } }
+  setBossPlayer(playerId) { if (!this.closed && this.isHost) { this.host.setBossPlayer(playerId); this.publish(); } }
   updateSword(sword) {
     if (this.closed) return;
     this.sword = validateSword(sword);
@@ -229,9 +230,9 @@ export class RoomSession {
     return items;
   }
 
-  // 陣営とスポーン位置を決める。抽選はホストだけが行い、結果を PREPARE で全員に配る。
-  // 1vs3 ではボスを1人選んで spawnIndex 0 に固定し、トリオだけを残りの席でシャッフルする。
-  // こうしないと陣営が入り混じった配置で試合が始まってしまう。
+  // 陣営とスポーン位置を決めて PREPARE で全員に配る。
+  // 1vs3 ではホストが指名したボスを spawnIndex 0 に固定し、トリオだけを残りの席で
+  // シャッフルする。こうしないと陣営が入り混じった配置で試合が始まってしまう。
   assignRoles(players) {
     const describe = (player, team, spawnIndex) => ({ playerId: player.playerId,
       slotIndex: player.slotIndex, spawnIndex, team, swordData: player.swordData });
@@ -239,10 +240,11 @@ export class RoomSession {
       const spawnSlots = this.shuffle(players.map((_, i) => i));
       return players.map((player, i) => describe(player, 0, spawnSlots[i]));
     }
-    const bossIndex = Math.min(players.length - 1, Math.floor(this.random() * players.length));
+    // 指名が有効かどうかは canStart() が既に確かめているので、ここでは見つかる前提でよい
+    const bossId = this.room.bossPlayerId;
     const trioSpawns = this.shuffle(Array.from({ length: players.length - 1 }, (_, i) => i + 1));
     let nextTrioSpawn = 0;
-    return players.map((player, i) => i === bossIndex
+    return players.map(player => player.playerId === bossId
       ? describe(player, 0, 0)
       : describe(player, 1, trioSpawns[nextTrioSpawn++]));
   }

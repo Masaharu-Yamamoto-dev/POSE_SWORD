@@ -230,6 +230,7 @@ test('solo mode waits for a full room of four before it may start', () => {
     room.reserve(`peer-${count}`);
     room.join(`peer-${count}`, sword);
     for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+    room.setBossPlayer('p0');
     assert.equal(room.snapshot().players.length, count);
     assert.equal(room.canStart(), false, `${count}人では開始できない`);
     assert.throws(() => room.prepare());
@@ -237,12 +238,58 @@ test('solo mode waits for a full room of four before it may start', () => {
   room.reserve('peer-4');
   room.join('peer-4', sword);
   for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  room.setBossPlayer('p0');
   assert.equal(room.canStart(), true);
+});
+
+test('solo mode cannot start until the host names a boss', () => {
+  const room = fullRoom();
+  room.setSoloMode(true);
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  assert.equal(room.snapshot().bossPlayerId, null);
+  assert.equal(room.canStart(), false, '指名前は開始できない');
+  assert.throws(() => room.prepare());
+  room.setBossPlayer('p2');
+  assert.equal(room.snapshot().bossPlayerId, 'p2');
+  assert.equal(room.canStart(), true);
+});
+
+test('naming a boss does not clear anyone\'s ready state', () => {
+  const room = fullRoom();
+  room.setSoloMode(true);
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  const version = room.snapshot().readyVersion;
+  room.setBossPlayer('p1');
+  room.setBossPlayer('p3');
+  assert.ok(room.snapshot().players.every(p => p.ready), '指名を変えても準備完了は保たれる');
+  assert.equal(room.snapshot().readyVersion, version);
+});
+
+test('a boss who leaves is unnamed again so the room cannot start', () => {
+  const room = fullRoom();
+  room.setSoloMode(true);
+  room.setBossPlayer(room.playerForConnection('peer-2'));
+  room.removeConnection('peer-2');
+  assert.equal(room.snapshot().bossPlayerId, null, '抜けた人の指名は外れる');
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  assert.equal(room.canStart(), false);
+});
+
+test('only a seated, connected player may be named boss', () => {
+  const room = fullRoom();
+  room.setSoloMode(true);
+  assert.throws(() => room.setBossPlayer('p9'));
+  assert.throws(() => room.setBossPlayer(null));
+  room.setBossPlayer('p0');
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  room.prepare();
+  assert.throws(() => room.setBossPlayer('p1'), 'ロビー外では指名できない');
 });
 
 test('a solo room that loses a player cannot start until the seat is filled again', () => {
   const room = fullRoom();
   room.setSoloMode(true);
+  room.setBossPlayer('p0');
   for (const p of room.snapshot().players) room.setReady(p.playerId, true);
   assert.equal(room.canStart(), true);
   room.removeConnection('peer-3');

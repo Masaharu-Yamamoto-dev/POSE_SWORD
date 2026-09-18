@@ -90,6 +90,39 @@ public class MultiplayerManager : MonoBehaviour
     private readonly Dictionary<string, float> suppressUntil = new Dictionary<string, float>();
     // 制圧中の頭上表示。
     private readonly Dictionary<string, TextMeshPro> suppressLabels = new Dictionary<string, TextMeshPro>();
+    // 1vs3 専用HUD。ボスを上部中央に大きく、トリオ3人を下部に横並びで出す。
+    // シーンには触らず実行時に組み立て、StopCurrent() で破棄して元のHUDへ戻す。
+    [Header("1vs3 HUD（ボスを上に大きく、トリオ3人を下に横並び）")]
+    [Tooltip("斜めの深さ(px)。0で長方形。左右の端が同じ向きに傾いた平行四辺形になる")]
+    [SerializeField] float hudSlant = 18f;
+    [SerializeField] Vector2 bossPanelSize = new Vector2(760, 132);
+    [Tooltip("画面上端からボスパネルまでの距離")]
+    [SerializeField] float bossPanelTop = 16f;
+    [SerializeField] Color bossPanelColor = new Color(.16f, .06f, .24f, .82f);
+    [SerializeField] Vector2 trioPanelSize = new Vector2(300, 96);
+    [Tooltip("トリオパネル同士の間隔")]
+    [SerializeField] float trioPanelGap = 18f;
+    [Tooltip("画面下端からトリオパネルまでの距離")]
+    [SerializeField] float trioPanelBottom = 16f;
+    [SerializeField] Color trioPanelColor = new Color(.07f, .09f, .14f, .82f);
+
+    [Header("1vs3 HUD の文字サイズ")]
+    [Tooltip("ボスの名前（👑＋剣名）")]
+    [SerializeField] float bossNameFontSize = 30f;
+    [Tooltip("ボスのHPの数値")]
+    [SerializeField] float bossHpFontSize = 20f;
+    [Tooltip("ボスのSPの数値")]
+    [SerializeField] float bossSpFontSize = 18f;
+    [Tooltip("トリオの名前（「2P 剣名」）")]
+    [SerializeField] float trioNameFontSize = 20f;
+    [Tooltip("トリオのHPの数値と、状態表示（あなた／操作不能／撃破）")]
+    [SerializeField] float trioValueFontSize = 16f;
+
+    private GameObject soloHudRoot;
+    private Sprite slantSprite;
+    private readonly List<GameObject> hiddenSceneBars = new List<GameObject>();
+    private readonly Dictionary<string, TextMeshProUGUI> soloHudStates = new Dictionary<string, TextMeshProUGUI>();
+    private Image bossSpFill;
     // 制圧の対象領域を示す輪。狙いを付けるための下見(ボス本人のみ)と、撃った瞬間の明滅(全員)に使う。
     private SpriteRenderer suppressRange;
     private Sprite suppressRangeSprite;
@@ -223,6 +256,8 @@ public class MultiplayerManager : MonoBehaviour
             float bladeWidth = scene.generators != null && scene.generators.Length > 0 && scene.generators[0] != null
                 ? scene.generators[0].targetBladeWidth : scene.hostGenerator.targetBladeWidth;
             foreach (var player in config.players) CreateSword(player, network.playerSwords[0], bladeWidth, spawnPositions[player.spawnIndex]);
+            // 1vs3 は「1人 対 3人」の構図が伝わる専用HUDに差し替える。剣を作り終えてから配線する。
+            if (soloModeActive) BuildSoloHud();
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
             StartCoroutine(CompleteInitialization());
         }
@@ -399,6 +434,262 @@ public class MultiplayerManager : MonoBehaviour
             if (show) label.text = "操作不能 " + Mathf.CeilToInt(remaining);
             if (label.gameObject.activeSelf != show) label.gameObject.SetActive(show);
         }
+    }
+
+    // ===== 1vs3 専用HUD =====
+    // 対称戦の4枠並びでは「誰がボスか」も「ボスがいつ掌握斬を撃てるか」も伝わらない。
+    // ボスを上部中央に大きく1本（全員が見る共通の目標）、トリオ3人を下部に横並びにして、
+    // 画面の配置そのもので1対3の構図を示す。
+    void BuildSoloHud()
+    {
+        var font = FindHudFont();
+        HideSceneHudBars();
+
+        soloHudRoot = new GameObject("SoloHud", typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler));
+        var canvas = soloHudRoot.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 50;
+        var scaler = soloHudRoot.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+
+        var bossConfig = config.players.First(p => p.team == BossTeam);
+        BuildBossPanel(swords[bossConfig.playerId], font);
+
+        var trio = config.players.Where(p => p.team == TrioTeam).OrderBy(p => p.slotIndex).ToArray();
+        for (int i = 0; i < trio.Length; i++) BuildTrioPanel(swords[trio[i].playerId], trio[i].slotIndex, i, trio.Length, font);
+    }
+
+    // 既存のPL1Bar〜PL4Barは1vs3の間だけ隠す。試合が終わったら必ず戻す（シーンは触らない）。
+    void HideSceneHudBars()
+    {
+        hiddenSceneBars.Clear();
+        if (hudCanvas == null) return;
+        for (int slot = 1; slot <= 4; slot++)
+        {
+            var bar = hudCanvas.transform.Find("PL" + slot + "Bar");
+            if (bar == null || !bar.gameObject.activeSelf) continue;
+            bar.gameObject.SetActive(false);
+            hiddenSceneBars.Add(bar.gameObject);
+        }
+    }
+
+    // 日本語が出るフォントをシーンから借りる。TMPの既定フォントには日本語の字形が無い。
+    TMP_FontAsset FindHudFont()
+    {
+        if (countdownText != null) return countdownText.font;
+        foreach (var battle in swords.Values) if (battle.nameText != null) return battle.nameText.font;
+        return null;
+    }
+
+    void BuildBossPanel(SwordBattle boss, TMP_FontAsset font)
+    {
+        var panel = NewPanel("BossPanel", new Vector2(.5f, 1f), new Vector2(0, -bossPanelTop),
+            bossPanelSize, bossPanelColor);
+        // バーの幅はパネルの幅に追従させる。斜めの縁に文字やバーが乗り上げないよう左右を空ける。
+        float inner = bossPanelSize.x - 40f - hudSlant;
+        // 行の位置は上から順に積む。文字を大きくしても下の行が押し下がるだけで重ならない。
+        float nameHeight = bossNameFontSize * 1.35f;
+        float hpHeight = Mathf.Max(bossHpFontSize * 1.5f, 24f);
+        float spHeight = Mathf.Max(bossSpFontSize * 1.4f, 20f);
+        float y = -8f;
+        var crown = NewLabel(panel, "Name", font, bossNameFontSize, TextAlignmentOptions.Center,
+            new Vector2(0, y), new Vector2(inner, nameHeight));
+        crown.color = new Color(.85f, .62f, 1f);
+        y -= nameHeight + 6f;
+
+        var hp = NewBar(panel, "Hp", new Vector2(0, y), new Vector2(inner, hpHeight),
+            new Color(.85f, .16f, .16f), new Color(.10f, .10f, .12f, .9f));
+        var hpText = NewLabel(panel, "HpText", font, bossHpFontSize, TextAlignmentOptions.Right,
+            new Vector2(-12, y), new Vector2(inner - 20, hpHeight));
+        y -= hpHeight + 8f;
+
+        var sp = NewBar(panel, "Sp", new Vector2(0, y), new Vector2(inner, spHeight),
+            new Color(.35f, .75f, 1f), new Color(.10f, .10f, .12f, .9f));
+        var spText = NewLabel(panel, "SpText", font, bossSpFontSize, TextAlignmentOptions.Right,
+            new Vector2(-12, y), new Vector2(inner - 20, spHeight));
+        // パネルの高さは中身に合わせて伸ばす。指定値より中身が大きい時だけ広げる。
+        panel.sizeDelta = new Vector2(bossPanelSize.x, Mathf.Max(bossPanelSize.y, -y + spHeight + 8f));
+        // 100の位置に区切り線。ゲージが2段階（100＝通常必殺 / 200＝掌握斬）であることを示す。
+        float tick = boss.maxSp > 0 ? boss.ultimateSp / boss.maxSp : .5f;
+        var line = NewImage(sp.transform as RectTransform, "UltimateTick", new Color(1, 1, 1, .85f));
+        line.rectTransform.anchorMin = new Vector2(tick, 0f);
+        line.rectTransform.anchorMax = new Vector2(tick, 1f);
+        line.rectTransform.sizeDelta = new Vector2(3, 0);
+        line.rectTransform.anchoredPosition = Vector2.zero;
+
+        boss.nameText = crown;
+        boss.hpBar = hp.GetComponent<Slider>();
+        boss.hpText = hpText;
+        boss.spGaugeBar = sp.GetComponent<Slider>();
+        boss.spText = spText;
+        boss.delayHpBar = null;
+        bossSpFill = sp.GetComponentsInChildren<Image>(true).FirstOrDefault(i => i.name == "Fill");
+        boss.UpdateUI();
+        crown.text = "\U0001F451 " + boss.swordName;
+    }
+
+    void BuildTrioPanel(SwordBattle battle, int slotIndex, int index, int count, TMP_FontAsset font)
+    {
+        float width = trioPanelSize.x, gap = trioPanelGap;
+        float span = count * width + (count - 1) * gap;
+        float x = -span / 2f + width / 2f + index * (width + gap);
+        var panel = NewPanel("TrioPanel" + slotIndex, new Vector2(.5f, 0f), new Vector2(x, trioPanelBottom),
+            trioPanelSize, trioPanelColor);
+        float inner = width - 24f - hudSlant;
+
+        var name = NewLabel(panel, "Name", font, trioNameFontSize, TextAlignmentOptions.Left,
+            new Vector2(hudSlant / 2f, -8), new Vector2(inner, 26));
+        name.color = SwordBattle.PlayerColors[Mathf.Clamp(slotIndex, 0, 3)];
+        name.text = (slotIndex + 1) + "P " + battle.swordName;
+
+        var hp = NewBar(panel, "Hp", new Vector2(0, -42), new Vector2(inner, 24),
+            new Color(.3f, .8f, .35f), new Color(.10f, .10f, .12f, .9f));
+        var hpText = NewLabel(panel, "HpText", font, trioValueFontSize, TextAlignmentOptions.Right,
+            new Vector2(-14, -42), new Vector2(inner - 16, 22));
+
+        var state = NewLabel(panel, "State", font, trioValueFontSize, TextAlignmentOptions.Center,
+            new Vector2(0, -74), new Vector2(inner, 22));
+        state.color = new Color(.85f, .62f, 1f);
+        soloHudStates[battle.PlayerId] = state;
+
+        battle.nameText = name; battle.hpBar = hp.GetComponent<Slider>(); battle.hpText = hpText;
+        battle.spGaugeBar = null; battle.spText = null; battle.delayHpBar = null;
+        battle.UpdateUI();
+        name.text = (slotIndex + 1) + "P " + battle.swordName;
+    }
+
+    // 毎フレームの差分。自分がどれか、誰が掌握斬で固められているか、ボスが撃てる状態か。
+    void UpdateSoloHud()
+    {
+        if (soloHudRoot == null) return;
+        foreach (var pair in soloHudStates)
+        {
+            var battle = swords.ContainsKey(pair.Key) ? swords[pair.Key] : null;
+            float remaining = SuppressRemaining(pair.Key);
+            pair.Value.text = battle == null || !battle.IsAlive ? "撃破"
+                : remaining > 0f ? "操作不能 " + Mathf.CeilToInt(remaining)
+                : pair.Key == config.localPlayerId ? "あなた" : string.Empty;
+        }
+        // ボスのゲージが満タン＝掌握斬が来る。トリオが散開を判断できるよう、全員の画面で点滅させる。
+        if (bossSpFill == null || bossPlayerId == null || !swords.ContainsKey(bossPlayerId)) return;
+        var boss = swords[bossPlayerId];
+        bool ready = boss.IsAlive && boss.currentSp >= boss.maxSp;
+        bossSpFill.color = ready
+            ? Color.Lerp(new Color(.78f, .45f, 1f), Color.white, Mathf.PingPong(Time.unscaledTime * 3f, 1f))
+            : new Color(.35f, .75f, 1f);
+    }
+
+    // ----- 以下は組み立て用の小道具 -----
+
+    RectTransform NewPanel(string name, Vector2 anchor, Vector2 offset, Vector2 size, Color color)
+    {
+        var obj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        var rect = obj.GetComponent<RectTransform>();
+        rect.SetParent(soloHudRoot.transform, false);
+        rect.anchorMin = rect.anchorMax = anchor;
+        rect.pivot = new Vector2(.5f, anchor.y);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = offset;
+        var image = obj.GetComponent<Image>();
+        image.color = color;
+        ApplySlant(image);
+        return rect;
+    }
+
+    // 平行四辺形の画像をその場で作る。左右の端だけが斜めで、真ん中は真っ直ぐ。
+    // 9スライス（border を左右だけ持たせる）にしてあるので、バーが伸び縮みしても
+    // 斜めの角度は変わらず、真ん中だけが伸びる。
+    Sprite SlantSprite()
+    {
+        if (slantSprite != null) return slantSprite;
+        int slant = Mathf.Max(0, Mathf.RoundToInt(hudSlant));
+        const int height = 64;
+        int width = slant * 2 + 4;
+        var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+        texture.wrapMode = TextureWrapMode.Clamp;
+        var pixels = new Color32[width * height];
+        for (int y = 0; y < height; y++)
+        {
+            float t = (y + .5f) / height;
+            float left = slant * t;
+            float right = width - slant * (1f - t);
+            for (int x = 0; x < width; x++)
+            {
+                // 斜めの縁が階段状にならないよう、1px ぶんでなめらかに抜く
+                float cx = x + .5f;
+                float coverage = Mathf.Clamp01(cx - left + .5f) * Mathf.Clamp01(right - cx + .5f);
+                pixels[y * width + x] = new Color32(255, 255, 255, (byte)Mathf.RoundToInt(coverage * 255f));
+            }
+        }
+        texture.SetPixels32(pixels);
+        texture.Apply();
+        slantSprite = Sprite.Create(texture, new Rect(0, 0, width, height), new Vector2(.5f, .5f), 100f,
+            0, SpriteMeshType.FullRect, new Vector4(slant, 0, slant, 0));
+        return slantSprite;
+    }
+
+    void ApplySlant(Image image)
+    {
+        if (hudSlant <= 0f) return;
+        image.sprite = SlantSprite();
+        image.type = Image.Type.Sliced;
+        image.fillCenter = true;
+    }
+
+    static Image NewImage(RectTransform parent, string name, Color color)
+    {
+        var obj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        var rect = obj.GetComponent<RectTransform>();
+        rect.SetParent(parent, false);
+        rect.anchorMin = Vector2.zero; rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero; rect.offsetMax = Vector2.zero;
+        var image = obj.GetComponent<Image>();
+        image.color = color;
+        return image;
+    }
+
+    // 背景と塗りを持つスライダー。既存のHPバーと同じく SwordBattle.UpdateUI() が値を書き込む。
+    GameObject NewBar(RectTransform parent, string name, Vector2 offset, Vector2 size, Color fill, Color back)
+    {
+        var obj = new GameObject(name, typeof(RectTransform), typeof(Slider));
+        var rect = obj.GetComponent<RectTransform>();
+        rect.SetParent(parent, false);
+        rect.anchorMin = rect.anchorMax = new Vector2(.5f, 1f);
+        rect.pivot = new Vector2(.5f, 1f);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = offset;
+        var backgroundImage = NewImage(rect, "Background", back);
+        var fillImage = NewImage(rect, "Fill", fill);
+        ApplySlant(backgroundImage); ApplySlant(fillImage);
+        var background = backgroundImage;
+        var fillRect = fillImage.rectTransform;
+        var slider = obj.GetComponent<Slider>();
+        slider.transition = Selectable.Transition.None;
+        slider.interactable = false;
+        slider.targetGraphic = background;
+        slider.fillRect = fillRect;
+        slider.minValue = 0;
+        return obj;
+    }
+
+    static TextMeshProUGUI NewLabel(RectTransform parent, string name, TMP_FontAsset font, float size,
+        TextAlignmentOptions alignment, Vector2 offset, Vector2 rectSize)
+    {
+        var obj = new GameObject(name, typeof(RectTransform));
+        var label = obj.AddComponent<TextMeshProUGUI>();
+        var rect = label.rectTransform;
+        rect.SetParent(parent, false);
+        rect.anchorMin = rect.anchorMax = new Vector2(.5f, 1f);
+        rect.pivot = new Vector2(.5f, 1f);
+        rect.sizeDelta = rectSize;
+        rect.anchoredPosition = offset;
+        if (font != null) label.font = font;
+        label.fontSize = size;
+        label.alignment = alignment;
+        label.color = Color.white;
+        label.raycastTarget = false;
+        return label;
     }
 
     // ターゲット選定と制圧の範囲判定で共通に使う名簿。
@@ -802,6 +1093,7 @@ public class MultiplayerManager : MonoBehaviour
         UpdateCountdownUi();
         UpdateSuppressLabels();
         UpdateSuppressRange();
+        UpdateSoloHud();
         if (IsHost && phase == "COUNTDOWN" && Time.unscaledTime >= countdownEnd)
         {
             phase = "PLAYING"; SwordBattle.isRoundStarted = true;
@@ -1289,6 +1581,15 @@ public class MultiplayerManager : MonoBehaviour
         bossPlayerId = null; judgmentVisualStart = -999f;
         RestoreJudgmentGravity();
         if (suppressRange != null) { Destroy(suppressRange.gameObject); suppressRange = null; }
+        // 1vs3 専用HUDを片付け、隠していた元のHPバーを必ず戻す
+        if (soloHudRoot != null) { soloHudRoot.SetActive(false); Destroy(soloHudRoot); soloHudRoot = null; }
+        foreach (var bar in hiddenSceneBars) if (bar != null) bar.SetActive(true);
+        hiddenSceneBars.Clear(); soloHudStates.Clear(); bossSpFill = null;
+        if (slantSprite != null)
+        {
+            if (slantSprite.texture != null) Destroy(slantSprite.texture);
+            Destroy(slantSprite); slantSprite = null;
+        }
         if (suppressRangeSprite != null)
         {
             if (suppressRangeSprite.texture != null) Destroy(suppressRangeSprite.texture);

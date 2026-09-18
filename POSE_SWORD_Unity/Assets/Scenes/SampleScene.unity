@@ -4668,6 +4668,13 @@ MonoBehaviour:
   bossMaxSp: 200
   suppressRadius: 8
   suppressDuration: 10
+  judgmentPullSeconds: 1
+  judgmentPullForce: 60
+  judgmentDamageMultiplier: 1.3
+  judgmentKnockback: 40
+  judgmentSweepSeconds: 0.4
+  judgmentSweepSpin: 720
+  judgmentSweepScale: 2
 --- !u!114 &618030785
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4680,6 +4687,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 710911b73e4c49c78a828f4cae9cf771, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  hudSlant: 18
+  bossPanelSize: {x: 1000, y: 132}
+  bossPanelTop: 16
+  bossPanelColor: {r: 0.16, g: 0.06, b: 0.24, a: 0.82}
+  trioPanelSize: {x: 500, y: 96}
+  trioPanelGap: 24
+  trioPanelBottom: 16
+  trioPanelColor: {r: 0.07, g: 0.09, b: 0.14, a: 0.82}
+  bossNameFontSize: 40
+  bossHpFontSize: 30
+  bossSpFontSize: 25
+  trioNameFontSize: 25
+  trioValueFontSize: 23
 --- !u!1 &619394800
 GameObject:
   m_ObjectHideFlags: 0

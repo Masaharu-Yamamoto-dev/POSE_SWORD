@@ -6,7 +6,7 @@ import { MAX_PLAYERS, MIN_PLAYERS, SOLO_MODE_PLAYERS } from '../network/HostRoom
 export default function LobbyScreen({
   view, roomId, isCopied, handleCopyId,
   swordList, mySwordData, equipSword,
-  onReady, onGameMode, onLivesMode, onSoloMode, onStart, onLeave, goToCrafting, error
+  onReady, onGameMode, onLivesMode, onSoloMode, onBossPlayer, onStart, onLeave, goToCrafting, error
 }) {
   const room = view?.room;
   const me = room?.players.find(p => p.playerId === view.localPlayerId);
@@ -19,6 +19,11 @@ export default function LobbyScreen({
   const seatLimit = room.seatLimit ?? MAX_PLAYERS;
   // ランダムマッチの部屋は準備ボタンを使わず、人数がそろえば自動で始まる。
   const auto = Boolean(room.autoStart);
+  // 1vs3 はホストがボスを指名するまで開始できない。
+  // ※ auto を参照するので、必ず auto の宣言より後に置くこと（前に置くと 1vs3 をONにした
+  //   瞬間に初期化前アクセスで描画が落ちる）。
+  const bossPlayerId = room.bossPlayerId ?? null;
+  const canPickBoss = soloMode && isHost && !auto;
   const playerCount = room.players.length;
   const readyCount = room.players.filter(p => p.ready).length;
   const otherSeats = Array.from({ length: seatLimit }, (_, slot) => slot)
@@ -35,6 +40,7 @@ export default function LobbyScreen({
 
   const status = auto ? autoStatus
     : soloShortage > 0 ? `1vs3 には${SOLO_MODE_PLAYERS}人必要です（あと${soloShortage}人）`
+    : soloMode && !bossPlayerId ? 'ボスを指名してください'
     : playerCount < MIN_PLAYERS ? `参加者を待っています（最低${MIN_PLAYERS}人・最大${seatLimit}人）`
     : readyCount < playerCount ? `準備完了 ${readyCount} / ${playerCount}人`
     : isHost ? `${playerCount}人全員の準備が完了。対戦を開始できます`
@@ -48,7 +54,18 @@ export default function LobbyScreen({
         <div className="lobby-panel self-panel" style={{ display: 'flex', flexDirection: 'column' }}>
           <h2 style={{ margin: '0 0 15px 0', fontSize: '28px', color: PLAYER_COLORS[me.slotIndex], borderBottom: `2px solid ${PLAYER_COLORS[me.slotIndex]}`, paddingBottom: '5px' }}>
             {me.slotIndex + 1}P: あなた ({isHost ? "ホスト" : "ゲスト"})
+            {soloMode && me.playerId === bossPlayerId && " 👑"}
           </h2>
+
+          {/* 1vs3：ホストは自分をボスに指名できる */}
+          {canPickBoss && me.playerId !== bossPlayerId && (
+            <button
+              style={{ marginBottom: '10px', padding: '6px 12px', backgroundColor: '#6a1b9a', color: 'white', border: 'none', borderRadius: '5px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', alignSelf: 'flex-start' }}
+              onClick={() => onBossPlayer(me.playerId)}
+            >
+              👑 自分がボスになる
+            </button>
+          )}
 
           {mySwordData ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, justifyContent: 'center' }}>
@@ -126,6 +143,7 @@ export default function LobbyScreen({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '5px', marginBottom: '10px' }}>
                 <span style={{ fontWeight: 'bold', color: PLAYER_COLORS[slot] }}>
                   {slot + 1}P: {player ? (player.playerId === 'p0' ? "ホスト" : "プレイヤー") : "空き枠"}
+                  {soloMode && player && player.playerId === bossPlayerId && " 👑"}
                 </span>
                 {player && (
                   <span style={{ backgroundColor: player.ready ? '#4CAF50' : '#9e9e9e', color: 'white', padding: '3px 10px', borderRadius: '15px', fontSize: '12px', fontWeight: 'bold' }}>
@@ -142,6 +160,14 @@ export default function LobbyScreen({
                   <div style={{ textAlign: 'left' }}>
                     <p style={{ margin: '0 0 5px 0', fontWeight: 'bold', fontSize: '16px' }}>{player.swordData.name}</p>
                     <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>HP:{player.swordData.hp} / 攻:{player.swordData.attack} / 重:{player.swordData.weight}</p>
+                    {canPickBoss && player.playerId !== bossPlayerId && (
+                      <button
+                        style={{ marginTop: '6px', padding: '4px 10px', backgroundColor: '#6a1b9a', color: 'white', border: 'none', borderRadius: '5px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+                        onClick={() => onBossPlayer(player.playerId)}
+                      >
+                        👑 ボスにする
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (
