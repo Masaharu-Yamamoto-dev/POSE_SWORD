@@ -93,6 +93,20 @@ public class SceneController : MonoBehaviour
     private readonly List<GameObject> dynamicSwords = new List<GameObject>();
     private readonly List<GameObject> dynamicHudPieces = new List<GameObject>();
 
+    // ▼【新規追加】StartBattle()(autoTestOnStartのローカルデバッグ含む)が3・4人目用に動的生成した
+    // 剣・HPバー(名前表示のクローンも含む)を破棄する。StartBattle()自身の冒頭だけでなく、
+    // MultiplayerManager.InitializeMultiplayer側からも呼べるように public 化した。
+    // 以前はMultiplayerManager側からはこれが呼ばれておらず、autoTestOnStartでp3HudTemplate/
+    // p4HudTemplateが未設定の場合にWireClonedHudが複製した名前表示等のUIが、本番のマルチプレイ
+    // 対戦が始まっても破棄されずに残ってしまっていた(消したはずの要素が復活して見える不具合の原因)
+    public void ClearDynamicObjects()
+    {
+        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
+        dynamicSwords.Clear();
+        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
+        dynamicHudPieces.Clear();
+    }
+
     void Start()
     {
         if (autoTestOnStart && debugBattleJsonFile != null && !string.IsNullOrEmpty(debugBattleJsonFile.text))
@@ -127,10 +141,7 @@ public class SceneController : MonoBehaviour
         Vector3[] positions = GetSpawnPositions(playerCount);
 
         // ▼ 前回のStartBattle()で3・4人目用に動的生成したもの(剣・HPバー)を破棄してから作り直す
-        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
-        dynamicSwords.Clear();
-        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
-        dynamicHudPieces.Clear();
+        ClearDynamicObjects();
 
         if (NetworkManager.Instance != null)
         {

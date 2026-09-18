@@ -80,6 +80,7 @@ public static bool matchEnded = false;
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
     public float giantSpinScale = 6f; // 巨大化一回転（hiltType:"1"）の拡大率
     public float giantSpinDamageMultiplier = 8f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
+    public float giantSpinRotationSpeed = 1080f; // 巨大化一回転の回転速度（度/秒）。小さくするとゆっくり回るようになる（一回転にかかる時間もこれに応じて伸びる）
     public int cloneCount = 3; // 分身突進（hiltType:"2"）の分身数
     public float cloneSpawnMinRadius = 2f; // 分身の出現位置：自分からの最小距離
     public float cloneSpawnMaxRadius = 4f; // 分身の出現位置：自分からの最大距離
@@ -108,6 +109,14 @@ public static bool matchEnded = false;
     // 展開中の枚(GameObject)の数をここで数え、1枚でも残っていれば本体への通常ダメージを無効化する
     [HideInInspector] public int activeLeafShieldCount = 0;
     public bool HasActiveLeafShield => activeLeafShieldCount > 0;
+
+    // ▼【新規追加】残機モードでリスポーン(次の剣に持ち替え)した直後の無敵時間。
+    // 無敵中はスプライトを点滅させて、見た目でも無敵中だと分かるようにする
+    [Header("残機モード：リスポーン時の無敵")]
+    public float respawnInvincibleDuration = 3f; // リスポーン直後、何秒間ダメージを無効化するか
+    public float respawnBlinkInterval = 0.12f;   // 点滅の切り替え間隔（秒）
+    private float respawnInvincibleTimer = 0f;
+    public bool IsRespawnInvincible => respawnInvincibleTimer > 0f;
 
     // ▼【新規追加】現在のダッシュ技の種類 (0:なし, 1:小ダッシュ, 2:竜巻, 3:大回転, 4:巨大化一回転, 5:分身突進)
     [HideInInspector] public int currentDashType = 0;
@@ -246,6 +255,9 @@ public static bool matchEnded = false;
         // 本来の見た目より小さく(または大きく)なってしまっていた。ConfigureMultiplayerで記録した
         // このテンプレート本来のスケールへ戻す
         transform.localScale = baselineScale;
+        // ▼【新規追加】リスポーン直後は一定時間ダメージを受けない(無敵)。Update()側で点滅させつつ
+        // カウントダウンし、MultiplayerManager.QueueHit側のinvulnerable判定もこれを見て無効化する
+        respawnInvincibleTimer = respawnInvincibleDuration;
     }
 
     public void ApplyMultiplayerHealth(int health, bool wasCrit = false)
@@ -295,15 +307,33 @@ public static bool matchEnded = false;
         int previousDashType = currentDashType;
         currentSp = Mathf.Clamp(sp, 0, maxSp); isDashing = dashing; currentDashType = dashType;
         if (dashType != previousDashType) TryPlayUltimateCutin(dashType);
-        if (spriteRenderer != null) spriteRenderer.color = dashType == 1 ? new Color(1, .5f, .5f) :
-            dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) :
-            dashType == 4 ? new Color(1f, .3f, .3f) : dashType == 5 ? new Color(.3f, .6f, 1f) :
-            dashType == 6 ? new Color(.4f, .95f, .5f) : Color.white;
-        if (scale > 0f) transform.localScale = Vector3.one * scale;
+        if (spriteRenderer != null)
+        {
+            Color tint = dashType == 1 ? new Color(1, .5f, .5f) :
+                dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) :
+                dashType == 4 ? new Color(1f, .3f, .3f) : dashType == 5 ? new Color(.3f, .6f, 1f) :
+                dashType == 6 ? new Color(.4f, .95f, .5f) : Color.white;
+            // ▼【新規追加】リスポーン無敵中の点滅(Update()側でアルファだけ操作)を上書きしてしまわないよう、
+            // 現在のアルファ値は維持したまま色(RGB)だけ差し替える
+            tint.a = spriteRenderer.color.a;
+            spriteRenderer.color = tint;
+        }
+        // ▼【修正】Host側は自分の剣のlocalScale.xだけをSYNCで送っており(MultiplayerManager.Snapshot)、
+        // これをVector3.one * scaleでそのまま復元するとZ軸まで巻き込んで上書きしてしまっていた。
+        // このテンプレートは元々X/Y=2・Z=1という非対称なスケールで作られており(柄(Handle-A)は
+        // ローカルZ座標を-5に固定しているため)、親のZスケールが1→2に化けると柄のワールドZ座標が
+        // -5→-10まで移動してカメラ(Z=-10)の目の前・ニアクリップ面のすぐ手前まで来てしまい、
+        // 柄がカリングされて画面に描画されなくなる不具合の原因になっていた。
+        // Z軸はConfigureMultiplayerで記録した本来のbaselineScaleのまま維持し、X/Yだけ同期する
+        if (scale > 0f) transform.localScale = new Vector3(scale, scale, baselineScale.z);
     }
 
     // ▼【新規追加】dashType(2〜6)に対応する必殺技のカットインを、スローモーションなしで再生する
     // （Host自身の画面は各Routine内で直接PlayCutinを呼んでいるので、ここはClient専用の経路）
+    // ▼【修正】ここは常にfalseのままでよい。実際の「止まる」演出はHost側のPhysics2D.Simulate停止
+    // (各Routine側でuseSlowMotion=trueを渡している)によってSYNCデータ自体が止まることで実現しており、
+    // Client側の位置補間はTime.unscaledDeltaTimeで動いているためローカルでtimeScaleを変えても
+    // 見た目上は止まらない(むしろ他の演出のタイミングだけズレる)。ここではカットインUI/SE専用に留める
     void TryPlayUltimateCutin(int dashType)
     {
         if (CutinManager.Instance == null || spriteRenderer == null) return;
@@ -354,6 +384,26 @@ public static bool matchEnded = false;
     {
         Debug.Log($"クリック検出 / Round={isRoundStarted}, Dead={isDead}, Ended={matchEnded}, Local={(controller != null && controller.isLocalControlled)}");
     }
+
+        // ▼【新規追加】リスポーン直後の無敵時間をカウントダウンしつつ、スプライトを点滅させる。
+        // isDead/matchEnded中でも(死亡演出等の色と衝突しないよう)無敵タイマー自体は進めておく
+        if (respawnInvincibleTimer > 0f)
+        {
+            respawnInvincibleTimer -= Time.deltaTime;
+            if (spriteRenderer != null)
+            {
+                if (respawnInvincibleTimer <= 0f)
+                {
+                    respawnInvincibleTimer = 0f;
+                    var c = spriteRenderer.color; c.a = 1f; spriteRenderer.color = c;
+                }
+                else
+                {
+                    bool visible = Mathf.FloorToInt(respawnInvincibleTimer / respawnBlinkInterval) % 2 == 0;
+                    var c = spriteRenderer.color; c.a = visible ? 1f : 0.25f; spriteRenderer.color = c;
+                }
+            }
+        }
 
         if (!isRoundStarted || isDead || matchEnded) return;
 
@@ -783,6 +833,11 @@ public static bool matchEnded = false;
             Debug.Log("🍃 オレ達シールド展開中につき本体無敵！攻撃はシールドの反射に任せる！");
             return false;
         }
+        if (IsRespawnInvincible)
+        {
+            Debug.Log("✨ リスポーン直後につき無敵！攻撃を弾いた！");
+            return false;
+        }
 
         float damagePercentage = ((float)damage / maxHp) * 100f; 
         currentSp = Mathf.Clamp(currentSp + (damagePercentage * damageSpMultiplier), 0f, maxSp);
@@ -1134,7 +1189,10 @@ public static bool matchEnded = false;
 
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f), PlayerMainColor, MultiplayerOwner == null);
+            // ▼【修正】マルチプレイでも必殺技カットイン中は全員の動きを止める演出にする(useSlowMotion常にtrue)。
+            // Host権威のPhysics2D.Simulateが実質停止するため、この間だけは意図的に両プレイヤーとも止まる
+            // (Client側は停止したSYNCデータをそのまま補間するので、こちらでも自然に止まって見える)
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f), PlayerMainColor, true);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
@@ -1186,7 +1244,7 @@ public static bool matchEnded = false;
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f), PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f), PlayerMainColor, true);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.3f, 0.3f);
@@ -1226,7 +1284,7 @@ public static bool matchEnded = false;
             }
         }
 
-        float angularSpeed = 1080f * spinDir; // 度/秒
+        float angularSpeed = giantSpinRotationSpeed * spinDir; // 度/秒
         float duration = 360f / Mathf.Abs(angularSpeed); // ちょうど一回転分の時間
 
         if (controlsPhysics)
@@ -1266,7 +1324,7 @@ public static bool matchEnded = false;
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達アタック!!", cloneColor, PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達アタック!!", cloneColor, PlayerMainColor, true);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = cloneColor;
@@ -1398,7 +1456,7 @@ public static bool matchEnded = false;
         // 他の剣モード必殺技と同様にローカル/テストモード時だけ再生する
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達シールド!!", shieldColor, PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達シールド!!", shieldColor, PlayerMainColor, true);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = shieldColor;
@@ -1543,7 +1601,7 @@ public static bool matchEnded = false;
 
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f), PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f), PlayerMainColor, true);
         }
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）

@@ -49,7 +49,6 @@ export const HILT_DATABASE = {
 };
 
 export default function SwordListScreen({ 
-  direction = "forward", 
   swordList, mySwordData, equipSword, deleteSword, 
   startNewCrafting, startRecapture, updateSword, cancelList, toggleSwordFlip 
 }) {
@@ -57,8 +56,6 @@ export default function SwordListScreen({
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
-
-  const [transition, setTransition] = useState("enter");
 
   useEffect(() => {
     if (!swordList.find(s => s.id === selectedId)) setSelectedId(swordList[0]?.id);
@@ -90,49 +87,23 @@ export default function SwordListScreen({
     setIsModalOpen(false);
   };
 
-  // ==========================================
-  // 🌟 追加：画面遷移をフックするラッパー関数
-  // ==========================================
-  const onCancel = () => {
-    if (transition !== "enter") return;
-    setTransition("exit-back"); // 戻る判定：右へフェードアウト
-    setTimeout(cancelList, 300);
-  };
-
-  const onRecapture = (id) => {
-    if (transition !== "enter") return;
-    setTransition("exit-forward"); // 進む判定：左へフェードアウト
-    setTimeout(() => startRecapture(id), 300);
-  };
-
-  const onNewCrafting = () => {
-    if (transition !== "enter") return;
-    setTransition("exit-forward"); 
-    setTimeout(startNewCrafting, 300);
-  };
-
-  // 現在のステートに基づいてCSSクラスを決定
-  const animClass = transition === "exit-back" ? "page-exit-back" :
-                    transition === "exit-forward" ? "page-exit-forward" : 
-                    (direction === "back" ? "page-enter-back" : "page-enter-forward");
-
   return (
-    // 🌟 変更：外側のdivに animClass を適用
-    <div className={animClass} style={{ ...styles.container, justifyContent: 'flex-start', paddingTop: '20px', backgroundColor: '#eef2f5' }}>
+    <div style={{ ...styles.container, justifyContent: 'flex-start', paddingTop: '20px', backgroundColor: '#eef2f5' }}>
       
       {/* 👑 ヘッダー部分 */}
       <div style={{ width: '100%', maxWidth: '1000px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', marginBottom: '20px', boxSizing: 'border-box' }}>
-        {/* 🌟 変更：onClickを onCancel に差し替え */}
-        <button style={{ padding: '10px 20px', backgroundColor: '#607d8b', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }} onClick={onCancel}>
+        <button style={{ padding: '10px 20px', backgroundColor: '#607d8b', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }} onClick={cancelList}>
           ◀ 戻る
         </button>
         <h2 style={{ margin: 0, fontSize: '32px', color: '#333', letterSpacing: '2px' }}>武 器 庫</h2>
         <div style={{ width: '80px' }}></div>
       </div>
 
+      {/* ▼ 変更：左右のカラム分けを廃止し、2×2のグリッド（マス目）に直接配置して高さを同期 */}
       <div className="armory-grid" style={{ width: '100%', maxWidth: '1000px', display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '20px', padding: '0 20px', boxSizing: 'border-box' }}>
         
         {/* ======================= 行1：左上（プレビュー） ======================= */}
+        {/* 高さを固定せず、右上のパネルと自動で高さが揃うようにしました */}
         <div className="panel" style={{ minHeight: '280px', position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '30px', border: isEquipped ? '4px solid #4CAF50' : '2px solid transparent' }}>
           {isEquipped && <div style={{ position: 'absolute', top: 10, left: 10, backgroundColor: '#4CAF50', color: 'white', padding: '5px 15px', fontWeight: 'bold', borderRadius: '5px' }}>★ 装備中</div>}
           
@@ -186,6 +157,7 @@ export default function SwordListScreen({
         </div>
 
         {/* ======================= 行2：左下（アクションボタン） ======================= */}
+        {/* 高さを自動で右下のパネルと同期させます */}
         <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '10px', justifyContent: 'center' }}>
           <button 
             style={{ padding: '15px', fontSize: '18px', fontWeight: 'bold', backgroundColor: isEquipped ? '#ccc' : '#2196F3', color: 'white', border: 'none', borderRadius: '8px', cursor: isEquipped ? 'default' : 'pointer' }} 
@@ -196,8 +168,7 @@ export default function SwordListScreen({
           </button>
           <div style={{ display: 'flex', gap: '10px' }}>
             <button onClick={() => toggleSwordFlip(selectedSword.id)} style={{ flex: 1, padding: '12px', backgroundColor: '#9C27B0', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>⇄ 左右反転</button>
-            {/* 🌟 変更：onClickを onRecapture に差し替え */}
-            <button onClick={() => onRecapture(selectedSword.id)} style={{ flex: 1, padding: '12px', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>📸 撮り直し</button>
+            <button onClick={() => startRecapture(selectedSword.id)} style={{ flex: 1, padding: '12px', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>📸 撮り直し</button>
           </div>
           <button onClick={() => deleteSword(selectedSword.id)} disabled={swordList.length === 1} style={{ padding: '12px', backgroundColor: swordList.length === 1 ? '#e0e0e0' : '#f44336', color: swordList.length === 1 ? '#9e9e9e' : 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: swordList.length === 1 ? 'not-allowed' : 'pointer' }}>
             🗑️ 破棄する
@@ -247,7 +218,7 @@ export default function SwordListScreen({
               );
             } else {
               return (
-                <div key={`empty-${index}`} onClick={onNewCrafting} style={{ width: '80px', height: '80px', backgroundColor: 'rgba(255,255,255,0.5)', borderRadius: '8px', border: '2px dashed #aaa', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#888', fontSize: '24px', transition: '0.2s' }}>
+                <div key={`empty-${index}`} onClick={startNewCrafting} style={{ width: '80px', height: '80px', backgroundColor: 'rgba(255,255,255,0.5)', borderRadius: '8px', border: '2px dashed #aaa', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#888', fontSize: '24px', transition: '0.2s' }}>
                   ＋
                 </div>
               );
@@ -319,7 +290,7 @@ export default function SwordListScreen({
         }
         @media (max-width: 800px) {
           .armory-grid {
-            grid-template-columns: 1fr !important;
+            grid-template-columns: 1fr !important; /* スマホでは1列に自動で並び替わります */
           }
         }
       `}</style>

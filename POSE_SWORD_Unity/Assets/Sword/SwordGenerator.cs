@@ -99,6 +99,13 @@ public class SwordGenerator : MonoBehaviour
             Debug.Log($"剣の生成完了: {data.name} | 見た目の攻撃力:{rawAttack} → 実攻撃力:{actualAttack} | 見た目の重さ:{rawWeight} → 実質量:{actualWeight}");
         }
 
+        // ▼【修正】柄(hiltType)の表示/非表示・見た目切り替えは、刀身の画像(imageStr)とは独立したデータ。
+        // 以前は下の「画像と当たり判定の反映」ブロック(imageStrが空、あるいはBase64デコード/画像読み込みに
+        // 失敗すると丸ごとスキップされる)の内側でしか柄を更新しておらず、クライアント側で同期された
+        // imageStrが一時的に空・不正だった場合に柄だけ生成/更新されずに残ってしまうことがあった。
+        // 刀身画像の成否に関わらず必ず柄を更新するため、先に独立して呼び出す
+        ApplyHandleAppearance(data);
+
         // =========================================================
         // 🎨 画像と当たり判定の反映
         // =========================================================
@@ -106,21 +113,21 @@ public class SwordGenerator : MonoBehaviour
         if (!string.IsNullOrEmpty(data.imageStr))
         {
             string base64String = data.imageStr;
-            
+
             // DataURL形式（data:image/png;base64,xxxxx）の場合は base64部分を抽出
             if (base64String.Contains(","))
             {
                 base64String = base64String.Split(',')[1];
                 Debug.Log("📌 DataURL形式を検出して Base64 に変換しました");
             }
-            
+
             try
             {
                 byte[] imageBytes = Convert.FromBase64String(base64String);
                 Texture2D tex = new Texture2D(4, 4);
-                
+
                 // ▼【重要】エラーを回避するための安全装置
-                bool isLoaded = tex.LoadImage(imageBytes); 
+                bool isLoaded = tex.LoadImage(imageBytes);
                 if (!isLoaded)
                 {
                     Destroy(tex);
@@ -130,16 +137,16 @@ public class SwordGenerator : MonoBehaviour
 
                 // Spriteの生成
                 Sprite newSprite = Sprite.Create(
-                    tex, 
-                    new Rect(0, 0, tex.width, tex.height), 
+                    tex,
+                    new Rect(0, 0, tex.width, tex.height),
                     new Vector2(0.5f, 0.0f),
-                    100f 
+                    100f
                 );
 
                 if (targetSpriteRenderer != null)
                 {
                     targetSpriteRenderer.sprite = newSprite;
-                    
+
                     // 画像サイズに関わらず、理想の太さに自動リサイズする処理
                     float currentWidth = newSprite.bounds.size.x;
                     if (currentWidth > 0)
@@ -164,51 +171,68 @@ public class SwordGenerator : MonoBehaviour
                 generatedSprite = newSprite;
                 generatedTexture = tex;
                 LastGenerationSucceeded = true;
-
-                // 独楽モードかどうかで、柄の表示/非表示を切り替える
-                if (handleObject != null)
-                {
-                    // ▼ hiltTypeで切り替える前の、Inspectorで手動調整済みのlocalScaleを一度だけ記録する
-                    // (これがhandleSprite0の画像サイズに対して正しくチューニングされている前提の基準値)
-                    if (handleBaselineScale == null) handleBaselineScale = handleObject.transform.localScale;
-
-                    // ▼【新規追加】hiltType(柄の種類)に応じて、柄の見た目(スプライト)もReact側の
-                    // 武器庫(SwordListScreen.jsx / HILT_DATABASE)と対応する画像に切り替える
-                    var handleRenderer = handleObject.GetComponent<SpriteRenderer>();
-                    if (handleRenderer != null)
-                    {
-                        Sprite handleSprite = handleSprite0;
-                        switch (data.hiltType)
-                        {
-                            case "1": handleSprite = handleSprite1; break;
-                            case "2": handleSprite = handleSprite2; break;
-                            case "3": handleSprite = handleSprite3; break;
-                        }
-                        if (handleSprite != null)
-                        {
-                            handleRenderer.sprite = handleSprite;
-                            // ▼【新規追加】handleSprite0以外は元画像のピクセルサイズがバラバラなため、
-                            // handleSprite0を基準に横幅を正規化してスケールを補正する
-                            // (これが無いと切り替えた柄が極端に小さく/大きく表示される)
-                            float defaultWidth = handleSprite0 != null ? handleSprite0.bounds.size.x : 0f;
-                            float newWidth = handleSprite.bounds.size.x;
-                            if (defaultWidth > 0f && newWidth > 0f)
-                                handleObject.transform.localScale = handleBaselineScale.Value * (defaultWidth / newWidth);
-                        }
-                    }
-                    handleObject.SetActive(!SwordController.isKomaMode);
-                    // ▼【新規追加】柄を(残機の持ち替えなどで)差し替えた時に、人物の刀身画像より
-                    // 手前に来てしまうことがあったため、Z座標を明示的に奥へ固定して重ならないようにする
-                    Vector3 handlePos = handleObject.transform.localPosition;
-                    handleObject.transform.localPosition = new Vector3(handlePos.x, handlePos.y, -5f);
-                    Debug.Log($"✅ 柄の表示状態を更新しました: {!SwordController.isKomaMode}");
-                }
             }
             catch (System.Exception e)
             {
                 Debug.LogError($"❌ 画像の読み込みに失敗: {e.Message}");
             }
         }
+    }
+
+    // ▼【新規追加】柄(Handle-A)の表示/非表示(独楽モードかどうか)とhiltTypeに応じた見た目(スプライト)切り替え。
+    // 刀身の画像(imageStr)生成とは完全に独立しており、imageStrが空/読み込み失敗でも必ず呼ばれる
+    void ApplyHandleAppearance(SwordData data)
+    {
+        if (handleObject == null) return;
+
+        // ▼ hiltTypeで切り替える前の、Inspectorで手動調整済みのlocalScaleを一度だけ記録する
+        // (これがhandleSprite0の画像サイズに対して正しくチューニングされている前提の基準値)
+        if (handleBaselineScale == null) handleBaselineScale = handleObject.transform.localScale;
+
+        // ▼ hiltType(柄の種類)に応じて、柄の見た目(スプライト)もReact側の
+        // 武器庫(SwordListScreen.jsx / HILT_DATABASE)と対応する画像に切り替える
+        var handleRenderer = handleObject.GetComponent<SpriteRenderer>();
+        if (handleRenderer != null)
+        {
+            Sprite handleSprite = handleSprite0;
+            switch (data.hiltType)
+            {
+                case "1": handleSprite = handleSprite1; break;
+                case "2": handleSprite = handleSprite2; break;
+                case "3": handleSprite = handleSprite3; break;
+            }
+            if (handleSprite != null)
+            {
+                handleRenderer.sprite = handleSprite;
+                // ▼ handleSprite0以外は元画像のピクセルサイズがバラバラなため、
+                // handleSprite0を基準に横幅を正規化してスケールを補正する
+                // (これが無いと切り替えた柄が極端に小さく/大きく表示される)
+                float defaultWidth = handleSprite0 != null ? handleSprite0.bounds.size.x : 0f;
+                float newWidth = handleSprite.bounds.size.x;
+                if (defaultWidth > 0f && newWidth > 0f)
+                    handleObject.transform.localScale = handleBaselineScale.Value * (defaultWidth / newWidth);
+            }
+        }
+        handleObject.SetActive(!SwordController.isKomaMode);
+        // ▼ 柄を(残機の持ち替えなどで)差し替えた時に、人物の刀身画像より
+        // 手前に来てしまうことがあったため、Z座標を明示的に奥へ固定して重ならないようにする
+        Vector3 handlePos = handleObject.transform.localPosition;
+        handleObject.transform.localPosition = new Vector3(handlePos.x, handlePos.y, -5f);
+        // ▼【調査用ログ】実機のクライアント側だけ柄が透明/非表示になる不具合を追うための診断ログ。
+        // ログ上は有効(active/sprite割り当て済み)なのに画面には出ない、という状況を追うため、
+        // 位置・スケール・描画順まで含めて詳しく出す
+        var sr = handleObject.GetComponent<SpriteRenderer>();
+        Debug.Log($"✅ 柄の表示状態を更新しました: active={!SwordController.isKomaMode}, " +
+            $"sword={gameObject.name}, handleObj={handleObject.name}(id={handleObject.GetInstanceID()}), " +
+            $"activeSelf={handleObject.activeSelf}, sprite={(sr != null ? sr.sprite?.name : "no-renderer")}, " +
+            $"color={(sr != null ? sr.color.ToString() : "n/a")}, hiltType={data.hiltType}, " +
+            $"localPos={handleObject.transform.localPosition}, worldPos={handleObject.transform.position}, " +
+            $"localScale={handleObject.transform.localScale}, lossyScale={handleObject.transform.lossyScale}, " +
+            $"sortLayer={(sr != null ? sr.sortingLayerID : -1)}, sortOrder={(sr != null ? sr.sortingOrder : -1)}, " +
+            $"spriteBounds={(sr != null && sr.sprite != null ? sr.sprite.bounds.size.ToString() : "n/a")}, " +
+            $"rootPos={transform.position}, rootScale={transform.lossyScale}, " +
+            $"bladePos={(targetSpriteRenderer != null ? targetSpriteRenderer.transform.position.ToString() : "n/a")}, " +
+            $"bladeSortOrder={(targetSpriteRenderer != null ? targetSpriteRenderer.sortingOrder.ToString() : "n/a")}");
     }
 
     void OnDestroy()
