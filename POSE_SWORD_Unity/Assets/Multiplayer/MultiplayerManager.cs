@@ -120,6 +120,8 @@ public class MultiplayerManager : MonoBehaviour
 
     private GameObject soloHudRoot;
     private Sprite slantSprite;
+    // 実行時に作る文字が使うフォント。シーンで使われているものに揃える。
+    private TMP_FontAsset hudFont;
     private readonly List<GameObject> hiddenSceneBars = new List<GameObject>();
     private readonly Dictionary<string, TextMeshProUGUI> soloHudStates = new Dictionary<string, TextMeshProUGUI>();
     private Image bossSpFill;
@@ -444,7 +446,8 @@ public class MultiplayerManager : MonoBehaviour
                 label.transform.localPosition = new Vector3(0, 3.2f, -0.2f);
                 label.fontSize = 5; label.alignment = TextAlignmentOptions.Center;
                 label.color = new Color(.78f, .45f, 1f);
-                if (pair.Value.nameText != null) label.font = pair.Value.nameText.font;
+                var font = FindHudFont();
+                if (font != null) label.font = font;
                 suppressLabels[pair.Key] = label;
             }
             bool show = remaining > 0f && pair.Value.IsAlive;
@@ -491,12 +494,21 @@ public class MultiplayerManager : MonoBehaviour
         }
     }
 
-    // 日本語が出るフォントをシーンから借りる。TMPの既定フォントには日本語の字形が無い。
+    // 実行時に作る文字は、すべてここで解決した1つのフォントに統一する。
+    // TMPの既定フォント(LiberationSans)には日本語の字形が無く、フォールバックも未設定なので、
+    // 借り先を見つけられないまま生成すると豆腐文字になる。シーンで実際に使われているものを探す。
     TMP_FontAsset FindHudFont()
     {
-        if (countdownText != null) return countdownText.font;
-        foreach (var battle in swords.Values) if (battle.nameText != null) return battle.nameText.font;
-        return null;
+        if (hudFont != null) return hudFont;
+        if (countdownText != null && countdownText.font != null) hudFont = countdownText.font;
+        if (hudFont == null)
+            foreach (var battle in swords.Values)
+                if (battle.nameText != null && battle.nameText.font != null) { hudFont = battle.nameText.font; break; }
+        // 最後の手段として、シーン上のどれでもいいので実際に使われているフォントを拾う
+        if (hudFont == null)
+            foreach (var text in FindObjectsByType<TextMeshProUGUI>(FindObjectsSortMode.None))
+                if (text.font != null) { hudFont = text.font; break; }
+        return hudFont;
     }
 
     void BuildBossPanel(SwordBattle boss, TMP_FontAsset font)
@@ -1617,7 +1629,7 @@ public class MultiplayerManager : MonoBehaviour
         // 1vs3 専用HUDを片付け、隠していた元のHPバーを必ず戻す
         if (soloHudRoot != null) { soloHudRoot.SetActive(false); Destroy(soloHudRoot); soloHudRoot = null; }
         foreach (var bar in hiddenSceneBars) if (bar != null) bar.SetActive(true);
-        hiddenSceneBars.Clear(); soloHudStates.Clear(); bossSpFill = null;
+        hiddenSceneBars.Clear(); soloHudStates.Clear(); bossSpFill = null; hudFont = null;
         if (slantSprite != null)
         {
             if (slantSprite.texture != null) Destroy(slantSprite.texture);
