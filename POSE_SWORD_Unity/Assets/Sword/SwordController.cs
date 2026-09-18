@@ -151,6 +151,17 @@ public class SwordController : MonoBehaviour
         JumpAndSpin(jumpRight);
     }
 
+    // ▼【新規追加】柄(Handle-A)はInstantiate複製時、参照先が自分の階層外にあると複製先へ
+    // 付け替わらない(Unityの仕様)ため、Editorの配線ミスや複製のタイミング次第で「他人の柄」を
+    // 参照したままになることがあった(実機でクライアント側の柄だけ表示されない不具合の原因)。
+    // 呼び出し側(複製直後やモード切り替え前)でこれを呼ぶと、自分の子から名前で柄を探し直して
+    // 必ず自分自身の柄を参照するように補正できる。柄の見た目(スプライト)切り替えには一切関与しない。
+    public void ResolveOwnHandle()
+    {
+        Transform handle = transform.Find("Handle-A");
+        if (handle != null) handleObject = handle.gameObject;
+    }
+
     public void ApplyPhysicsMode()
     {
         if (swordRigidbody == null) return;

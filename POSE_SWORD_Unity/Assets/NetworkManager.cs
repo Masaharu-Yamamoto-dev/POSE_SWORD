@@ -334,7 +334,13 @@ public class NetworkManager : MonoBehaviour
             GameObject obj = playerSwords[i];
             if (obj == null) continue;
             var controller = obj.GetComponent<SwordController>();
-            if (controller != null) controller.ApplyPhysicsMode();
+            if (controller != null)
+            {
+                // ▼ Inspectorの配線ミスで柄(Handle-A)参照が別プレイヤーの剣を指していることがあるため、
+                // モード切り替えで柄の表示/非表示を変える直前に必ず自分自身の柄を参照し直す
+                controller.ResolveOwnHandle();
+                controller.ApplyPhysicsMode();
+            }
         }
 
         if (swordStage != null) swordStage.SetActive(!SwordController.isKomaMode);
