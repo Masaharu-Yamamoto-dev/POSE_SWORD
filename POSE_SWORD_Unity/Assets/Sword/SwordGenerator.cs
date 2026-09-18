@@ -18,7 +18,18 @@ public class SwordGenerator : MonoBehaviour
     public SwordBattle swordBattle;
 
     [Header("柄のオブジェクト（独楽モード時は消す）")]
-    public GameObject handleObject; 
+    public GameObject handleObject;
+    // ▼【新規追加】柄オブジェクトのInspectorで設定された元のlocalScale(=handleSprite0の画像サイズに対して
+    // 手動で調整済みのスケール)を、最初にhiltTypeで切り替える前に一度だけ記録しておく。
+    // handleSprite1〜3は元画像のピクセルサイズがhandleSprite0とバラバラなため、これを基準に
+    // 毎回スケールを正規化しないと、切り替えた柄が極端に小さく/大きく表示されてしまう
+    private Vector3? handleBaselineScale;
+
+    [Header("柄（つか）の見た目：hiltTypeごとの画像(React側の武器庫の柄と対応)")]
+    public Sprite handleSprite0; // "0"(未指定/不明な値含む) = 普通の柄
+    public Sprite handleSprite1; // "1" = 武骨な柄
+    public Sprite handleSprite2; // "2" = 悪魔の柄
+    public Sprite handleSprite3; // "3" = 大翼の柄
 
     [Header("刀身の理想の太さ（横幅）")]
     public float targetBladeWidth = 1.5f;
@@ -156,9 +167,40 @@ public class SwordGenerator : MonoBehaviour
 
                 // 独楽モードかどうかで、柄の表示/非表示を切り替える
                 if (handleObject != null)
-                // s
                 {
+                    // ▼ hiltTypeで切り替える前の、Inspectorで手動調整済みのlocalScaleを一度だけ記録する
+                    // (これがhandleSprite0の画像サイズに対して正しくチューニングされている前提の基準値)
+                    if (handleBaselineScale == null) handleBaselineScale = handleObject.transform.localScale;
+
+                    // ▼【新規追加】hiltType(柄の種類)に応じて、柄の見た目(スプライト)もReact側の
+                    // 武器庫(SwordListScreen.jsx / HILT_DATABASE)と対応する画像に切り替える
+                    var handleRenderer = handleObject.GetComponent<SpriteRenderer>();
+                    if (handleRenderer != null)
+                    {
+                        Sprite handleSprite = handleSprite0;
+                        switch (data.hiltType)
+                        {
+                            case "1": handleSprite = handleSprite1; break;
+                            case "2": handleSprite = handleSprite2; break;
+                            case "3": handleSprite = handleSprite3; break;
+                        }
+                        if (handleSprite != null)
+                        {
+                            handleRenderer.sprite = handleSprite;
+                            // ▼【新規追加】handleSprite0以外は元画像のピクセルサイズがバラバラなため、
+                            // handleSprite0を基準に横幅を正規化してスケールを補正する
+                            // (これが無いと切り替えた柄が極端に小さく/大きく表示される)
+                            float defaultWidth = handleSprite0 != null ? handleSprite0.bounds.size.x : 0f;
+                            float newWidth = handleSprite.bounds.size.x;
+                            if (defaultWidth > 0f && newWidth > 0f)
+                                handleObject.transform.localScale = handleBaselineScale.Value * (defaultWidth / newWidth);
+                        }
+                    }
                     handleObject.SetActive(!SwordController.isKomaMode);
+                    // ▼【新規追加】柄を(残機の持ち替えなどで)差し替えた時に、人物の刀身画像より
+                    // 手前に来てしまうことがあったため、Z座標を明示的に奥へ固定して重ならないようにする
+                    Vector3 handlePos = handleObject.transform.localPosition;
+                    handleObject.transform.localPosition = new Vector3(handlePos.x, handlePos.y, -5f);
                     Debug.Log($"✅ 柄の表示状態を更新しました: {!SwordController.isKomaMode}");
                 }
             }
@@ -173,5 +215,31 @@ public class SwordGenerator : MonoBehaviour
     {
         if (generatedSprite != null) Destroy(generatedSprite);
         if (generatedTexture != null) Destroy(generatedTexture);
+    }
+
+    // ▼【新規追加】残機モードの分身演出用：base64画像からSpriteだけを単体で生成する。
+    // GenerateSwordFromJsonとは独立した用途(装備していない残機の剣の見た目を分身に流用する)のため、
+    // どのGameObject/コライダーにも紐付けず、呼び出し側がSpriteRendererへ割り当てて使う
+    public static Sprite CreateSpriteFromBase64(string imageStr)
+    {
+        if (string.IsNullOrEmpty(imageStr)) return null;
+        string base64String = imageStr;
+        if (base64String.Contains(",")) base64String = base64String.Split(',')[1];
+        try
+        {
+            byte[] imageBytes = Convert.FromBase64String(base64String);
+            Texture2D tex = new Texture2D(4, 4);
+            if (!tex.LoadImage(imageBytes))
+            {
+                Destroy(tex);
+                return null;
+            }
+            return Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0f), 100f);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"❌ 分身用スプライトの読み込みに失敗: {e.Message}");
+            return null;
+        }
     }
 }

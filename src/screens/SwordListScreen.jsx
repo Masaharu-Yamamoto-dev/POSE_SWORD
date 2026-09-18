@@ -5,42 +5,46 @@ import { styles } from '../styles';
 // ==========================================
 // 📖 柄（ヒルト）のマスターデータ辞書
 // ==========================================
+// ▼【修正】キーはUnity側(SwordBattle.UltimateRoutine)がhiltTypeとして直接switchしている値
+// ("0"=デフォルト, "1"=巨大化一回転, "2"=分身突進, "3"=リーフシールド)と完全に一致させる。
+// 以前は"default"/"handle_1"/"handle_2"/"handle_3"という別の文字列を使っており、
+// Unity側のswitchが"1"/"2"/"3"しか見ていないため、柄を変更しても常にデフォルト技のままになっていた
 export const HILT_DATABASE = {
-  "default": {
+  "0": {
     name: "普通の柄",
-    imageSrc: "/sword_handle.png", 
+    imageSrc: "/sword_handle.png",
     hpBonus: 0,
     attackBonus: 0,
     weightBonus: 0,
     skillName: "大旋風斬",
-    skillDescription: "敵目掛けて回転突進する必中必殺の一撃"
+    skillDescription: "敵に目掛けて回転突進する、必中必殺の一撃!"
   },
-  "hilt_2": {
-    name: "かっちょいい柄",
-    imageSrc: "/hilts/fire_dragon.png",
+  "1": {
+    name: "武骨な柄",
+    imageSrc: "/sword_handle_1.png",
     hpBonus: 10,
     attackBonus: 25,
     weightBonus: 5,
     skillName: "でっかくなるやつ",
-    skillDescription: "巨大化して周囲を薙ぎ払う。複数KOして気持ちよくなろう"
+    skillDescription: "巨大化して周囲を薙ぎ払う。複数KOも狙えるロマン技!"
   },
-  "hilt_3": {
-    name: "分身する柄",
-    imageSrc: "/hilts/light_feather.png",
+  "2": {
+    name: "悪魔の柄",
+    imageSrc: "/sword_handle_2.png",
     hpBonus: 0,
     attackBonus: 5,
     weightBonus: -3,
     skillName: "分身飛ばすやつ",
-    skillDescription: "自分の分身を飛ばして攻撃。敵の間合いの外から撃って泣かせよう"
+    skillDescription: "自分の分身を飛ばして攻撃する、武士道皆無の珍技!"
   },
-  "hilt_4": {
-    name: "リフ氏柄",
-    imageSrc: "/hilts/light_feather.png",
+  "3": {
+    name: "大翼の柄",
+    imageSrc: "/sword_handle_3.png",
     hpBonus: 0,
     attackBonus: 5,
     weightBonus: -3,
     skillName: "分身シールド",
-    skillDescription: "自分の分身を周囲に展開する、攻防一体の妙手"
+    skillDescription: "自分の分身を周囲に展開する、攻防一体の妙技!"
   }
 };
 
@@ -61,7 +65,7 @@ export default function SwordListScreen({
   if (!selectedSword) return null;
 
   const isEquipped = mySwordData?.id === selectedSword.id;
-  const currentHilt = HILT_DATABASE[selectedSword.hiltType] || HILT_DATABASE["default"];
+  const currentHilt = HILT_DATABASE[selectedSword.hiltType] || HILT_DATABASE["0"];
 
   const totalHp = selectedSword.hp + currentHilt.hpBonus;
   const totalAttack = selectedSword.attack + currentHilt.attackBonus;
@@ -236,7 +240,7 @@ export default function SwordListScreen({
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', overflowY: 'auto', paddingRight: '10px' }}>
               {Object.entries(HILT_DATABASE).map(([hiltId, hiltData]) => {
-                const isCurrentlySet = (selectedSword.hiltType || "default") === hiltId;
+                const isCurrentlySet = (selectedSword.hiltType || "0") === hiltId;
                 return (
                   <div key={hiltId} style={{ display: 'flex', border: isCurrentlySet ? '3px solid #4CAF50' : '1px solid #ccc', borderRadius: '10px', padding: '15px', alignItems: 'center', gap: '20px', backgroundColor: isCurrentlySet ? '#f1f8e9' : '#fff', transition: '0.2s' }}>
                     

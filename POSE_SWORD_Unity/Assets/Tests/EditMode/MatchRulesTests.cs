@@ -167,6 +167,54 @@ public class MatchRulesTests
     }
 
     [Test]
+    public void LosingALifeDoesNotEliminateAndSwapsToNextSwordHp()
+    {
+        var match = new MatchRules(new[] { "a", "b" }, new int[][] { new[] { 100, 80, 50 }, new[] { 100 } });
+        match.ResolveStep(1, new[] { new Hit("b", "a", 100) });
+        Assert.IsFalse(match.Ended);
+        Assert.IsTrue(match.Get("a").Alive);
+        Assert.AreEqual(80, match.Get("a").Hp);
+        Assert.AreEqual(2, match.Get("a").LivesRemaining);
+        Assert.AreEqual(1, match.Get("a").CurrentLifeIndex);
+        Assert.AreEqual(1, match.Get("a").RespawnSeq);
+        Assert.AreEqual(1, match.Get("b").Kills);
+        Assert.IsNull(match.Get("a").EliminationReason);
+    }
+
+    [Test]
+    public void MatchEndsOnlyAfterAllLivesAreExhausted()
+    {
+        var match = new MatchRules(new[] { "a", "b" }, new int[][] { new[] { 100, 50 }, new[] { 100 } });
+        match.ResolveStep(1, new[] { new Hit("b", "a", 100) });
+        Assert.IsFalse(match.Ended);
+        Assert.AreEqual(50, match.Get("a").Hp);
+        match.ResolveStep(2, new[] { new Hit("b", "a", 50) });
+        Assert.IsTrue(match.Ended);
+        Assert.AreEqual("b", match.WinnerId);
+        Assert.AreEqual(0, match.Get("a").LivesRemaining);
+        Assert.AreEqual("KO", match.Get("a").EliminationReason);
+        Assert.AreEqual(2, match.Get("b").Kills);
+    }
+
+    [Test]
+    public void DisconnectionEliminatesEvenWithLivesRemaining()
+    {
+        var match = new MatchRules(new[] { "a", "b" }, new int[][] { new[] { 100, 100, 100 }, new[] { 100 } });
+        match.ResolveStep(1, new Hit[0], new[] { "a" });
+        Assert.IsTrue(match.Ended);
+        Assert.AreEqual("b", match.WinnerId);
+        Assert.AreEqual(0, match.Get("a").LivesRemaining);
+        Assert.AreEqual("DISCONNECTED", match.Get("a").EliminationReason);
+    }
+
+    [Test]
+    public void LivesRosterRejectsEmptyLifeList()
+    {
+        Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "a", "b" }, new int[][] { new int[0], new[] { 100 } }));
+        Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "a", "b" }, new int[][] { new[] { 100 }, null }));
+    }
+
+    [Test]
     public void EveryCollisionOrderingHasTheSameFourWayDraw()
     {
         var hits = new[] { new Hit("p0", "p1", 100), new Hit("p1", "p2", 100),

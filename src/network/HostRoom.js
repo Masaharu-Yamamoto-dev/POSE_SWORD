@@ -13,21 +13,66 @@ export function validateSword(sword) {
       typeof sword.imageStr !== 'string' || !sword.imageStr || sword.imageStr.length > MAX_IMAGE_LENGTH) {
     throw new Error('武器データが不正です。再錬成してください。');
   }
-  const { name, hp, attack, weight, imageStr } = sword;
-  return { name, hp, attack, weight, imageStr };
+
+  // 1. 柄（hiltType）の取得
+  // ▼【修正】Unity側(SwordBattle.UltimateRoutine)が直接switchしている値("0"=デフォルト,"1"〜"3")に
+  // 合わせる。以前は'default'という別の文字列を使っており、Unity側のswitchに一致せず柄を変更しても
+  // 常にデフォルト技のままになっていた
+  const hiltType = typeof sword.hiltType === 'string' ? sword.hiltType : '0';
+
+  // 2. 装備インデックス（equippedIndex）の取得
+  const equippedIndex = Number.isInteger(sword.equippedIndex) && sword.equippedIndex >= 0 && sword.equippedIndex <= 2 
+    ? sword.equippedIndex 
+    : 0;
+
+  // 3. 3本分の配列（swords）の構築
+  let swords = [];
+  if (Array.isArray(sword.swords)) {
+    swords = sword.swords.map(s => {
+      if (!s) return { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: '0', isEmpty: true };
+      return {
+        name: typeof s.name === 'string' ? s.name : 'empty',
+        hp: Number.isInteger(s.hp) ? s.hp : 1,
+        attack: Number.isInteger(s.attack) ? s.attack : 1,
+        weight: Number.isInteger(s.weight) ? s.weight : 1,
+        imageStr: typeof s.imageStr === 'string' ? s.imageStr : '',
+        hiltType: typeof s.hiltType === 'string' ? s.hiltType : '0',
+        isEmpty: Boolean(s.isEmpty)
+      };
+    });
+  } else {
+    swords = [
+      { name: sword.name, hp: sword.hp, attack: sword.attack, weight: sword.weight, imageStr: sword.imageStr, hiltType, isEmpty: false },
+      { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: '0', isEmpty: true },
+      { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: '0', isEmpty: true }
+    ];
+  }
+
+  // 4. すべての拡張データを含めて返す（ここで確実に返却する！）
+  return {
+    name: sword.name,
+    hp: sword.hp,
+    attack: sword.attack,
+    weight: sword.weight,
+    imageStr: sword.imageStr,
+    hiltType: hiltType,
+    swords: swords,
+    equippedIndex: equippedIndex
+  };
 }
 
 // The host owns this model. Transport identities never come from packet playerId fields.
 export class HostRoom {
-  constructor({ roomEpoch, hostSword, seatLimit = MAX_PLAYERS, autoStart = false, gameMode = '0' }) {
+  constructor({ roomEpoch, hostSword, seatLimit = MAX_PLAYERS, autoStart = false, gameMode = '0', livesMode = false }) {
     if (!roomEpoch || !Number.isInteger(seatLimit) || seatLimit < MIN_PLAYERS || seatLimit > MAX_PLAYERS ||
-        !['0', '1'].includes(gameMode)) {
+        !['0', '1'].includes(gameMode) || typeof livesMode !== 'boolean') {
       throw new Error('Invalid room configuration');
     }
     this.seatLimit = seatLimit;
     this.autoStart = autoStart;
     this.roomEpoch = roomEpoch;
     this.gameMode = gameMode;
+    this.livesMode = livesMode;
     this.phase = 'LOBBY';
     this.revision = 0;
     this.readyVersion = 0;
@@ -47,7 +92,7 @@ export class HostRoom {
   snapshot() {
     return structuredClone({ protocolVersion: PROTOCOL_VERSION, roomEpoch: this.roomEpoch,
       revision: this.revision, readyVersion: this.readyVersion, seatLimit: this.seatLimit, autoStart: this.autoStart, gameMode: this.gameMode,
-      phase: this.phase, matchId: this.matchId, players: this.players });
+      livesMode: this.livesMode, phase: this.phase, matchId: this.matchId, players: this.players });
   }
 
   reserve(connectionId) {
@@ -77,6 +122,13 @@ export class HostRoom {
   setGameMode(mode) {
     if (this.phase !== 'LOBBY' || !['0', '1'].includes(mode)) throw new Error('モードを変更できません。');
     this.gameMode = mode;
+    this.resetReady();
+  }
+
+  // 残機モード：剣/独楽どちらとも組み合わせられる独立したON/OFFトグル
+  setLivesMode(enabled) {
+    if (this.phase !== 'LOBBY' || typeof enabled !== 'boolean') throw new Error('モードを変更できません。');
+    this.livesMode = enabled;
     this.resetReady();
   }
 
