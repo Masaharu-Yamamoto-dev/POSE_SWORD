@@ -40,10 +40,10 @@ export const SOLO_BUFF = Object.freeze({
 });
 
 export function validateSword(sword) {
-  if (!sword || typeof sword.name !== 'string' || !sword.name.trim() || sword.name.length > 100 ||
-      !Number.isInteger(sword.hp) || sword.hp < 1 || sword.hp > 1000 ||
-      !Number.isInteger(sword.attack) || sword.attack < 1 || sword.attack > 100 ||
-      !Number.isInteger(sword.weight) || sword.weight < 1 || sword.weight > 100 ||
+  if (!sword || typeof sword.name !== 'string' || !sword.name.trim() ||
+      !Number.isInteger(sword.hp) || sword.hp < 1 ||
+      !Number.isInteger(sword.attack) || sword.attack < 1 ||
+      !Number.isInteger(sword.weight) || sword.weight < 1 ||
       typeof sword.imageStr !== 'string' || !sword.imageStr || sword.imageStr.length > MAX_IMAGE_LENGTH) {
     throw new Error('武器データが不正です。再錬成してください。');
   }
