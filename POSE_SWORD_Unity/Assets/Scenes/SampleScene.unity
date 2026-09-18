@@ -2393,6 +2393,7 @@ MonoBehaviour:
   attack: 10
   hiltType: 0
   playerNumber: 1
+  ultimateSp: 100
   hpBar: {fileID: 929529342}
   delayHpBar: {fileID: 1522675176}
   nameText: {fileID: 852906881}
@@ -2503,6 +2504,7 @@ MonoBehaviour:
   spinTorque: -500
   isLocalControlled: 1
   multiplayer: {fileID: 0}
+  suppressed: 0
   handleObject: {fileID: 473435595}
   handleSprite0: {fileID: -8933226394695032513, guid: 7479a214f2e48dc48bdc45bba473d222, type: 3}
   handleSprite1: {fileID: 5578160622178687459, guid: f09a771d01337462c997ed91b882b870, type: 3}
@@ -3645,6 +3647,7 @@ MonoBehaviour:
   spinTorque: -500
   isLocalControlled: 1
   multiplayer: {fileID: 0}
+  suppressed: 0
   handleObject: {fileID: 1711303185}
   handleSprite0: {fileID: -8933226394695032513, guid: 7479a214f2e48dc48bdc45bba473d222, type: 3}
   handleSprite1: {fileID: 5578160622178687459, guid: f09a771d01337462c997ed91b882b870, type: 3}
@@ -3671,6 +3674,7 @@ MonoBehaviour:
   attack: 10
   hiltType: 0
   playerNumber: 1
+  ultimateSp: 100
   hpBar: {fileID: 2089335308}
   delayHpBar: {fileID: 1722956000}
   nameText: {fileID: 1566579566}
@@ -4543,6 +4547,26 @@ MonoBehaviour:
   - {x: -2, y: 3, z: 0}
   - {x: 2, y: 3, z: 0}
   - {x: 6, y: 3, z: 0}
+  sword1v3Positions:
+  - {x: -9, y: 0, z: 0}
+  - {x: 5, y: 0, z: 0}
+  - {x: 8, y: 0, z: 0}
+  - {x: 11, y: 0, z: 0}
+  koma1v3Positions:
+  - {x: 0, y: 7, z: 0}
+  - {x: -5, y: -3, z: 0}
+  - {x: 0, y: -3, z: 0}
+  - {x: 5, y: -3, z: 0}
+  sword1v3SpawnPoints:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  koma1v3SpawnPoints:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
   sword3PSpawnPoints:
   - {fileID: 0}
   - {fileID: 0}
@@ -4636,6 +4660,14 @@ MonoBehaviour:
   gameMode: 0
   ownedSwordCount: 1
   livesMode: 1
+  soloMode: 1
+  bossSlot: 0
+  hpMultiplier: 3
+  attackMultiplier: 1.3
+  spGainMultiplier: 10
+  bossMaxSp: 200
+  suppressRadius: 8
+  suppressDuration: 10
 --- !u!114 &618030785
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9103,6 +9135,7 @@ GameObject:
   - component: {fileID: 1459843540}
   - component: {fileID: 1459843539}
   - component: {fileID: 1459843541}
+  - component: {fileID: 1459843542}
   m_Layer: 5
   m_Name: flyfloor
   m_TagString: Untagged
@@ -9119,7 +9152,7 @@ RectTransform:
   m_GameObject: {fileID: 1459843537}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: -7e-15}
-  m_LocalScale: {x: 5.3215475, y: 1.9195724, z: 2.5026}
+  m_LocalScale: {x: 5.3215475, y: 1.0350034, z: 2.5026}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 2099923495}
@@ -9245,6 +9278,18 @@ BoxCollider2D:
   m_AutoTiling: 0
   m_Size: {x: 1, y: 1}
   m_EdgeRadius: 0
+--- !u!114 &1459843542
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1459843537}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 54813df003c45440ca3ceaf5229393f8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1479049294
 GameObject:
   m_ObjectHideFlags: 0
