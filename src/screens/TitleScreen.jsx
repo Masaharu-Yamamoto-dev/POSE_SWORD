@@ -18,13 +18,16 @@ export default function TitleScreen({
   openRandomMatch,
   startRandomMatch,
   matchMode,
-  setMatchMode
+  setMatchMode,
+  onOpenHowToPlay
 }) {
   // 🌟 追加：アニメーションクラスの判定
   const animClass = direction === "back" ? "page-enter-back" : "page-enter-forward";
 
   return (
     <div className={animClass} style={styles.container}>
+      <button className="howto-open-btn" onClick={onOpenHowToPlay}>📖 遊び方</button>
+
       {mySwordData?.imageSrc && (
         <img src={mySwordData.imageSrc} alt="Background Sword" style={{ ...styles.bgImageCenter, transform: 'translate(-50%, -50%)' }} />
       )}
