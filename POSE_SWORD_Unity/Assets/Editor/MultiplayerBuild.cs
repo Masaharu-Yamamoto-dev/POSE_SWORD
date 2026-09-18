@@ -8,7 +8,7 @@ public static class MultiplayerBuild
 {
     // 出力先のバージョン。ここを上げてビルドし、React 側 BattleArena.jsx の4つのURLを合わせる。
     // 上書きせず別フォルダに出すので、問題があれば参照を戻すだけで前のビルドに復帰できる。
-    const string Version = "ver3.12";
+    const string Version = "ver3.13";
 
     [MenuItem("POSE SWORD/Build four-player WebGL")]
     public static void BuildWebGL()
