@@ -122,6 +122,10 @@ public static bool matchEnded = false;
     // 何度も連続ヒットするのを防ぎたいだけなので、「すでに当てた相手の集合」で管理し、
     // 別の相手には引き続き当たるようにする
     private readonly HashSet<SwordBattle> giantSpinHitTargets = new HashSet<SwordBattle>();
+    // ▼【調査用】必殺技ボタンがでっぱなしになる不具合調査用の、一度きりログ発火フラグ
+    private bool loggedUpdateStall = false;
+    private bool loggedButtonGuardStall = false;
+    private bool wasLocalControlledForButton = false;
 
     // ▼【新規追加】オレ達シールド(旧リーフシールド)が展開されている間の本体無敵管理。
     // シールドのCollider2DはisTrigger(=当たっても攻撃側の移動を止めない)なので、これが無いと
@@ -552,6 +556,16 @@ public static bool matchEnded = false;
             }
         }
 
+        // ▼【調査用ログ】必殺技ボタンがでっぱなし/使えなくなる不具合の調査用。
+        // このreturnを抜けると、この剣のUpdateSpecialAttackButton()等が二度と呼ばれなくなる
+        // (=共有ボタンが今の状態のまま固まる)ため、自分の操作キャラでこれが起きた瞬間を記録しておく
+        if ((!isRoundStarted || isDead || matchEnded) && controller != null && controller.isLocalControlled && !loggedUpdateStall)
+        {
+            loggedUpdateStall = true;
+            Debug.Log($"⏸️ [調査用] Update()が早期returnするようになりました(以後この剣のUpdateSpecialAttackButton等は呼ばれません): " +
+                $"sword={gameObject.name}, isRoundStarted={isRoundStarted}, isDead={isDead}, matchEnded={matchEnded}, " +
+                $"currentSp={currentSp}, buttonActive={(specialAttackButton != null ? specialAttackButton.gameObject.activeSelf.ToString() : "no-button")}");
+        }
         if (!isRoundStarted || isDead || matchEnded) return;
 
         if (MultiplayerOwner == null || MultiplayerOwner.IsHost) currentSp += passiveSpFill * Time.deltaTime;
@@ -604,12 +618,32 @@ public static bool matchEnded = false;
     // 自分が操作しているキャラ以外は絶対にこのボタンへ触れないようにする（他人の生死やSPで消えてしまうのを防ぐ）
     void UpdateSpecialAttackButton()
     {
+        // ▼【調査用ログ】自分の操作キャラのはずなのに、途中からisLocalControlled/controller/ボタン参照が
+        // 欠けてここでスキップされるようになった場合を捕捉する(一度だけログを出す)
+        if ((specialAttackButton == null || controller == null || !controller.isLocalControlled) &&
+            wasLocalControlledForButton && !loggedButtonGuardStall)
+        {
+            loggedButtonGuardStall = true;
+            Debug.Log($"⏸️ [調査用] UpdateSpecialAttackButton()が以後スキップされるようになりました: " +
+                $"sword={gameObject.name}, specialAttackButtonNull={specialAttackButton == null}, " +
+                $"controllerNull={controller == null}, isLocalControlled={(controller != null ? controller.isLocalControlled.ToString() : "n/a")}");
+        }
         if (specialAttackButton == null || controller == null || !controller.isLocalControlled) return;
+        wasLocalControlledForButton = true;
         // 制圧を受けている間はどの入力も通らないので、押せるように見せない
         bool suppressed = MultiplayerOwner != null && MultiplayerOwner.IsSuppressed(PlayerId);
         bool shouldShow = !isDashing && !suppressed && currentSp >= UltimateThreshold;
         if (specialAttackButton.gameObject.activeSelf != shouldShow)
+        {
+            // ▼【調査用ログ】ボタンの表示/非表示が切り替わるたびに、判断材料を全部出しておく。
+            // 「でっぱなし」で困っている時は、最後にこのログが出た時の値と、それ以降ログが
+            // 一切出ていない(=このメソッド自体が呼ばれなくなった)かどうかを見れば原因を絞り込める
+            Debug.Log($"🔘 [調査用] 必殺技ボタンの表示切り替え: sword={gameObject.name}, " +
+                $"{specialAttackButton.gameObject.activeSelf}→{shouldShow}, currentSp={currentSp}, " +
+                $"UltimateThreshold={UltimateThreshold}, isDashing={isDashing}, suppressed={suppressed}, " +
+                $"isKomaMode={SwordController.isKomaMode}, isRoundStarted={isRoundStarted}");
             specialAttackButton.gameObject.SetActive(shouldShow);
+        }
         // ▼【新規追加】1vs3：ボタンは1つのまま、SPが満タンになったら掌握へ切り替わる。
         // どちらが出るのか分かるよう、表示も切り替える
         ApplySuppressButtonSkin(SuppressReady);

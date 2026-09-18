@@ -2,8 +2,11 @@ import { HostRoom, MAX_PLAYERS, PROTOCOL_VERSION, SOLO_BUFF, validateSword } fro
 
 const ACTIVE = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 // 自動開始の部屋のタイミング。席が埋まれば少し待って開始し、埋まらなければ人数を切り上げる。
-export const AUTO_START_DELAY = 3000;
+export const AUTO_START_DELAY = 6000;
 export const FILL_TIMEOUT = 60000;
+// 通信が遅いと剣画像(ROSTER)の受信完了がAUTO_START_DELAYより遅れ、猶予が
+// 実質ゼロのまま開始してしまうことがあった。受信完了からも別途この分だけ待つ。
+export const ASSETS_READY_DELAY = 3000;
 // 剣画像は ROSTER でしか配らない。STATE は同じ形のまま imageStr だけを落とす。
 // 残機モードの swords[] は3本それぞれが画像を持つので、そこまで潜って削る。
 // ここを浅く削ると STATE 1通が数MBになり、心拍が詰まって接続が切れる。
@@ -62,6 +65,7 @@ export class RoomSession {
     this.autoStartAt = null;
     this.gatheredAt = null;
     this.fullAt = null;
+    this.readyAt = null;
   }
 
   view() {
@@ -320,12 +324,16 @@ export class RoomSession {
     if (full) this.fullAt ??= now; else this.fullAt = null;
     const deadline = full ? this.fullAt + AUTO_START_DELAY : this.gatheredAt + FILL_TIMEOUT;
     if (deadline !== this.autoStartAt) { this.autoStartAt = deadline; this.publish(); }
-    // 武器データが全員に届くまでは開始しない（view().canStart が受信完了を見ている）
-    if (now >= deadline && this.view().canStart) { this.cancelAutoStart(); this.prepare(); }
+    // 武器データ(画像込み)が全員に届くまでは開始しない（view().canStart が受信完了を見ている）。
+    // 通信が遅いと受信完了がdeadlineより後になり得るので、その場合は受信完了からも
+    // ASSETS_READY_DELAY分だけ別途待つ（そうしないと猶予が実質ゼロになってしまう）
+    const ready = this.view().canStart;
+    if (ready) this.readyAt ??= now; else this.readyAt = null;
+    if (now >= deadline && ready && now >= this.readyAt + ASSETS_READY_DELAY) { this.cancelAutoStart(); this.prepare(); }
   }
 
   cancelAutoStart() {
-    this.gatheredAt = null; this.fullAt = null;
+    this.gatheredAt = null; this.fullAt = null; this.readyAt = null;
     if (this.autoStartAt === null) return;
     this.autoStartAt = null;
     if (this.room.phase === 'LOBBY') this.publish();

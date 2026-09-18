@@ -4937,19 +4937,19 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   autoStartOnPlay: 1
   debugRosterJsonFile: {fileID: 0}
-  playerCount: 4
+  playerCount: 2
   gameMode: 0
   ownedSwordCount: 1
   livesMode: 1
   isHost: 1
-  soloMode: 1
+  soloMode: 0
   bossSlot: 0
   hpMultiplier: 3
   attackMultiplier: 2
   spGainMultiplier: 1.5
   scaleMultiplier: 1.5
   bossMaxSp: 200
-  suppressRadius: 12
+  suppressRadius: 8
   suppressDuration: 4
   judgmentPullSeconds: 1
   judgmentPullForce: 60
@@ -4974,15 +4974,15 @@ MonoBehaviour:
   bossPanelSize: {x: 760, y: 132}
   bossPanelTop: 16
   bossPanelColor: {r: 0.16, g: 0.06, b: 0.24, a: 0.82}
-  trioPanelSize: {x: 400, y: 96}
+  trioPanelSize: {x: 300, y: 96}
   trioPanelGap: 18
   trioPanelBottom: 16
   trioPanelColor: {r: 0.07, g: 0.09, b: 0.14, a: 0.82}
   bossNameFontSize: 30
   bossHpFontSize: 20
   bossSpFontSize: 18
-  trioNameFontSize: 24
-  trioValueFontSize: 22
+  trioNameFontSize: 20
+  trioValueFontSize: 16
 --- !u!1 &619394800
 GameObject:
   m_ObjectHideFlags: 0

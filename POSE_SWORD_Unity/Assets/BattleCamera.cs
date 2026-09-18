@@ -15,6 +15,7 @@ public class BattleCamera : MonoBehaviour
 
     [Header("高さの制限")]
     public float baseY = 3f;
+    
 
     [Header("カウントダウン演出設定")]
     [Tooltip("数値が大きいほど、クローズアップ時にカメラが上に移動します（剣が画面のやや下に映るようになります）")]
