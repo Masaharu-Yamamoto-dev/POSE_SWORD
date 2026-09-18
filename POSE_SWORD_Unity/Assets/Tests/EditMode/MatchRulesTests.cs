@@ -276,6 +276,24 @@ public class MatchRulesTests
         Assert.IsNull(BattlePolicies.UltimateAction(false, 100, true, true, false, false, float.NaN));
     }
 
+    [Test]
+    public void OnlyTheBossCanSuppressAndOnlyOnAFullGauge()
+    {
+        // ゲージ満タン(200)でのみ発動。通常必殺技の100では撃てない
+        Assert.IsTrue(BattlePolicies.CanSuppress(200, 200, true, true, false, false, true));
+        Assert.IsFalse(BattlePolicies.CanSuppress(199, 200, true, true, false, false, true));
+        // トリオ側は持っていない能力
+        Assert.IsFalse(BattlePolicies.CanSuppress(200, 200, true, true, false, false, false));
+        // 開始前・撃破後・突進中・制圧を受けている間は撃てない
+        Assert.IsFalse(BattlePolicies.CanSuppress(200, 200, false, true, false, false, true));
+        Assert.IsFalse(BattlePolicies.CanSuppress(200, 200, true, false, false, false, true));
+        Assert.IsFalse(BattlePolicies.CanSuppress(200, 200, true, true, true, false, true));
+        Assert.IsFalse(BattlePolicies.CanSuppress(200, 200, true, true, false, true, true));
+        // 壊れた値は発動させない
+        Assert.IsFalse(BattlePolicies.CanSuppress(float.NaN, 200, true, true, false, false, true));
+        Assert.IsFalse(BattlePolicies.CanSuppress(200, 0, true, true, false, false, true));
+    }
+
     private static TargetCandidate[] SuppressField() => new[] {
         new TargetCandidate("boss", 0, 0, 0, true, 0),
         new TargetCandidate("t1", 1, 3, 4, true, 1),     // ボスから距離5

@@ -61,6 +61,9 @@ using UnityEngine;
     // ゲスト側はlifeIndexが増えたことを検知して、そのプレイヤーの持ち替え演出(剣の再生成・復活)を再現する
     public int lifeIndex;
     public int livesRemaining;
+    // ▼【新規追加】1vs3：ボスの制圧を受けている残り秒数。0なら通常。ゲストはこの値から
+    // 操作不能の表示を出し、自分の必殺技ボタンを隠す
+    public float suppressedRemaining;
 }
 // ▼【新規追加】分身突進（hiltType:"2"）・リーフシールド（hiltType:"3"）など、
 // 本体以外に複数体表示する"付随体"1体分の見た目同期用データ

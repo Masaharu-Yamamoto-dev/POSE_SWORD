@@ -85,6 +85,21 @@ public class MultiplayerManager : MonoBehaviour
     public const int SoloModePlayers = 4;
     private bool soloModeActive;
     public bool SoloModeActive => soloModeActive;
+    // 制圧が解ける時刻(Time.unscaledTime)。Hostは発動時に書き込み、ゲストはSYNCの残り秒数から
+    // 同じ形に復元するので、IsSuppressed() は両方で同じように使える。
+    private readonly Dictionary<string, float> suppressUntil = new Dictionary<string, float>();
+    // 制圧ボタン（ボス本人の画面にだけ実行時生成する）と、制圧中の頭上表示。
+    private GameObject suppressButtonRoot;
+    private readonly Dictionary<string, TextMeshPro> suppressLabels = new Dictionary<string, TextMeshPro>();
+    // 制圧の対象領域を示す輪。狙いを付けるための下見(ボス本人のみ)と、撃った瞬間の明滅(全員)に使う。
+    private SpriteRenderer suppressRange;
+    private Sprite suppressRangeSprite;
+    private string bossPlayerId;
+    private float suppressFlashUntil;
+    private Vector3 suppressFlashCentre;
+    // ゲストは「誰かが制圧され始めた」瞬間を検知して明滅を出す。専用の同期項目を足さずに済ませるため。
+    private readonly HashSet<string> wasSuppressed = new HashSet<string>();
+    const float SuppressFlashSeconds = 0.7f;
     private Dictionary<string, List<SwordSlotData>> ownedSwordsByPlayer;
     private Dictionary<string, Vector3> spawnPositionByPlayer;
     private readonly Dictionary<string, int> lifeIndexByPlayer = new Dictionary<string, int>();
@@ -175,6 +190,8 @@ public class MultiplayerManager : MonoBehaviour
             // MatchRulesへ渡すHPの並びだけは残機モードの時だけ複数本ぶん、そうでなければ従来通り1本分のみ
             livesModeActive = config.livesMode;
             soloModeActive = config.soloMode;
+            bossPlayerId = soloModeActive
+                ? config.players.First(p => p.team == BossTeam).playerId : null;
             ownedSwordsByPlayer = config.players.ToDictionary(p => p.playerId, p => BuildOwnedSwords(p.swordData));
             lifeIndexByPlayer.Clear();
             foreach (var p in config.players) lifeIndexByPlayer[p.playerId] = 0;
@@ -256,6 +273,190 @@ public class MultiplayerManager : MonoBehaviour
         return copy;
     }
 
+    // 制圧の対象領域。半径いっぱいの輪を描いて「どこまで届くか」を見せる。
+    // ・下見（ボス本人だけ）：ゲージが満タンで撃てる間、自分の周りに薄く出し続ける
+    // ・明滅（全員）：撃った瞬間に濃く出す。判定は発動時の一度きりなので、輪はその場に置いたまま動かさない
+    void UpdateSuppressRange()
+    {
+        if (!soloModeActive || config.soloBuff == null) { HideSuppressRange(); return; }
+        bool flashing = Time.unscaledTime < suppressFlashUntil;
+        SwordBattle boss = bossPlayerId != null && swords.ContainsKey(bossPlayerId) ? swords[bossPlayerId] : null;
+        bool aiming = !flashing && boss != null && IsPlaying && boss.IsAlive &&
+            boss.PlayerId == config.localPlayerId && boss.currentSp >= boss.maxSp && !IsSuppressed(boss.PlayerId);
+        if (!flashing && !aiming) { HideSuppressRange(); return; }
+
+        if (suppressRange == null) BuildSuppressRange();
+        if (suppressRange == null) return;
+        Vector3 centre = flashing ? suppressFlashCentre : boss.currentCenterPosition;
+        centre.z = 0.5f;   // 剣より奥に置いて、輪が剣を隠さないようにする
+        suppressRange.transform.position = centre;
+        // スプライトは直径1として作ってあるので、半径の2倍がそのまま拡大率になる
+        suppressRange.transform.localScale = Vector3.one * (config.soloBuff.suppressRadius * 2f);
+        float alpha = flashing
+            ? Mathf.Lerp(0.15f, 0.85f, (suppressFlashUntil - Time.unscaledTime) / SuppressFlashSeconds)
+            : 0.28f;
+        suppressRange.color = new Color(.78f, .45f, 1f, alpha);
+        if (!suppressRange.gameObject.activeSelf) suppressRange.gameObject.SetActive(true);
+    }
+
+    void HideSuppressRange()
+    {
+        if (suppressRange != null && suppressRange.gameObject.activeSelf) suppressRange.gameObject.SetActive(false);
+    }
+
+    // 輪の画像をその場で作る。プロジェクトの素材には手を入れず、StopCurrent() で破棄する。
+    void BuildSuppressRange()
+    {
+        const int size = 128;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        texture.wrapMode = TextureWrapMode.Clamp;
+        var pixels = new Color32[size * size];
+        float half = size / 2f;
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            // 中心からの距離を0〜1に直し、縁だけを濃く、内側はうっすら塗る
+            float distance = Mathf.Sqrt((x + .5f - half) * (x + .5f - half) + (y + .5f - half) * (y + .5f - half)) / half;
+            byte alpha = distance > 1f ? (byte)0 : distance > 0.93f ? (byte)255 : (byte)40;
+            pixels[y * size + x] = new Color32(255, 255, 255, alpha);
+        }
+        texture.SetPixels32(pixels);
+        texture.Apply();
+        // pixelsPerUnit を size にすると、拡大率1のときちょうど直径1ユニットになる
+        suppressRangeSprite = Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(.5f, .5f), size);
+
+        var obj = new GameObject("SuppressRange");
+        obj.transform.SetParent(arena != null ? arena.transform : null, false);
+        suppressRange = obj.AddComponent<SpriteRenderer>();
+        suppressRange.sprite = suppressRangeSprite;
+        obj.SetActive(false);
+    }
+
+    // 制圧されている相手の頭上に残り秒数を出す。ホストもゲストも suppressUntil を持っているので
+    // 同じ表示になる。表示は剣ごとに1つ作って使い回し、StopCurrent() でまとめて消える。
+    void UpdateSuppressLabels()
+    {
+        if (!soloModeActive) return;
+        foreach (var pair in swords)
+        {
+            float remaining = SuppressRemaining(pair.Key);
+            TextMeshPro label;
+            if (!suppressLabels.TryGetValue(pair.Key, out label) || label == null)
+            {
+                if (remaining <= 0f) continue;
+                label = new GameObject("SuppressLabel").AddComponent<TextMeshPro>();
+                label.transform.SetParent(pair.Value.transform, false);
+                label.transform.localPosition = new Vector3(0, 3.2f, -0.2f);
+                label.fontSize = 5; label.alignment = TextAlignmentOptions.Center;
+                label.color = new Color(.78f, .45f, 1f);
+                if (pair.Value.nameText != null) label.font = pair.Value.nameText.font;
+                suppressLabels[pair.Key] = label;
+            }
+            bool show = remaining > 0f && pair.Value.IsAlive;
+            if (show) label.text = "操作不能 " + Mathf.CeilToInt(remaining);
+            if (label.gameObject.activeSelf != show) label.gameObject.SetActive(show);
+        }
+    }
+
+    // 制圧ボタンはシーンに置かず、ここで作ってボス本人にだけ渡す。既存の必殺技ボタンの少し上に、
+    // 同じCanvas・同じ大きさで並べる。後片付けは StopCurrent() の suppressButtonRoot 破棄でまとめて行う。
+    void BuildSuppressButton(SwordBattle battle)
+    {
+        if (hudCanvas == null || suppressButtonRoot != null) return;
+        var template = hudCanvas.transform.Find("SpecialAttackButtonPL1") as RectTransform;
+        if (template == null) return;
+
+        suppressButtonRoot = new GameObject("SuppressButtonBoss", typeof(RectTransform), typeof(Image), typeof(Button));
+        var rect = suppressButtonRoot.GetComponent<RectTransform>();
+        rect.SetParent(template.parent, false);
+        rect.anchorMin = template.anchorMin; rect.anchorMax = template.anchorMax; rect.pivot = template.pivot;
+        rect.sizeDelta = template.sizeDelta;
+        // 既存のボタンに重ならないよう、自分の高さぶん上へ逃がす
+        rect.anchoredPosition = template.anchoredPosition + new Vector2(0, template.sizeDelta.y + 12f);
+        suppressButtonRoot.GetComponent<Image>().color = new Color(.42f, .11f, .60f, .92f);
+
+        var label = new GameObject("Label", typeof(RectTransform)).AddComponent<TextMeshProUGUI>();
+        label.rectTransform.SetParent(rect, false);
+        label.rectTransform.anchorMin = Vector2.zero; label.rectTransform.anchorMax = Vector2.one;
+        label.rectTransform.offsetMin = Vector2.zero; label.rectTransform.offsetMax = Vector2.zero;
+        label.text = "制圧";
+        label.alignment = TextAlignmentOptions.Center;
+        label.enableAutoSizing = true; label.fontSizeMin = 12; label.fontSizeMax = 40;
+        label.color = Color.white;
+        if (battle.nameText != null) label.font = battle.nameText.font;
+
+        var button = suppressButtonRoot.GetComponent<Button>();
+        button.onClick.AddListener(battle.TrySuppress);
+        battle.suppressButton = button;
+        suppressButtonRoot.SetActive(false);
+    }
+
+    // ターゲット選定と制圧の範囲判定で共通に使う名簿。
+    // 陣営を渡すのは1vs3の時だけ。渡さなければ TargetCandidate は「1人が1チーム」として
+    // スロット番号を陣営に使うので、従来どおり自分以外の全員が候補になる。
+    TargetCandidate[] TargetCandidates()
+    {
+        return config.players.Select(p => soloModeActive
+            ? new TargetCandidate(p.playerId, p.slotIndex, swords[p.playerId].transform.position.x,
+                swords[p.playerId].transform.position.y, swords[p.playerId].IsAlive, p.team)
+            : new TargetCandidate(p.playerId, p.slotIndex, swords[p.playerId].transform.position.x,
+                swords[p.playerId].transform.position.y, swords[p.playerId].IsAlive)).ToArray();
+    }
+
+    // 制圧を受けている間はどの入力も通らない。ゲストも同じ判定を使えるよう、
+    // 解ける時刻を両側で持っている。
+    public bool IsSuppressed(string playerId)
+    {
+        float until;
+        return playerId != null && suppressUntil.TryGetValue(playerId, out until) && Time.unscaledTime < until;
+    }
+
+    public float SuppressRemaining(string playerId)
+    {
+        float until;
+        if (playerId == null || !suppressUntil.TryGetValue(playerId, out until)) return 0f;
+        return Mathf.Max(0f, until - Time.unscaledTime);
+    }
+
+    // ボスが制圧を撃った。範囲判定は発動の瞬間に一度だけ行い、以降どちらが動いても対象は変わらない。
+    public void ApplySuppress(string bossId)
+    {
+        if (!IsHost || !IsPlaying || !soloModeActive || !swords.ContainsKey(bossId)) return;
+        var boss = swords[bossId];
+        bool isBoss = config.players.Any(p => p.playerId == bossId && p.team == BossTeam);
+        if (!BattlePolicies.CanSuppress(boss.currentSp, boss.maxSp, IsPlaying, boss.IsAlive,
+            boss.isDashing, IsSuppressed(bossId), isBoss)) return;
+
+        var centre = boss.currentCenterPosition;
+        var caught = BattlePolicies.SuppressTargets(bossId, centre.x, centre.y,
+            config.soloBuff.suppressRadius, TargetCandidates());
+        boss.ConsumeSuppressSp();
+        // カットインは技番号(dashType)の同期に乗るので、ここでHost側が立てれば全員の画面に出る
+        boss.PlaySuppressCutin();
+        float until = Time.unscaledTime + config.soloBuff.suppressDuration;
+        foreach (var id in caught) suppressUntil[id] = until;
+        // 輪は撃った場所に置いたままにする。判定が発動時の一度きりであることを見た目でも示すため。
+        StartSuppressFlash(centre);
+        RefreshSuppression();
+    }
+
+    void StartSuppressFlash(Vector3 centre)
+    {
+        suppressFlashCentre = centre;
+        suppressFlashUntil = Time.unscaledTime + SuppressFlashSeconds;
+    }
+
+    // 独楽の自動追尾を止めるためのフラグを配る。剣モードでは入力が通らないだけで足りるが、
+    // 独楽は操作なしでも敵へ向かい続けるので、追尾力も切らないと拘束にならない。
+    void RefreshSuppression()
+    {
+        foreach (var pair in swords)
+        {
+            var controller = pair.Value.GetComponent<SwordController>();
+            if (controller != null) controller.suppressed = IsSuppressed(pair.Key);
+        }
+    }
+
     // HP以外のボス強化。SPゲージは最大200になるが、通常必殺技のラインは全員共通の100のまま
     // (ultimateSpは触らない)。溜まる速さだけを上げて、2段階目の制圧まで届くようにする。
     void ApplyBossBuff(SwordBattle battle)
@@ -327,7 +528,13 @@ public class MultiplayerManager : MonoBehaviour
         if (!generator.LastGenerationSucceeded) throw new InvalidOperationException("Could not generate player sword.");
         // 残りの強化は生成後に掛ける。攻撃力はSwordGeneratorが1〜100を10〜90へ変換した後の
         // 実数値に掛けたいので、変換前の素の値をいじってはいけない。
-        if (IsBoss(player)) ApplyBossBuff(battle);
+        // 制圧ボタンは「自分がボスの時」にだけ作る。ボスの剣自体は全員の画面に作られるので、
+        // ここを絞らないと押せないボタンが他のプレイヤーの画面にも生まれてしまう。
+        if (IsBoss(player))
+        {
+            ApplyBossBuff(battle);
+            if (controller.isLocalControlled) BuildSuppressButton(battle);
+        }
         controller.ApplyPhysicsMode();
         swords.Add(player.playerId, battle); bodies.Add(player.playerId, rb);
         sequences[player.playerId] = 0; inputTimes[player.playerId] = -100;
@@ -514,6 +721,8 @@ public class MultiplayerManager : MonoBehaviour
     {
         if (config == null) return;
         UpdateCountdownUi();
+        UpdateSuppressLabels();
+        UpdateSuppressRange();
         if (IsHost && phase == "COUNTDOWN" && Time.unscaledTime >= countdownEnd)
         {
             phase = "PLAYING"; SwordBattle.isRoundStarted = true;
@@ -579,6 +788,8 @@ public class MultiplayerManager : MonoBehaviour
         // 引き続きIsPlayingになってからのみ行う（QueueHit側もIsPlayingガード済みなので二重に安全）
         if (!IsHost || !IsSimulating) return;
         UpdateTargets(false);
+        // 制圧の残り時間は実時間で切れるので、毎ステップ配り直して独楽の追尾抑止を最新にする
+        RefreshSuppression();
         // ▼【修正】オレ達シールド展開中も本体は無敵にする(SwordBattle.TakeDamage側の無敵判定と同じ条件)。
         // これが無いと、Client側は正しいHPを受け取れても、Host自身のOnCollisionEnter2D→QueueHitでは
         // シールドの反射に加えて本体にも通常ダメージが通ってしまっていた
@@ -625,6 +836,10 @@ public class MultiplayerManager : MonoBehaviour
         // 味方同士はダメージにしない。弾き合いはOnCollisionEnter2D側で既に済んでいるので、
         // ここで捨てるのは数値・撃破数・ダメージ表示だけ。最終的な裁定はMatchRules側でも同じ条件で行う。
         if (rules.Get(attacker.PlayerId).Team == rules.Get(target.PlayerId).Team) return;
+        // ブレード掌握を受けている剣は攻撃力ゼロ。入力を止めるだけでは、慣性で突っ込んだ衝突や
+        // 発動済みの分身・シールドからダメージが通ってしまうので、与える側の経路をここで断つ。
+        // 与えるダメージが消えるだけで、受ける側としては通常どおり成立する。
+        if (IsSuppressed(attacker.PlayerId)) return;
         // Two dashes clashing in koma mode break each other's guard.
         bool blocked = invulnerable.ContainsKey(target.PlayerId) && invulnerable[target.PlayerId];
         bool clash = SwordController.isKomaMode && invulnerable.ContainsKey(attacker.PlayerId) && invulnerable[attacker.PlayerId];
@@ -707,6 +922,12 @@ public class MultiplayerManager : MonoBehaviour
         if (!IsPlaying || !swords[config.localPlayerId].IsAlive) return;
         Emit("INPUT", new MultiplayerCommand { matchId = config.matchId, action = "ULTIMATE" });
     }
+    // ▼【新規追加】1vs3：ボスの制圧。撃てるかどうかの判定はHost側で行うので、ここでは送るだけ
+    public void SubmitLocalSuppress()
+    {
+        if (!IsPlaying || !soloModeActive || !swords[config.localPlayerId].IsAlive) return;
+        Emit("INPUT", new MultiplayerCommand { matchId = config.matchId, action = "SUPPRESS" });
+    }
     [UnityEngine.Scripting.Preserve]
     public void ReceiveMultiplayerInput(string json)
     {
@@ -717,6 +938,11 @@ public class MultiplayerManager : MonoBehaviour
         {
             sequences[msg.playerId] = msg.seq; inputTimes[msg.playerId] = Time.unscaledTime;
             swords[msg.playerId].ExecuteMultiplayerAction(msg.direction == "RIGHT");
+        }
+        else if (msg.action == "SUPPRESS")
+        {
+            sequences[msg.playerId] = msg.seq; inputTimes[msg.playerId] = Time.unscaledTime;
+            swords[msg.playerId].ExecuteMultiplayerSuppress();
         }
         else if (msg.action == "ULTIMATE")
         {
@@ -733,13 +959,7 @@ public class MultiplayerManager : MonoBehaviour
 
     void UpdateTargets(bool force)
     {
-        // 陣営を渡すのは1vs3の時だけ。渡さなければ TargetCandidate は「1人が1チーム」として
-        // スロット番号を陣営に使うので、従来どおり自分以外の全員が候補になる。
-        var candidates = config.players.Select(p => soloModeActive
-            ? new TargetCandidate(p.playerId, p.slotIndex, swords[p.playerId].transform.position.x,
-                swords[p.playerId].transform.position.y, swords[p.playerId].IsAlive, p.team)
-            : new TargetCandidate(p.playerId, p.slotIndex, swords[p.playerId].transform.position.x,
-                swords[p.playerId].transform.position.y, swords[p.playerId].IsAlive)).ToArray();
+        var candidates = TargetCandidates();
         bool interval = Time.unscaledTime >= nextTargetUpdate;
         foreach (var p in swords)
         {
@@ -768,7 +988,8 @@ public class MultiplayerManager : MonoBehaviour
                     clashSeq = clashSeq.TryGetValue(p.playerId, out var cseq) ? cseq : 0,
                     critSeq = critSeq.TryGetValue(p.playerId, out var crseq) ? crseq : 0,
                     lifeIndex = rules.Get(p.playerId).CurrentLifeIndex,
-                    livesRemaining = rules.Get(p.playerId).LivesRemaining };
+                    livesRemaining = rules.Get(p.playerId).LivesRemaining,
+                    suppressedRemaining = SuppressRemaining(p.playerId) };
             }).ToArray(),
             // ▼【新規追加】分身突進・リーフシールドなどの付随体の位置をクライアントへ配信する
             clones = activeClones.Where(kv => kv.Value.obj != null).Select(kv => new MultiplayerCloneState {
@@ -809,6 +1030,16 @@ public class MultiplayerManager : MonoBehaviour
             sword.ApplyMultiplayerHealth(data.hp, wasCrit);
             if (clashed) sword.PlayClashEffect();
             sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale);
+            // 残り秒数を「解ける時刻」に直して持つ。こうするとHostと同じ IsSuppressed() が使える。
+            if (data.suppressedRemaining > 0f)
+            {
+                suppressUntil[data.playerId] = Time.unscaledTime + data.suppressedRemaining;
+                // 0秒から立ち上がった瞬間＝ボスが今撃った、とみなして輪を明滅させる。
+                // 専用の同期項目を足さずに済ませるため、ボスの現在位置を中心として使う。
+                if (wasSuppressed.Add(data.playerId) && bossPlayerId != null && swords.ContainsKey(bossPlayerId))
+                    StartSuppressFlash(swords[bossPlayerId].currentCenterPosition);
+            }
+            else { suppressUntil.Remove(data.playerId); wasSuppressed.Remove(data.playerId); }
             targets[data.playerId] = data.targetPlayerId;
         }
         SyncClones(sync.clones);
@@ -972,6 +1203,17 @@ public class MultiplayerManager : MonoBehaviour
         clashSeq.Clear(); criticalHitThisTick.Clear(); critSeq.Clear();
         shakeDuration = 0f; hasLockedCameraPosition = false;
         livesModeActive = false; soloModeActive = false;
+        suppressUntil.Clear(); wasSuppressed.Clear();
+        bossPlayerId = null; suppressFlashUntil = 0f;
+        if (suppressRange != null) { Destroy(suppressRange.gameObject); suppressRange = null; }
+        if (suppressRangeSprite != null)
+        {
+            if (suppressRangeSprite.texture != null) Destroy(suppressRangeSprite.texture);
+            Destroy(suppressRangeSprite); suppressRangeSprite = null;
+        }
+        foreach (var label in suppressLabels.Values) if (label != null) Destroy(label.gameObject);
+        suppressLabels.Clear();
+        if (suppressButtonRoot != null) { suppressButtonRoot.SetActive(false); Destroy(suppressButtonRoot); suppressButtonRoot = null; }
         ownedSwordsByPlayer = null; spawnPositionByPlayer = null; lifeIndexByPlayer.Clear();
         foreach (var cache in lifeSpriteCache.Values)
             foreach (var sprite in cache)

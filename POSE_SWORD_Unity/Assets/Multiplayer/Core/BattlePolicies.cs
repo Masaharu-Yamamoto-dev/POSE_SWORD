@@ -48,6 +48,16 @@ namespace PoseSword.Multiplayer
             return sp >= ultimateSp ? "SwordDash" : null;
         }
 
+        // ボスの制圧を撃てるか。ゲージ満タン(=maxSp)が条件で、通常必殺技の100とは別枠。
+        // 制圧を受けている側は撃ち返せない。
+        public static bool CanSuppress(float sp, float maxSp, bool started, bool alive, bool dashing,
+            bool stunned, bool isBoss)
+        {
+            if (!isBoss || CannotAct(sp, started, alive, dashing, stunned)) return false;
+            if (float.IsNaN(maxSp) || float.IsInfinity(maxSp) || maxSp <= 0) return false;
+            return sp >= maxSp;
+        }
+
         // ボスの制圧：発動した瞬間に半径内にいた敵だけを返す。判定は一度きりで、
         // 以降どちらが動いても対象は変わらない。距離は二乗のまま比べて平方根を避ける。
         public static string[] SuppressTargets(string self, float x, float y, float radius,

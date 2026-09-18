@@ -19,6 +19,9 @@ public class SwordController : MonoBehaviour
     [Header("操作権限")]
     public bool isLocalControlled = true;
     [HideInInspector] public MultiplayerManager multiplayer;
+    // ▼【新規追加】1vs3：ボスの制圧を受けている間はtrue。Host側が毎FixedUpdateに更新する。
+    // 独楽モードは操作なしでも敵へ自動追尾するため、追尾力もここで止めないと拘束にならない
+    [HideInInspector] public bool suppressed;
 
     [Header("モード設定")]
     public static bool isKomaMode = false; // 全体で共有するモードフラグ
@@ -116,7 +119,8 @@ public class SwordController : MonoBehaviour
             // ==========================================
             // 2. 敵の方向へ向かう（GO! の合図が出た時だけ追尾を開始する！）
             // ==========================================
-            if (SwordBattle.isRoundStarted && enemyTarget != null)
+            // 制圧中は追尾しない。回転力(上の処理)には触れないので、その場で回り続ける見た目になる
+            if (SwordBattle.isRoundStarted && enemyTarget != null && !suppressed)
             {
                 Vector2 dirToEnemy = (enemyTarget.position - transform.position).normalized;
                 swordRigidbody.AddForce(dirToEnemy * komaHomingForce * swordRigidbody.mass * Time.fixedDeltaTime, ForceMode2D.Force);
