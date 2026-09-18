@@ -47,6 +47,11 @@ public class SwordController : MonoBehaviour
     [Header("【テスト用】チェックを入れると独楽モードで開始")]
     public bool testKomaMode = false;
 
+    // ▼【調査用】生成直後だけでなく、試合が始まってしばらく経ってからも柄の状態を記録して、
+    // 「生成時は正常だったのに後から非表示になった」ケースを追えるようにする
+    private float handleDiagnosticTimer = 2f;
+    private bool handleDiagnosticLogged = false;
+
     void Start()
     {
         // Unityエディタで実行している時だけ、インスペクタのチェックを反映する
@@ -68,6 +73,23 @@ public class SwordController : MonoBehaviour
         // ▼【N人対応】毎フレーム、生存中で最も近い相手を自動でターゲットにする
         // (本物のマルチプレイ中はMultiplayerManager.UpdateTargets()が専用ロジックでenemyTargetを決めるため、ここでは触らない)
         if (multiplayer == null) RefreshEnemyTarget();
+
+        // ▼【調査用ログ】生成から一定時間後(試合が動き出した頃)の柄の状態をもう一度記録する。
+        // 生成直後のログと比較して、後から何かが非表示にしていないかを確認するため
+        if (!handleDiagnosticLogged)
+        {
+            handleDiagnosticTimer -= Time.deltaTime;
+            if (handleDiagnosticTimer <= 0f)
+            {
+                handleDiagnosticLogged = true;
+                bool? hostFlag = multiplayer != null ? multiplayer.IsHost : (bool?)null;
+                Debug.Log($"⏱️ [遅延チェック] 柄の状態(生成の数秒後): sword={gameObject.name}, IsHost={hostFlag}, " +
+                    $"isLocalControlled={isLocalControlled}, isKomaMode={isKomaMode}, " +
+                    $"handleObject={(handleObject != null ? handleObject.name + "(id=" + handleObject.GetInstanceID() + ")" : "null")}, " +
+                    $"activeSelf={(handleObject != null ? handleObject.activeSelf.ToString() : "n/a")}, " +
+                    $"activeInHierarchy={(handleObject != null ? handleObject.activeInHierarchy.ToString() : "n/a")}");
+            }
+        }
     }
 
     // ▼【N人対応】NetworkManagerが持つ全プレイヤーの中から、自分以外・生存中・最も近い相手を探す
@@ -153,6 +175,17 @@ public class SwordController : MonoBehaviour
     public void NetworkJump(bool jumpRight)
     {
         JumpAndSpin(jumpRight);
+    }
+
+    // ▼【新規追加】柄(Handle-A)はInstantiate複製時、参照先が自分の階層外にあると複製先へ
+    // 付け替わらない(Unityの仕様)ため、Editorの配線ミスや複製のタイミング次第で「他人の柄」を
+    // 参照したままになることがあった(実機でクライアント側の柄だけ表示されない不具合の原因)。
+    // 呼び出し側(複製直後やモード切り替え前)でこれを呼ぶと、自分の子から名前で柄を探し直して
+    // 必ず自分自身の柄を参照するように補正できる。柄の見た目(スプライト)切り替えには一切関与しない。
+    public void ResolveOwnHandle()
+    {
+        Transform handle = transform.Find("Handle-A");
+        if (handle != null) handleObject = handle.gameObject;
     }
 
     public void ApplyPhysicsMode()

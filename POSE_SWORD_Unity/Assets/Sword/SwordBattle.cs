@@ -96,6 +96,7 @@ public static bool matchEnded = false;
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
     public float giantSpinScale = 6f; // 巨大化一回転（hiltType:"1"）の拡大率
     public float giantSpinDamageMultiplier = 8f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
+    public float giantSpinRotationSpeed = 1080f; // 巨大化一回転の回転速度（度/秒）。小さくするとゆっくり回るようになる（一回転にかかる時間もこれに応じて伸びる）
     public int cloneCount = 3; // 分身突進（hiltType:"2"）の分身数
     public float cloneSpawnMinRadius = 2f; // 分身の出現位置：自分からの最小距離
     public float cloneSpawnMaxRadius = 4f; // 分身の出現位置：自分からの最大距離
@@ -116,7 +117,11 @@ public static bool matchEnded = false;
     [HideInInspector] public bool isDashing = false;
     [HideInInspector] public bool isDashShooting = false;
     private float dashDamageBonus = 1.0f;
-    private bool hasHitDuringGiantSpin = false;
+    // ▼【修正】単一のboolだと「最初に当てた1人」以降、他の誰にも一切ヒットしなくなってしまい、
+    // 3〜4人戦で2人目・3人目に必殺技が当たらない不具合の原因になっていた。回転中に同じ相手へ
+    // 何度も連続ヒットするのを防ぎたいだけなので、「すでに当てた相手の集合」で管理し、
+    // 別の相手には引き続き当たるようにする
+    private readonly HashSet<SwordBattle> giantSpinHitTargets = new HashSet<SwordBattle>();
 
     // ▼【新規追加】オレ達シールド(旧リーフシールド)が展開されている間の本体無敵管理。
     // シールドのCollider2DはisTrigger(=当たっても攻撃側の移動を止めない)なので、これが無いと
@@ -124,6 +129,14 @@ public static bool matchEnded = false;
     // 展開中の枚(GameObject)の数をここで数え、1枚でも残っていれば本体への通常ダメージを無効化する
     [HideInInspector] public int activeLeafShieldCount = 0;
     public bool HasActiveLeafShield => activeLeafShieldCount > 0;
+
+    // ▼【新規追加】残機モードでリスポーン(次の剣に持ち替え)した直後の無敵時間。
+    // 無敵中はスプライトを点滅させて、見た目でも無敵中だと分かるようにする
+    [Header("残機モード：リスポーン時の無敵")]
+    public float respawnInvincibleDuration = 3f; // リスポーン直後、何秒間ダメージを無効化するか
+    public float respawnBlinkInterval = 0.12f;   // 点滅の切り替え間隔（秒）
+    private float respawnInvincibleTimer = 0f;
+    public bool IsRespawnInvincible => respawnInvincibleTimer > 0f;
 
     // ▼【新規追加】現在のダッシュ技の種類 (0:なし, 1:小ダッシュ, 2:竜巻, 3:大回転, 4:巨大化一回転, 5:分身突進)
     [HideInInspector] public int currentDashType = 0;
@@ -139,7 +152,22 @@ public static bool matchEnded = false;
     // ▼【新規追加】カメラが追従するための、画像サイズに左右されない本物の中心座標
     [HideInInspector] public Vector3 currentCenterPosition;
 
-    public static bool isRoundStarted = false;
+    // ▼【修正】false→trueに切り替わった瞬間のTime.unscaledTimeを自動記録するプロパティにした。
+    // Host/Clientそれぞれが「自分がisRoundStartedをtrueだと認識した瞬間」を記録するため、
+    // Time.time(アプリ起動からの経過時間、端末ごとにバラバラ)より遥かに揃った「試合開始からの経過時間」の
+    // 基準点として使える(動く足場などの演出をHost/ゲスト間で位相を揃えるために利用する)
+    private static bool _isRoundStarted = false;
+    public static bool isRoundStarted
+    {
+        get => _isRoundStarted;
+        set
+        {
+            if (value && !_isRoundStarted) roundStartUnscaledTime = Time.unscaledTime;
+            _isRoundStarted = value;
+        }
+    }
+    // ▼ isRoundStartedが最後にtrueになった時刻(Time.unscaledTime基準)。まだ一度もtrueになっていなければ-1
+    public static float roundStartUnscaledTime = -1f;
 
     // ▼【N人対応】生存者数の管理。試合開始時にSceneControllerからプレイヤー人数がセットされ、
     // 誰かが撃破されるたびにReportElimination()で減算。残り1人になった時だけ試合終了とする。
@@ -306,6 +334,9 @@ public static bool matchEnded = false;
         // 本来の見た目より小さく(または大きく)なってしまっていた。ConfigureMultiplayerで記録した
         // このテンプレート本来のスケールへ戻す
         transform.localScale = baselineScale;
+        // ▼【新規追加】リスポーン直後は一定時間ダメージを受けない(無敵)。Update()側で点滅させつつ
+        // カウントダウンし、MultiplayerManager.QueueHit側のinvulnerable判定もこれを見て無効化する
+        respawnInvincibleTimer = respawnInvincibleDuration;
     }
 
     public void ApplyMultiplayerHealth(int health, bool wasCrit = false)
@@ -355,8 +386,18 @@ public static bool matchEnded = false;
         int previousDashType = currentDashType;
         currentSp = Mathf.Clamp(sp, 0, maxSp); isDashing = dashing; currentDashType = dashType;
         if (dashType != previousDashType) TryPlayUltimateCutin(dashType);
-        if (spriteRenderer != null) spriteRenderer.color = ColorForDashType(dashType);
-        if (scale > 0f) transform.localScale = Vector3.one * scale;
+        if (spriteRenderer != null)
+        {
+            Color tint = ColorForDashType(dashType);
+            // ▼ リスポーン無敵中の点滅(Update()側でアルファだけ操作)を上書きしないよう、
+            // 現在のアルファ値は維持したまま色(RGB)だけ差し替える
+            tint.a = spriteRenderer.color.a;
+            spriteRenderer.color = tint;
+        }
+        // ▼ Host側は localScale.x だけをSYNCで送っている。Vector3.one * scale で戻すとZ軸まで
+        // 上書きしてしまい、柄(Handle-A)のワールドZがカメラのニアクリップ面まで来て描画されなくなる。
+        // Z軸は ConfigureMultiplayer で記録した baselineScale のまま維持し、X/Yだけ同期する
+        if (scale > 0f) transform.localScale = new Vector3(scale, scale, baselineScale.z);
     }
 
     // 技の種別に対応する刀身の色。制圧の減光でも「本来の色」を引くのに使う。
@@ -419,6 +460,10 @@ public static bool matchEnded = false;
 
     // ▼【新規追加】dashType(2〜6)に対応する必殺技のカットインを、スローモーションなしで再生する
     // （Host自身の画面は各Routine内で直接PlayCutinを呼んでいるので、ここはClient専用の経路）
+    // ▼【修正】ここは常にfalseのままでよい。実際の「止まる」演出はHost側のPhysics2D.Simulate停止
+    // (各Routine側でuseSlowMotion=trueを渡している)によってSYNCデータ自体が止まることで実現しており、
+    // Client側の位置補間はTime.unscaledDeltaTimeで動いているためローカルでtimeScaleを変えても
+    // 見た目上は止まらない(むしろ他の演出のタイミングだけズレる)。ここではカットインUI/SE専用に留める
     void TryPlayUltimateCutin(int dashType)
     {
         if (CutinManager.Instance == null || spriteRenderer == null) return;
@@ -429,6 +474,7 @@ public static bool matchEnded = false;
             case 2: skillName = "竜巻猛突!!"; themeColor = new Color(1f, 0.8f, 0.2f); break;
             case 3: skillName = "大回転斬!!"; themeColor = new Color(0.5f, 1f, 1f); break;
             case 4: skillName = "巨大回転斬!!"; themeColor = new Color(1f, 0.3f, 0.3f); break;
+            
             case 5: skillName = "オレ達アタック!!"; themeColor = new Color(0.3f, 0.6f, 1f); break;
             case 6: skillName = "オレ達シールド!!"; themeColor = new Color(0.4f, 0.95f, 0.5f); break;
             // ▼【新規追加】1vs3：制圧。Host側は SuppressCutinRoutine で直接鳴らし、
@@ -473,6 +519,26 @@ public static bool matchEnded = false;
         Debug.Log($"クリック検出 / Round={isRoundStarted}, Dead={isDead}, Ended={matchEnded}, Local={(controller != null && controller.isLocalControlled)}");
     }
 
+        // ▼【新規追加】リスポーン直後の無敵時間をカウントダウンしつつ、スプライトを点滅させる。
+        // isDead/matchEnded中でも(死亡演出等の色と衝突しないよう)無敵タイマー自体は進めておく
+        if (respawnInvincibleTimer > 0f)
+        {
+            respawnInvincibleTimer -= Time.deltaTime;
+            if (spriteRenderer != null)
+            {
+                if (respawnInvincibleTimer <= 0f)
+                {
+                    respawnInvincibleTimer = 0f;
+                    var c = spriteRenderer.color; c.a = 1f; spriteRenderer.color = c;
+                }
+                else
+                {
+                    bool visible = Mathf.FloorToInt(respawnInvincibleTimer / respawnBlinkInterval) % 2 == 0;
+                    var c = spriteRenderer.color; c.a = visible ? 1f : 0.25f; spriteRenderer.color = c;
+                }
+            }
+        }
+
         if (!isRoundStarted || isDead || matchEnded) return;
 
         if (MultiplayerOwner == null || MultiplayerOwner.IsHost) currentSp += passiveSpFill * Time.deltaTime;
@@ -496,7 +562,18 @@ public static bool matchEnded = false;
         if (controller != null && controller.isLocalControlled)
         {
             // ▼【変更】画面の「右半分」か「左半分」かを判定してジャンプ！（必殺技はここでは発動しない）
-            if (Input.GetMouseButtonDown(0))
+            // ▼【修正】必殺技ボタンをクリックした時にもGetMouseButtonDown(0)は真になってしまい、
+            // 「画面タップ」としての通常アクション(独楽モードなら小ダッシュ)も同時に暴発していた。
+            // これが必殺技ボタンを押した直後にSPを食い合ってしまい、SPが70超あっても直前の小ダッシュで
+            // 0まで消費された状態でULTIMATE入力が処理される→しきい値未満で不発、という不具合の原因だった。
+            // ▼【修正】最初はEventSystem.IsPointerOverGameObject()でUI全般を除外していたが、これだと
+            // HPバー・名前表示・チュートリアルの帯など、必殺技ボタンと無関係なUI要素の上をタップしただけでも
+            // 通常アクションが握りつぶされ、「画面を押してもジャンプできないことがある」不具合になっていた。
+            // 必殺技ボタン自身の範囲と重なっている時だけ除外するよう、判定を絞り込む
+            bool overSpecialButton = specialAttackButton != null && specialAttackButton.gameObject.activeInHierarchy &&
+                RectTransformUtility.RectangleContainsScreenPoint(
+                    specialAttackButton.GetComponent<RectTransform>(), Input.mousePosition, null);
+            if (Input.GetMouseButtonDown(0) && !overSpecialButton)
             {
                 // クリックしたX座標が、画面幅の半分より大きければ「右（true）」、小さければ「左（false）」
                 bool clickedRight = Input.mousePosition.x > (Screen.width / 2f);
@@ -932,6 +1009,11 @@ public static bool matchEnded = false;
             Debug.Log("🍃 オレ達シールド展開中につき本体無敵！攻撃はシールドの反射に任せる！");
             return false;
         }
+        if (IsRespawnInvincible)
+        {
+            Debug.Log("✨ リスポーン直後につき無敵！攻撃を弾いた！");
+            return false;
+        }
 
         float damagePercentage = ((float)damage / maxHp) * 100f; 
         currentSp = Mathf.Clamp(currentSp + (damagePercentage * damageSpMultiplier), 0f, maxSp);
@@ -1290,7 +1372,10 @@ public static bool matchEnded = false;
 
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f), PlayerMainColor, MultiplayerOwner == null);
+            // ▼【修正】マルチプレイでも必殺技カットイン中は全員の動きを止める演出にする(useSlowMotion常にtrue)。
+            // Host権威のPhysics2D.Simulateが実質停止するため、この間だけは意図的に両プレイヤーとも止まる
+            // (Client側は停止したSYNCデータをそのまま補間するので、こちらでも自然に止まって見える)
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f), PlayerMainColor, true);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
@@ -1336,13 +1421,13 @@ public static bool matchEnded = false;
         isDashing = true;
         currentDashType = 4;
         currentSp = 0f;
-        hasHitDuringGiantSpin = false;
+        giantSpinHitTargets.Clear();
 
         // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f), PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f), PlayerMainColor, true);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.3f, 0.3f);
@@ -1382,7 +1467,7 @@ public static bool matchEnded = false;
             }
         }
 
-        float angularSpeed = 1080f * spinDir; // 度/秒
+        float angularSpeed = giantSpinRotationSpeed * spinDir; // 度/秒
         float duration = 360f / Mathf.Abs(angularSpeed); // ちょうど一回転分の時間
 
         if (controlsPhysics)
@@ -1422,7 +1507,7 @@ public static bool matchEnded = false;
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達アタック!!", cloneColor, PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達アタック!!", cloneColor, PlayerMainColor, true);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = cloneColor;
@@ -1554,7 +1639,7 @@ public static bool matchEnded = false;
         // 他の剣モード必殺技と同様にローカル/テストモード時だけ再生する
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達シールド!!", shieldColor, PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達シールド!!", shieldColor, PlayerMainColor, true);
         }
 
         if (spriteRenderer != null) spriteRenderer.color = shieldColor;
@@ -1661,7 +1746,7 @@ public static bool matchEnded = false;
     void OnTriggerEnter2D(Collider2D other)
     {
         if (isDead || matchEnded) return;
-        if (currentDashType != 4 || hasHitDuringGiantSpin) return;
+        if (currentDashType != 4) return;
 
         // ▼【重要】トリガー判定はKinematic同士でも発火してしまう。
         // 他の必殺技と同様、実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行い、
@@ -1670,8 +1755,10 @@ public static bool matchEnded = false;
 
         SwordBattle target = other.GetComponentInParent<SwordBattle>();
         if (target == null || target == this) return;
-
-        hasHitDuringGiantSpin = true;
+        // ▼【修正】同じ相手への連続ヒット(回転中に何度もすれ違う)だけを防ぐ。Add()はこの相手が
+        // 初めてなら追加してtrueを返すので、既にヒット済みの相手ならここでreturnして二重ヒットを防止しつつ、
+        // 別の相手(初めて触れた相手)には引き続き当たるようにする
+        if (!giantSpinHitTargets.Add(target)) return;
 
         bool isWeakPoint = other.CompareTag("Handle");
         int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier);
@@ -1699,7 +1786,7 @@ public static bool matchEnded = false;
 
         if (CutinManager.Instance != null && spriteRenderer != null)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f), PlayerMainColor, MultiplayerOwner == null);
+            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f), PlayerMainColor, true);
         }
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）

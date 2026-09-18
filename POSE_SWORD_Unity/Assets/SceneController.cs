@@ -40,6 +40,13 @@ public class SceneController : MonoBehaviour
     public Vector3 komaLeftPosition = new Vector3(-4f, 3f, 0f); // 例: 剣モードより少し上で、少し近い
     public Vector3 komaRightPosition = new Vector3(4f, 3f, 0f);
 
+    [Header("開始位置（2人用・任意）")]
+    [Tooltip("対応する要素([0]=1人目/左, [1]=2人目/右)にTransformを割り当てると、そのシーン上の位置を" +
+        "上のVector3の数値より優先して使う。PlayerSword1/PlayerSword2自身をここにドラッグしてSceneビュー上で" +
+        "動かせば、その位置がそのままスポーン地点になる。要素が未設定(null)の場合は従来通り上の数値を使う。")]
+    public Transform[] sword2PSpawnPoints = new Transform[2];
+    public Transform[] koma2PSpawnPoints = new Transform[2];
+
     [Header("開始位置（剣モード・3〜4人用）")]
     public Vector3[] sword3PPositions = new Vector3[] {
         new Vector3(-6f, 0f, 0f), new Vector3(0f, 0f, 0f), new Vector3(6f, 0f, 0f)
@@ -106,6 +113,20 @@ public class SceneController : MonoBehaviour
     private readonly List<GameObject> dynamicSwords = new List<GameObject>();
     private readonly List<GameObject> dynamicHudPieces = new List<GameObject>();
 
+    // ▼【新規追加】StartBattle()(autoTestOnStartのローカルデバッグ含む)が3・4人目用に動的生成した
+    // 剣・HPバー(名前表示のクローンも含む)を破棄する。StartBattle()自身の冒頭だけでなく、
+    // MultiplayerManager.InitializeMultiplayer側からも呼べるように public 化した。
+    // 以前はMultiplayerManager側からはこれが呼ばれておらず、autoTestOnStartでp3HudTemplate/
+    // p4HudTemplateが未設定の場合にWireClonedHudが複製した名前表示等のUIが、本番のマルチプレイ
+    // 対戦が始まっても破棄されずに残ってしまっていた(消したはずの要素が復活して見える不具合の原因)
+    public void ClearDynamicObjects()
+    {
+        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
+        dynamicSwords.Clear();
+        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
+        dynamicHudPieces.Clear();
+    }
+
     void Start()
     {
         if (autoTestOnStart && debugBattleJsonFile != null && !string.IsNullOrEmpty(debugBattleJsonFile.text))
@@ -140,10 +161,7 @@ public class SceneController : MonoBehaviour
         Vector3[] positions = GetSpawnPositions(playerCount);
 
         // ▼ 前回のStartBattle()で3・4人目用に動的生成したもの(剣・HPバー)を破棄してから作り直す
-        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
-        dynamicSwords.Clear();
-        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
-        dynamicHudPieces.Clear();
+        ClearDynamicObjects();
 
         if (NetworkManager.Instance != null)
         {
@@ -234,6 +252,13 @@ public class SceneController : MonoBehaviour
 
         // ▼ P1(複製元)の値をそのまま引き継いでしまわないよう、スロット順のプレイヤー番号を明示的に上書きする
         if (battle != null) battle.playerNumber = slotIndex + 1;
+
+        // ▼ 柄(Handle-A)はテンプレート側のSwordController.handleObjectが誤って別の剣の柄を参照して
+        // いることがある(MultiplayerManager.CreateSwordと同じ問題)。参照先がテンプレートの階層の外に
+        // あると、Unityは複製(Instantiate)時にこの参照を複製先へ付け替えないため、そのままコピーすると
+        // 3・4人目の剣が自分の柄ではなく他プレイヤーの柄を操作してしまう。ResolveOwnHandle()で複製した
+        // 自分自身の子から探し直してから使う
+        if (controller != null) controller.ResolveOwnHandle();
 
         var generator = clone.GetComponent<SwordGenerator>();
         if (generator == null) generator = clone.AddComponent<SwordGenerator>();
@@ -336,10 +361,8 @@ public class SceneController : MonoBehaviour
             case 4:
                 return ResolveSpawnPositions(koma ? koma4PPositions : sword4PPositions, koma ? koma4PSpawnPoints : sword4PSpawnPoints);
             default:
-                return new Vector3[] {
-                    koma ? komaLeftPosition : leftPosition,
-                    koma ? komaRightPosition : rightPosition
-                };
+                Vector3[] fallback2P = { koma ? komaLeftPosition : leftPosition, koma ? komaRightPosition : rightPosition };
+                return ResolveSpawnPositions(fallback2P, koma ? koma2PSpawnPoints : sword2PSpawnPoints);
         }
     }
 

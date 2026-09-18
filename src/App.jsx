@@ -27,7 +27,21 @@ const PEER_ICE_CONFIG = {
 const ACTIVE_PHASES = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 const ROOM_STEPS = ['LOBBY', 'PLAYING', 'RESULT'];
 // 武器の中身が変わったかどうかだけを見る。IDが同じでも撮り直しを検出する。
-const swordKey = sword => sword && `${sword.id}:${sword.name}:${sword.hp}:${sword.attack}:${sword.weight}:${sword.imageStr?.length ?? 0}`;
+// ▼【修正】hiltType(柄の種類)が入っていなかったため、ステータスや画像を変えずに柄だけ
+// 変更すると同じキーになってしまい、room.updateSword()による同期がスキップされていた
+// (画面上は選んだ柄に見えるのに、実際に対戦相手へは古い柄のままのデータが送られ続けていた)
+const swordKey = sword => sword && `${sword.id}:${sword.name}:${sword.hp}:${sword.attack}:${sword.weight}:${sword.imageStr?.length ?? 0}:${sword.hiltType ?? '0'}`;
+// ▼【新規追加】残機モード用のswords[](装備中以外も含む3本分)まで含めた同期判定キー。
+// swordKeyは装備中の1本しか見ていないため、2本目・3本目(=装備していない剣)の柄だけを変更しても
+// 変化なしと判定されてroom.updateSword()が呼ばれず、Unity側には古い(登録時点の)柄のままの
+// データが送られ続けてしまっていた。createSyncSwordData()が返す実際の送信内容全体をキーにする
+const syncKey = sync => {
+  if (!sync) return null;
+  const slots = (sync.swords || [])
+    .map(s => `${s.name}:${s.hp}:${s.attack}:${s.weight}:${s.imageStr?.length ?? 0}:${s.hiltType ?? '0'}:${s.isEmpty ? 1 : 0}`)
+    .join('|');
+  return `${swordKey(sync)}:${sync.equippedIndex}:${slots}`;
+};
 
 export default function PoseSwordWeb() {
   const [step, setStep] = useState("TITLE");
@@ -116,12 +130,25 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
   }, []);
   useEffect(() => { resetToTitleRef.current = resetToTitle; }, [resetToTitle]);
 
+  // ▼【修正】結果が届いた瞬間に結果画面へ切り替えると、Unity側の決着演出(MatchEndCinematic、
+  // 2.5秒のスローモーション)がBattleArenaごと隠れてしまい、プレイヤーからは見えないまま終わっていた。
+  // 結果を受け取ってから2.5秒(Unity側の演出時間と同じ)だけ結果画面への切り替えを遅らせ、
+  // その間はPLAYING画面のまま(=Unity画面を表示したまま)にして演出を見せる
+  const resultMatchId = view?.result?.matchId ?? null;
+  const [resultDelayDone, setResultDelayDone] = useState(false);
+  useEffect(() => {
+    if (!resultMatchId) { setResultDelayDone(false); return; }
+    setResultDelayDone(false);
+    const timer = setTimeout(() => setResultDelayDone(true), 2500);
+    return () => clearTimeout(timer);
+  }, [resultMatchId]);
+
   // 部屋の局面がそのまま画面になる。錬成中（武器庫・撮影）だけは自分の画面を保つ。
   const roomScreen = (() => {
     if (!view?.room || view.closed) return null;
     const me = view.room.players.find(p => p.playerId === view.localPlayerId);
     if (ACTIVE_PHASES.includes(view.room.phase)) return "PLAYING";
-    if (view.result && me && !me.inLobby) return "RESULT";
+    if (view.result && me && !me.inLobby) return resultDelayDone ? "RESULT" : "PLAYING";
     return "LOBBY";
   })();
   // 相手を探している間は、自分の部屋ができていても探索画面を出し続ける。
@@ -132,13 +159,17 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
     : step;
 
   // 武器を持ち替えたら部屋にも反映する（本人の準備は解除される）
+  // ▼【修正】依存配列がmySwordData(装備中の1本)だけだったため、2本目・3本目(装備していない剣)の
+  // 柄だけを武器庫で変更しても、装備中の剣自体は変化していないのでこのeffectが再実行されず、
+  // room.updateSword()が呼ばれないまま(=古いままの柄が送られ続ける)ことがあった。swordListの変化も
+  // 見るようにし、比較キーもswords[]全体を含むsyncKeyに変更した
   useEffect(() => {
     if (!view?.room || !mySwordData) return;
-    const key = swordKey(mySwordData);
+    const key = syncKey(currentSyncSword);
     if (sentSwordRef.current === key) return;
     sentSwordRef.current = key;
     room.updateSword(currentSyncSword);
-  }, [mySwordData, view?.room, room]);
+  }, [mySwordData, swordList, view?.room, room]);
 
   useEffect(() => {
     let stream = null;
@@ -258,7 +289,7 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
     if (!mySwordData) return;
     setMatchSize(size);
     setSystemMessage(""); setTitleMode("DEFAULT");
-    sentSwordRef.current = swordKey(mySwordData);
+    sentSwordRef.current = syncKey(currentSyncSword);
     randomMatch.start(size, matchMode);
   };
 
@@ -270,7 +301,7 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
   // 同じ部屋を畳んで、新しい相手を探しに行く
   const findNewOpponents = () => {
     room.leave();
-    sentSwordRef.current = swordKey(mySwordData);
+    sentSwordRef.current = syncKey(currentSyncSword);
     randomMatch.start(matchSize, matchMode);
   };
 
@@ -285,7 +316,7 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
   const handleCreateRoom = () => {
     if (!mySwordData) return;
     setSystemMessage(""); setTitleMode("DEFAULT");
-    sentSwordRef.current = swordKey(mySwordData);
+    sentSwordRef.current = syncKey(currentSyncSword);
     room.createRoom(currentSyncSword);
   };
 
@@ -305,7 +336,7 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
     if (targetId.length < 6) return setSystemMessage("6桁で入力してください。");
     if (!mySwordData) return setSystemMessage("先に剣を錬成してください。");
     setSystemMessage("接続中...");
-    sentSwordRef.current = swordKey(mySwordData);
+    sentSwordRef.current = syncKey(currentSyncSword);
     room.joinRoom(targetId, currentSyncSword);
   };
 

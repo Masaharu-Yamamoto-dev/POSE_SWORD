@@ -41,6 +41,14 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
         "OFFのままでもownedSwordCountを2以上にすれば分身の見た目バリエーションだけは確認できる")]
     public bool livesMode = false;
 
+    [Header("【調査用】ゲスト(対戦相手)視点の再現")]
+    [Tooltip("OFFにすると、このEditorインスタンス自身をisHost=falseで初期化する。実際のオンライン対戦の" +
+        "ゲスト側(IsHost=False・剣のRigidbody2DがKinematic)と同じコード経路をEditor上でそのまま再現できるため、" +
+        "Sceneビュー/Inspectorで柄(Handle-A)の実際の状態を直接確認できる。" +
+        "(注: isHost=falseだとHost側からのSYNCが無いため剣は生成後その場で静止したままになる。" +
+        "動きの確認ではなく、生成直後の柄の見た目・Inspector上の値を確認する用途向け)")]
+    public bool isHost = true;
+
     [Header("1vs3（ボス vs 三人組）")]
     [Tooltip("ONにすると1人(ボス)対3人の非対称戦になる。人数は自動的に4人へ、残機モードは自動的にOFFになる" +
         "(本番のロビーでも両立しない組み合わせのため)。3人側は同士討ちしない")]
@@ -159,7 +167,7 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
         {
             matchId = "editor-local-test-" + Time.realtimeSinceStartup,
             localPlayerId = "p0",
-            isHost = true,
+            isHost = isHost,
             gameMode = gameMode,
             livesMode = lives,
             soloMode = soloMode,
