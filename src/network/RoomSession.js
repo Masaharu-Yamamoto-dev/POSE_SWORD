@@ -1,4 +1,4 @@
-import { HostRoom, MAX_PLAYERS, PROTOCOL_VERSION, validateSword } from './HostRoom.js';
+import { HostRoom, MAX_PLAYERS, PROTOCOL_VERSION, SOLO_BUFF, validateSword } from './HostRoom.js';
 
 const ACTIVE = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 // 自動開始の部屋のタイミング。席が埋まれば少し待って開始し、埋まらなければ人数を切り上げる。
@@ -13,15 +13,20 @@ const withoutImages = room => ({ ...room, players: room.players.map(p => {
 // Transport adapter for PeerJS DataConnection. Time is injected so barriers,
 // disconnects and retransmission can be tested without browser timers.
 export class RoomSession {
-  constructor({ isHost = false, roomEpoch = '', seatLimit, autoStart = false, gameMode = '0', livesMode = false, sword,
-    now = () => performance.now(), onChange = () => {}, onUnity = () => {} }) {
+  constructor({ isHost = false, roomEpoch = '', seatLimit, autoStart = false, gameMode = '0', livesMode = false,
+    soloMode = false, sword,
+    now = () => performance.now(), random = Math.random, onChange = () => {}, onUnity = () => {} }) {
     this.isHost = isHost;
     this.epoch = roomEpoch;
     this.sword = validateSword(sword);
     this.now = now;
+    // 時計と同じく乱数も注入する。開始時のスポーン順とボスの抽選をテストから固定できるようにするため。
+    this.random = random;
     this.onChange = onChange;
     this.onUnity = onUnity;
-    this.host = isHost ? new HostRoom({ roomEpoch, hostSword: sword, seatLimit, autoStart, gameMode, livesMode }) : null;
+    this.host = isHost
+      ? new HostRoom({ roomEpoch, hostSword: sword, seatLimit, autoStart, gameMode, livesMode, soloMode })
+      : null;
     this.localPlayerId = isHost ? 'p0' : null;
     this.links = new Map();
     this.room = this.host?.snapshot() ?? null;
@@ -196,6 +201,7 @@ export class RoomSession {
   }
   setGameMode(mode) { if (!this.closed && this.isHost) { this.host.setGameMode(mode); this.publish(); } }
   setLivesMode(enabled) { if (!this.closed && this.isHost) { this.host.setLivesMode(enabled); this.publish(); } }
+  setSoloMode(enabled) { if (!this.closed && this.isHost) { this.host.setSoloMode(enabled); this.publish(); } }
   updateSword(sword) {
     if (this.closed) return;
     this.sword = validateSword(sword);
@@ -207,14 +213,38 @@ export class RoomSession {
   prepare() {
     if (!this.view().canStart) throw new Error('全員の準備と武器データの受信を待ってください。');
     this.host.prepare(); this.publish();
-    const spawnSlots = this.room.players.map((_, i) => i);
-    for (let i = spawnSlots.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1)); [spawnSlots[i], spawnSlots[j]] = [spawnSlots[j], spawnSlots[i]];
-    }
     const config = { matchId: this.room.matchId, gameMode: this.room.gameMode, livesMode: this.room.livesMode,
-      players: this.room.players.map((p, i) => ({ playerId: p.playerId, slotIndex: p.slotIndex, spawnIndex: spawnSlots[i], swordData: p.swordData })) };
+      soloMode: this.room.soloMode, soloBuff: this.room.soloMode ? { ...SOLO_BUFF } : null,
+      players: this.assignRoles(this.room.players) };
     this.loadDeadline = this.now() + 60000;
     this.broadcast('PREPARE', config); this.initialize(config);
+  }
+
+  // Fisher-Yates。乱数は注入されたものを使うので、テストから並びを固定できる。
+  shuffle(items) {
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(this.random() * (i + 1));
+      [items[i], items[j]] = [items[j], items[i]];
+    }
+    return items;
+  }
+
+  // 陣営とスポーン位置を決める。抽選はホストだけが行い、結果を PREPARE で全員に配る。
+  // 1vs3 ではボスを1人選んで spawnIndex 0 に固定し、トリオだけを残りの席でシャッフルする。
+  // こうしないと陣営が入り混じった配置で試合が始まってしまう。
+  assignRoles(players) {
+    const describe = (player, team, spawnIndex) => ({ playerId: player.playerId,
+      slotIndex: player.slotIndex, spawnIndex, team, swordData: player.swordData });
+    if (!this.room.soloMode) {
+      const spawnSlots = this.shuffle(players.map((_, i) => i));
+      return players.map((player, i) => describe(player, 0, spawnSlots[i]));
+    }
+    const bossIndex = Math.min(players.length - 1, Math.floor(this.random() * players.length));
+    const trioSpawns = this.shuffle(Array.from({ length: players.length - 1 }, (_, i) => i + 1));
+    let nextTrioSpawn = 0;
+    return players.map((player, i) => i === bossIndex
+      ? describe(player, 0, 0)
+      : describe(player, 1, trioSpawns[nextTrioSpawn++]));
   }
 
   initialize(config) {
@@ -241,11 +271,12 @@ export class RoomSession {
       if (this.isHost) this.abort('ゲームの初期化に失敗しました。'); else this.sendToHost('LOAD_FAILED', data);
     } else if (type === 'INPUT' && this.room.phase === 'PLAYING') {
       const isPrimary = data.action === 'PRIMARY' && ['LEFT', 'RIGHT'].includes(data.direction);
-      const isUltimate = data.action === 'ULTIMATE';
+      // SUPPRESS はボスの制圧。撃てる条件はUnity側が判断するので、ここは中継するだけ。
+      const isUltimate = data.action === 'ULTIMATE' || data.action === 'SUPPRESS';
       if (!isPrimary && !isUltimate) return;
       const input = isPrimary
         ? { matchId: data.matchId, seq: ++this.sequence, action: 'PRIMARY', direction: data.direction }
-        : { matchId: data.matchId, seq: ++this.sequence, action: 'ULTIMATE' };
+        : { matchId: data.matchId, seq: ++this.sequence, action: data.action };
       if (this.isHost) this.command('ReceiveMultiplayerInput', { ...input, playerId: 'p0' });
       else this.sendToHost('INPUT', input);
     } else if (this.isHost && type === 'PLAYING') {

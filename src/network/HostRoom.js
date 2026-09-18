@@ -1,9 +1,21 @@
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export const MAX_IMAGE_LENGTH = 4 * 1024 * 1024;
 // 席数は2〜4。通常ロビーは4席で、そろった人数のまま試合を始める。
 // ランダムマッチは希望人数をそのまま席数にし、autoStart で準備ボタンなしに開始する。
 export const MAX_PLAYERS = 4;
 export const MIN_PLAYERS = 2;
+// 1vs3（ボス1人 対 トリオ3人）。席が全部埋まらないと成立しないので4人ちょうどを要求する。
+export const SOLO_MODE_PLAYERS = 4;
+// ボス側の強化。全クライアントが同じ値を使う必要があるため、ここで決めて試合設定に載せて配る。
+// 数値はすべて調整中。ここだけを直せば全員に反映される。
+export const SOLO_BUFF = Object.freeze({
+  hpMultiplier: 3.0,        // MatchRules へ渡すHPと Unity 側の maxHp に掛ける
+  attackMultiplier: 1.3,    // 攻撃力に掛ける
+  spGainMultiplier: 1.5,    // 時間経過・被弾によるSP獲得量に掛ける
+  maxSp: 200,               // ボスだけSPゲージが2段階（100=通常必殺 / 200=制圧）
+  suppressRadius: 8.0,      // 制圧が届く半径
+  suppressDuration: 10.0,   // 制圧されている秒数
+});
 
 export function validateSword(sword) {
   if (!sword || typeof sword.name !== 'string' || !sword.name.trim() || sword.name.length > 100 ||
@@ -63,9 +75,11 @@ export function validateSword(sword) {
 
 // The host owns this model. Transport identities never come from packet playerId fields.
 export class HostRoom {
-  constructor({ roomEpoch, hostSword, seatLimit = MAX_PLAYERS, autoStart = false, gameMode = '0', livesMode = false }) {
+  constructor({ roomEpoch, hostSword, seatLimit = MAX_PLAYERS, autoStart = false, gameMode = '0',
+    livesMode = false, soloMode = false }) {
     if (!roomEpoch || !Number.isInteger(seatLimit) || seatLimit < MIN_PLAYERS || seatLimit > MAX_PLAYERS ||
-        !['0', '1'].includes(gameMode) || typeof livesMode !== 'boolean') {
+        !['0', '1'].includes(gameMode) || typeof livesMode !== 'boolean' || typeof soloMode !== 'boolean' ||
+        (soloMode && livesMode)) {
       throw new Error('Invalid room configuration');
     }
     this.seatLimit = seatLimit;
@@ -73,6 +87,7 @@ export class HostRoom {
     this.roomEpoch = roomEpoch;
     this.gameMode = gameMode;
     this.livesMode = livesMode;
+    this.soloMode = soloMode;
     this.phase = 'LOBBY';
     this.revision = 0;
     this.readyVersion = 0;
@@ -92,7 +107,8 @@ export class HostRoom {
   snapshot() {
     return structuredClone({ protocolVersion: PROTOCOL_VERSION, roomEpoch: this.roomEpoch,
       revision: this.revision, readyVersion: this.readyVersion, seatLimit: this.seatLimit, autoStart: this.autoStart, gameMode: this.gameMode,
-      livesMode: this.livesMode, phase: this.phase, matchId: this.matchId, players: this.players });
+      livesMode: this.livesMode, soloMode: this.soloMode,
+      phase: this.phase, matchId: this.matchId, players: this.players });
   }
 
   reserve(connectionId) {
@@ -129,6 +145,16 @@ export class HostRoom {
   setLivesMode(enabled) {
     if (this.phase !== 'LOBBY' || typeof enabled !== 'boolean') throw new Error('モードを変更できません。');
     this.livesMode = enabled;
+    // 1vs3 との併用は当面見送る。ボスの実効HPが「剣の本数 × 強化倍率」で膨らみ、調整が追えなくなるため。
+    if (enabled) this.soloMode = false;
+    this.resetReady();
+  }
+
+  // 1vs3：剣/独楽どちらとも組み合わせられる独立したON/OFFトグル。誰がボスになるかは開始時に抽選する。
+  setSoloMode(enabled) {
+    if (this.phase !== 'LOBBY' || typeof enabled !== 'boolean') throw new Error('モードを変更できません。');
+    this.soloMode = enabled;
+    if (enabled) this.livesMode = false;
     this.resetReady();
   }
 
@@ -148,6 +174,8 @@ export class HostRoom {
   }
 
   canStart() {
+    // 1vs3 は1人対3人が揃って初めて成立する。人数が欠けた状態では始めない。
+    if (this.soloMode && this.players.length !== SOLO_MODE_PLAYERS) return false;
     return this.phase === 'LOBBY' && this.players.length >= MIN_PLAYERS && this.players.length <= this.seatLimit &&
       this.players.every(p => p.connected && p.inLobby && (this.autoStart || p.ready));
   }
@@ -182,14 +210,16 @@ export class HostRoom {
     if (this.phase !== 'PLAYING' || !playerId || !this.get(playerId)?.connected ||
         message?.matchId !== this.matchId || !Number.isSafeInteger(message.seq) || message.seq < 1) return null;
     const isPrimary = message.action === 'PRIMARY' && ['LEFT', 'RIGHT'].includes(message.direction);
-    const isUltimate = message.action === 'ULTIMATE';
+    // SUPPRESS はボスの制圧。撃てるかどうか（陣営・SP量）はUnity側のBattlePoliciesが決めるので、
+    // ここでは他の入力と同じく順序と間隔だけを見る。
+    const isUltimate = message.action === 'ULTIMATE' || message.action === 'SUPPRESS';
     if (!isPrimary && !isUltimate) return null;
     const prev = this.inputs.get(playerId);
     if (prev && (message.seq <= prev.seq || now - prev.time < 40)) return null;
     this.inputs.set(playerId, { seq: message.seq, time: now });
     return isPrimary
       ? { playerId, matchId: this.matchId, seq: message.seq, action: 'PRIMARY', direction: message.direction }
-      : { playerId, matchId: this.matchId, seq: message.seq, action: 'ULTIMATE' };
+      : { playerId, matchId: this.matchId, seq: message.seq, action: message.action };
   }
 
   removeConnection(connectionId) {

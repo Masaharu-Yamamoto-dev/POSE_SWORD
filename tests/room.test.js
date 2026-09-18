@@ -221,3 +221,77 @@ test('invalid join does not occupy a permanent player seat', () => {
   }
   assert.equal(room.snapshot().players.length, 4);
 });
+
+// ===== 1vs3（ボス vs 三人組） =====
+
+test('solo mode waits for a full room of four before it may start', () => {
+  const room = new HostRoom({ roomEpoch: 'solo', hostSword: sword, soloMode: true });
+  for (const count of [2, 3]) {
+    room.reserve(`peer-${count}`);
+    room.join(`peer-${count}`, sword);
+    for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+    assert.equal(room.snapshot().players.length, count);
+    assert.equal(room.canStart(), false, `${count}人では開始できない`);
+    assert.throws(() => room.prepare());
+  }
+  room.reserve('peer-4');
+  room.join('peer-4', sword);
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  assert.equal(room.canStart(), true);
+});
+
+test('a solo room that loses a player cannot start until the seat is filled again', () => {
+  const room = fullRoom();
+  room.setSoloMode(true);
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  assert.equal(room.canStart(), true);
+  room.removeConnection('peer-3');
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  assert.equal(room.canStart(), false);
+});
+
+test('solo mode is published to guests and clears ready like any other rule change', () => {
+  const room = fullRoom();
+  assert.equal(room.snapshot().soloMode, false);
+  room.setSoloMode(true);
+  assert.equal(room.snapshot().soloMode, true);
+  assert.ok(room.snapshot().players.every(p => !p.ready), 'ルール変更で準備完了は解除される');
+});
+
+test('solo mode and lives mode switch each other off instead of stacking', () => {
+  const room = fullRoom();
+  room.setLivesMode(true);
+  room.setSoloMode(true);
+  assert.equal(room.snapshot().livesMode, false);
+  assert.equal(room.snapshot().soloMode, true);
+  room.setLivesMode(true);
+  assert.equal(room.snapshot().soloMode, false);
+  assert.equal(room.snapshot().livesMode, true);
+  assert.throws(() => new HostRoom({ roomEpoch: 'x', hostSword: sword, soloMode: true, livesMode: true }));
+});
+
+test('rules cannot be changed once the match has left the lobby', () => {
+  const room = fullRoom();
+  room.prepare();
+  assert.throws(() => room.setSoloMode(true));
+});
+
+test('the suppress input is accepted and keeps its own action name', () => {
+  const room = fullRoom();
+  room.prepare();
+  const matchId = room.snapshot().matchId;
+  const suppress = { matchId, seq: 1, action: 'SUPPRESS' };
+  assert.equal(room.acceptInput('peer-1', suppress, 1000), null, '対戦中でなければ通らない');
+  for (const p of room.snapshot().players) room.markLoaded(p.playerId, matchId);
+  room.beginPlaying(matchId);
+  const accepted = room.acceptInput('peer-1', suppress, 1000);
+  assert.equal(accepted.action, 'SUPPRESS');
+  assert.equal(accepted.playerId, room.playerForConnection('peer-1'));
+  assert.equal(accepted.direction, undefined);
+  // 連番と間隔の制限は他の入力と同じ
+  assert.equal(room.acceptInput('peer-1', suppress, 1200), null);
+  assert.equal(room.acceptInput('peer-1', { ...suppress, seq: 2 }, 1001), null);
+  assert.ok(room.acceptInput('peer-1', { ...suppress, seq: 2 }, 1200));
+  // 知らないアクションは従来どおり捨てる
+  assert.equal(room.acceptInput('peer-1', { ...suppress, seq: 3, action: 'STUN' }, 1400), null);
+});
