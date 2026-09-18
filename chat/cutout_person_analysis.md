@@ -20,6 +20,7 @@ def cutout_person(
     session=None,
 ) -> Image.Image:
 ```
+　
 
 役割の要点:
 - `img`: PIL の画像オブジェクト
