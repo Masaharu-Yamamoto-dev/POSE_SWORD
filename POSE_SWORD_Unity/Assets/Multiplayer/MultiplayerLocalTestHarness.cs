@@ -41,6 +41,27 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
         "OFFのままでもownedSwordCountを2以上にすれば分身の見た目バリエーションだけは確認できる")]
     public bool livesMode = false;
 
+    [Header("1vs3（ボス vs 三人組）")]
+    [Tooltip("ONにすると1人(ボス)対3人の非対称戦になる。人数は自動的に4人へ、残機モードは自動的にOFFになる" +
+        "(本番のロビーでも両立しない組み合わせのため)。3人側は同士討ちしない")]
+    public bool soloMode = false;
+
+    [Range(0, 3)]
+    [Tooltip("どのスロットをボスにするか。本番は開始時にReact側が抽選するが、ここでは固定で選ぶ。" +
+        "AI対戦相手がいないため、制圧を実際に撃てるのは自分が操作するP1(=0)にした時だけ")]
+    public int bossSlot = 0;
+
+    [Header("1vs3：ボス強化（本番の既定値は HostRoom.js の SOLO_BUFF）")]
+    public float hpMultiplier = 3.0f;
+    public float attackMultiplier = 1.3f;
+    public float spGainMultiplier = 1.5f;
+    [Tooltip("ボスのSPゲージ上限。通常必殺技は100のままで、満タンの200で制圧を撃てる")]
+    public float bossMaxSp = 200f;
+    [Tooltip("制圧が届く半径。発動した瞬間にこの範囲内にいた敵だけが対象になる")]
+    public float suppressRadius = 8f;
+    [Tooltip("制圧されている秒数")]
+    public float suppressDuration = 10f;
+
     MultiplayerManager manager;
     SceneController scene;
     int localSeq;
@@ -88,7 +109,20 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
         }
 
         int count = Mathf.Clamp(playerCount, 2, 4);
+        // 1vs3は1人対3人が揃って初めて成立する。人数が違うとValidateConfigで弾かれるので合わせる。
+        if (soloMode && count != 4)
+        {
+            Debug.LogWarning("MultiplayerLocalTestHarness: 1vs3のため対戦人数を4人にしました。");
+            count = 4;
+        }
+        // 残機モードとの併用は本番のロビーでも許していない(ボスの実効HPが膨らみ調整が追えなくなるため)。
+        bool lives = livesMode && !soloMode;
+        if (livesMode && soloMode)
+            Debug.LogWarning("MultiplayerLocalTestHarness: 1vs3と残機モードは併用できないため、残機モードをOFFにしました。");
+        int boss = Mathf.Clamp(bossSlot, 0, count - 1);
+
         var players = new MultiplayerPlayerConfig[count];
+        int nextTrioSpawn = 1;
         for (int i = 0; i < count; i++)
         {
             // 手持ちの剣データが人数分無ければ使い回す
@@ -97,7 +131,10 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
             {
                 playerId = "p" + i,
                 slotIndex = i,
-                spawnIndex = i,
+                // 1vs3では陣営ごとにまとめて配置したいので、ボスを0番の位置に固定する
+                // (本番のRoomSession.assignRolesと同じ割り当て)
+                spawnIndex = !soloMode ? i : (i == boss ? 0 : nextTrioSpawn++),
+                team = soloMode && i != boss ? MultiplayerManager.TrioTeam : MultiplayerManager.BossTeam,
                 swordData = ownedSwordCount > 1 ? BuildOwnedSwordsTestData(sword, ownedSwordCount) : sword
             };
         }
@@ -108,10 +145,27 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
             localPlayerId = "p0",
             isHost = true,
             gameMode = gameMode,
-            livesMode = livesMode,
+            livesMode = lives,
+            soloMode = soloMode,
+            soloBuff = soloMode ? BuildSoloBuff() : null,
             players = players
         };
         return JsonUtility.ToJson(config);
+    }
+
+    // 本番ではReact側(HostRoom.jsのSOLO_BUFF)が決めて配る値を、エディタではInspectorから組み立てる。
+    // 倍率をここでいじって、バランスの当たりを付けるための枠でもある。
+    MultiplayerSoloBuff BuildSoloBuff()
+    {
+        return new MultiplayerSoloBuff
+        {
+            hpMultiplier = hpMultiplier,
+            attackMultiplier = attackMultiplier,
+            spGainMultiplier = spGainMultiplier,
+            maxSp = bossMaxSp,
+            suppressRadius = suppressRadius,
+            suppressDuration = suppressDuration
+        };
     }
 
     // ▼【新規追加】残機モード・分身の見た目テスト用に、デバッグ用の剣1本からHPが異なる手持ちの剣を
