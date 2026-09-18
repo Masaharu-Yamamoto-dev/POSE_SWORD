@@ -79,6 +79,12 @@ public class MultiplayerManager : MonoBehaviour
     // 「今使っている剣が手持ちの何番目か」を覚えておくための追跡用(残機モードでなければ常に0のまま)
     private bool livesModeActive;
     public bool LivesModeActive => livesModeActive;
+    // 1vs3。boss(team 0)が1人、trio(team 1)が3人。有効な間だけ陣営と強化を使う。
+    public const int BossTeam = 0;
+    public const int TrioTeam = 1;
+    public const int SoloModePlayers = 4;
+    private bool soloModeActive;
+    public bool SoloModeActive => soloModeActive;
     private Dictionary<string, List<SwordSlotData>> ownedSwordsByPlayer;
     private Dictionary<string, Vector3> spawnPositionByPlayer;
     private readonly Dictionary<string, int> lifeIndexByPlayer = new Dictionary<string, int>();
@@ -168,15 +174,18 @@ public class MultiplayerManager : MonoBehaviour
             // 必殺技の見た目バリエーションに使うため残機モードのON/OFFに関わらず常に構築する。
             // MatchRulesへ渡すHPの並びだけは残機モードの時だけ複数本ぶん、そうでなければ従来通り1本分のみ
             livesModeActive = config.livesMode;
+            soloModeActive = config.soloMode;
             ownedSwordsByPlayer = config.players.ToDictionary(p => p.playerId, p => BuildOwnedSwords(p.swordData));
             lifeIndexByPlayer.Clear();
             foreach (var p in config.players) lifeIndexByPlayer[p.playerId] = 0;
             rules = new MatchRules(config.players.Select(p => p.playerId).ToArray(),
                 config.players.Select(p => livesModeActive
-                    ? ownedSwordsByPlayer[p.playerId].Select(l => l.hp).ToArray()
-                    : new[] { p.swordData.hp }).ToArray());
+                    ? ownedSwordsByPlayer[p.playerId].Select(l => BuffedHp(p, l.hp)).ToArray()
+                    : new[] { BuffedHp(p, p.swordData.hp) }).ToArray(),
+                // 陣営を渡すのは1vs3の時だけ。渡さなければ MatchRules は従来どおりの個人戦として動く。
+                soloModeActive ? config.players.Select(p => p.team).ToArray() : null);
             // ▼ 壁も含めて自作していた即席アリーナをやめ、SceneController側の校正済み座標(GetSpawnPositions)を使う
-            Vector3[] spawnPositions = scene.GetSpawnPositions(config.players.Length);
+            Vector3[] spawnPositions = scene.GetSpawnPositions(config.players.Length, soloModeActive);
             spawnPositionByPlayer = config.players.ToDictionary(p => p.playerId, p => spawnPositions[p.spawnIndex]);
             // ▼【修正】刀身の太さは、ローカル(3・4人目の動的生成)と同じくSceneController.generators[0]の値を基準にする。
             // 以前はhostGeneratorという別枠の値を使っており、Inspector設定次第でローカルとサイズがズレていた
@@ -204,7 +213,66 @@ public class MultiplayerManager : MonoBehaviour
             config.players.Select(p => p.slotIndex).OrderBy(i => i).Where((slot, i) => slot != i).Any() ||
             config.players.Select(p => p.spawnIndex).OrderBy(i => i).Where((slot, i) => slot != i).Any())
             throw new ArgumentException("Invalid multiplayer roster.");
+        ValidateTeams();
         config.players = config.players.OrderBy(p => p.slotIndex).ToArray();
+    }
+
+    // 1vs3の編成を確かめる。ここを通さないと、陣営が壊れたまま試合が始まって
+    // 味方に攻撃が通る／決着が付かない、といった状態になりうる。
+    void ValidateTeams()
+    {
+        if (!config.soloMode)
+        {
+            // 通常の試合では陣営を使わない。全員0で来るはずで、そうでなければ設定が壊れている。
+            if (config.players.Any(p => p.team != BossTeam))
+                throw new ArgumentException("A normal match must not carry teams.");
+            return;
+        }
+        if (config.players.Length != SoloModePlayers || config.soloBuff == null ||
+            config.players.Any(p => p.team != BossTeam && p.team != TrioTeam) ||
+            config.players.Count(p => p.team == BossTeam) != 1 ||
+            config.players.Count(p => p.team == TrioTeam) != SoloModePlayers - 1)
+            throw new ArgumentException("A solo match requires one boss and three opponents.");
+        var buff = config.soloBuff;
+        if (!IsUsableMultiplier(buff.hpMultiplier) || !IsUsableMultiplier(buff.attackMultiplier) ||
+            !IsUsableMultiplier(buff.spGainMultiplier) || !IsUsableMultiplier(buff.maxSp) ||
+            !IsUsableMultiplier(buff.suppressRadius) || !IsUsableMultiplier(buff.suppressDuration))
+            throw new ArgumentException("The solo buff carries an unusable value.");
+    }
+
+    static bool IsUsableMultiplier(float value)
+    {
+        return value > 0f && !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+
+    bool IsBoss(MultiplayerPlayerConfig player) { return soloModeActive && player.team == BossTeam; }
+
+    // ボスのHPだけを差し替えた複製を返す。元の設定は他の用途(控えの剣の絵など)でも使うので壊さない。
+    SwordData BuffedSwordData(MultiplayerPlayerConfig player)
+    {
+        if (!IsBoss(player)) return player.swordData;
+        var copy = JsonUtility.FromJson<SwordData>(JsonUtility.ToJson(player.swordData));
+        copy.hp = BuffedHp(player, copy.hp);
+        return copy;
+    }
+
+    // HP以外のボス強化。SPゲージは最大200になるが、通常必殺技のラインは全員共通の100のまま
+    // (ultimateSpは触らない)。溜まる速さだけを上げて、2段階目の制圧まで届くようにする。
+    void ApplyBossBuff(SwordBattle battle)
+    {
+        var buff = config.soloBuff;
+        battle.attack = Mathf.Max(1, Mathf.RoundToInt(battle.attack * buff.attackMultiplier));
+        battle.maxSp = buff.maxSp;
+        battle.passiveSpFill *= buff.spGainMultiplier;
+        battle.damageSpMultiplier *= buff.spGainMultiplier;
+    }
+
+    // ボスのHPは倍率ぶん増える。MatchRulesへ渡す値と、Unity側のmaxHp(=HPバーの上限)を
+    // 必ず同じ計算で出すこと。片方だけ強化するとHPバーが頭打ちになって嘘の数値を表示する。
+    int BuffedHp(MultiplayerPlayerConfig player, int hp)
+    {
+        if (!IsBoss(player)) return hp;
+        return Mathf.Clamp(Mathf.RoundToInt(hp * config.soloBuff.hpMultiplier), 1, MatchRules.MaxHitPoints);
     }
 
     void CreateSword(MultiplayerPlayerConfig player, GameObject template, float bladeWidth, Vector3 spawnPosition)
@@ -253,8 +321,13 @@ public class MultiplayerManager : MonoBehaviour
         generator.handleSprite1 = controller.handleSprite1;
         generator.handleSprite2 = controller.handleSprite2;
         generator.handleSprite3 = controller.handleSprite3;
-        generator.GenerateSwordFromJson(JsonUtility.ToJson(player.swordData));
+        // ボスはHPだけ生成前に差し替える。SwordGeneratorがそのままHPとmaxHpに使うので、
+        // MatchRulesへ渡した値と一致し、HPバーの上限も強化後の値になる。
+        generator.GenerateSwordFromJson(JsonUtility.ToJson(BuffedSwordData(player)));
         if (!generator.LastGenerationSucceeded) throw new InvalidOperationException("Could not generate player sword.");
+        // 残りの強化は生成後に掛ける。攻撃力はSwordGeneratorが1〜100を10〜90へ変換した後の
+        // 実数値に掛けたいので、変換前の素の値をいじってはいけない。
+        if (IsBoss(player)) ApplyBossBuff(battle);
         controller.ApplyPhysicsMode();
         swords.Add(player.playerId, battle); bodies.Add(player.playerId, rb);
         sequences[player.playerId] = 0; inputTimes[player.playerId] = -100;
@@ -536,6 +609,7 @@ public class MultiplayerManager : MonoBehaviour
             // Deliver final HP/death state before the separately acknowledged result.
             Emit("SYNC", Snapshot());
             var result = new MultiplayerResult { matchId = config.matchId, winnerId = rules.WinnerId, draw = rules.Draw,
+                winnerTeam = rules.WinnerTeam,
                 standings = rules.Players.Select(p => new MultiplayerScore { playerId = p.PlayerId, rank = p.Rank,
                     damageDealt = p.DamageDealt, damageTaken = p.DamageTaken, kills = p.Kills,
                     eliminationTick = p.EliminationTick, eliminationReason = p.EliminationReason }).ToArray() };
@@ -546,7 +620,11 @@ public class MultiplayerManager : MonoBehaviour
 
     public void QueueHit(SwordBattle attacker, SwordBattle target, int damage, bool isCrit = false)
     {
-        if (!IsHost || !IsPlaying || target.MultiplayerOwner != this || !rules.Get(target.PlayerId).Alive) return;
+        if (!IsHost || !IsPlaying || target.MultiplayerOwner != this || attacker.MultiplayerOwner != this ||
+            !rules.Get(target.PlayerId).Alive) return;
+        // 味方同士はダメージにしない。弾き合いはOnCollisionEnter2D側で既に済んでいるので、
+        // ここで捨てるのは数値・撃破数・ダメージ表示だけ。最終的な裁定はMatchRules側でも同じ条件で行う。
+        if (rules.Get(attacker.PlayerId).Team == rules.Get(target.PlayerId).Team) return;
         // Two dashes clashing in koma mode break each other's guard.
         bool blocked = invulnerable.ContainsKey(target.PlayerId) && invulnerable[target.PlayerId];
         bool clash = SwordController.isKomaMode && invulnerable.ContainsKey(attacker.PlayerId) && invulnerable[attacker.PlayerId];
@@ -655,8 +733,13 @@ public class MultiplayerManager : MonoBehaviour
 
     void UpdateTargets(bool force)
     {
-        var candidates = config.players.Select(p => new TargetCandidate(p.playerId, p.slotIndex,
-            swords[p.playerId].transform.position.x, swords[p.playerId].transform.position.y, swords[p.playerId].IsAlive)).ToArray();
+        // 陣営を渡すのは1vs3の時だけ。渡さなければ TargetCandidate は「1人が1チーム」として
+        // スロット番号を陣営に使うので、従来どおり自分以外の全員が候補になる。
+        var candidates = config.players.Select(p => soloModeActive
+            ? new TargetCandidate(p.playerId, p.slotIndex, swords[p.playerId].transform.position.x,
+                swords[p.playerId].transform.position.y, swords[p.playerId].IsAlive, p.team)
+            : new TargetCandidate(p.playerId, p.slotIndex, swords[p.playerId].transform.position.x,
+                swords[p.playerId].transform.position.y, swords[p.playerId].IsAlive)).ToArray();
         bool interval = Time.unscaledTime >= nextTargetUpdate;
         foreach (var p in swords)
         {
@@ -888,7 +971,8 @@ public class MultiplayerManager : MonoBehaviour
         cloneVisuals.Clear();
         clashSeq.Clear(); criticalHitThisTick.Clear(); critSeq.Clear();
         shakeDuration = 0f; hasLockedCameraPosition = false;
-        livesModeActive = false; ownedSwordsByPlayer = null; spawnPositionByPlayer = null; lifeIndexByPlayer.Clear();
+        livesModeActive = false; soloModeActive = false;
+        ownedSwordsByPlayer = null; spawnPositionByPlayer = null; lifeIndexByPlayer.Clear();
         foreach (var cache in lifeSpriteCache.Values)
             foreach (var sprite in cache)
             {

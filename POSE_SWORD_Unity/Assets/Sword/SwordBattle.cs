@@ -32,7 +32,10 @@ public class SwordBattle : MonoBehaviour
     };
     public Color PlayerMainColor => PlayerColors[Mathf.Clamp(playerNumber - 1, 0, PlayerColors.Length - 1)];
     // 必殺技が撃てるようになるSPのライン（独楽モードは竜巻の70、剣モードは満タン）
-    public float UltimateThreshold => SwordController.isKomaMode ? 70f : maxSp;
+    // 通常必殺技の発動ライン。既定の100は maxSp の既定値と同じなので、従来の挙動は変わらない。
+    // 1vs3のボスだけ maxSp が200になるが、通常必殺技は100のままにしたいので参照先を分けてある。
+    public float ultimateSp = 100f;
+    public float UltimateThreshold => SwordController.isKomaMode ? 70f : ultimateSp;
 
     [Header("UI設定")]
     public Slider hpBar;        // 手前の緑ゲージ
@@ -213,8 +216,10 @@ public static bool matchEnded = false;
     public void ExecuteMultiplayerUltimate()
     {
         if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
+        // 閾値はUIと同じ ultimateSp を渡す。ここを固定値にすると、ボス(maxSp=200)で
+        // 「ボタンは出ていないのに撃てる」ような食い違いが起きる。
         string action = PoseSword.Multiplayer.BattlePolicies.UltimateAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, isDashing);
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing, false, ultimateSp);
         if (action == null) return;
         StartCoroutine(UltimateRoutine());
     }
