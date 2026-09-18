@@ -55,7 +55,7 @@ export default function PoseSwordWeb() {
         attack: sword.attack,
         weight: sword.weight,
         imageStr: sword.imageStr,
-        hiltType: sword.hiltType || "default",
+        hiltType: sword.hiltType || "0",
         isEmpty: false // 通常の剣
       };
     } else {
@@ -65,7 +65,7 @@ export default function PoseSwordWeb() {
         attack: 1,
         weight: 1,
         imageStr: "",
-        hiltType: "default",
+        hiltType: "0",
         isEmpty: true // 空きスロット
       };
     }
@@ -75,7 +75,7 @@ export default function PoseSwordWeb() {
 
   const result = {
     ...equipped, // 従来の1本分のプロパティ（LobbyScreen等の表示用）を維持
-    hiltType: equipped.hiltType || "default",
+    hiltType: equipped.hiltType || "0",
     swords: swords,           // ★ 3本分の配列
     equippedIndex: equippedIndex // ★ 現在選んでいる番号(0, 1, 2)
   };
@@ -358,7 +358,7 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
           weight: data.params.weight,
           imageStr: data.imageData,  
           imageSrc: "data:image/png;base64," + data.imageData,
-          hiltType: "default"
+          hiltType: "0"
         };
         setSwordList(prev => {
           let updatedList = [...prev];
@@ -420,7 +420,7 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
         return <SwordListScreen swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} deleteSword={deleteSword} startNewCrafting={startNewCrafting} startRecapture={startRecapture} updateSword={updateSword} cancelList={cancelList} toggleSwordFlip={toggleSwordFlip} />;
 
       case "LOBBY":
-        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} onReady={room.setReady} onGameMode={room.setGameMode} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
+        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
 
       case "RESULT":
         return <ResultScreen view={view} onReturnToLobby={room.returnToLobby} onLeave={handleLeave}

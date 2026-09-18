@@ -13,7 +13,7 @@ const withoutImages = room => ({ ...room, players: room.players.map(p => {
 // Transport adapter for PeerJS DataConnection. Time is injected so barriers,
 // disconnects and retransmission can be tested without browser timers.
 export class RoomSession {
-  constructor({ isHost = false, roomEpoch = '', seatLimit, autoStart = false, gameMode = '0', sword,
+  constructor({ isHost = false, roomEpoch = '', seatLimit, autoStart = false, gameMode = '0', livesMode = false, sword,
     now = () => performance.now(), onChange = () => {}, onUnity = () => {} }) {
     this.isHost = isHost;
     this.epoch = roomEpoch;
@@ -21,7 +21,7 @@ export class RoomSession {
     this.now = now;
     this.onChange = onChange;
     this.onUnity = onUnity;
-    this.host = isHost ? new HostRoom({ roomEpoch, hostSword: sword, seatLimit, autoStart, gameMode }) : null;
+    this.host = isHost ? new HostRoom({ roomEpoch, hostSword: sword, seatLimit, autoStart, gameMode, livesMode }) : null;
     this.localPlayerId = isHost ? 'p0' : null;
     this.links = new Map();
     this.room = this.host?.snapshot() ?? null;
@@ -195,6 +195,7 @@ export class RoomSession {
     else this.sendToHost('READY', { ready, readyVersion: this.room?.readyVersion });
   }
   setGameMode(mode) { if (!this.closed && this.isHost) { this.host.setGameMode(mode); this.publish(); } }
+  setLivesMode(enabled) { if (!this.closed && this.isHost) { this.host.setLivesMode(enabled); this.publish(); } }
   updateSword(sword) {
     if (this.closed) return;
     this.sword = validateSword(sword);
@@ -210,7 +211,7 @@ export class RoomSession {
     for (let i = spawnSlots.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1)); [spawnSlots[i], spawnSlots[j]] = [spawnSlots[j], spawnSlots[i]];
     }
-    const config = { matchId: this.room.matchId, gameMode: this.room.gameMode,
+    const config = { matchId: this.room.matchId, gameMode: this.room.gameMode, livesMode: this.room.livesMode,
       players: this.room.players.map((p, i) => ({ playerId: p.playerId, slotIndex: p.slotIndex, spawnIndex: spawnSlots[i], swordData: p.swordData })) };
     this.loadDeadline = this.now() + 60000;
     this.broadcast('PREPARE', config); this.initialize(config);
