@@ -9,6 +9,7 @@ import { NameInputScreen, CraftPoseScreen, CraftingApiScreen, CraftCompleteScree
 import SwordListScreen, { HILT_DATABASE } from './screens/SwordListScreen';
 import MatchmakingScreen from './screens/MatchmakingScreen';
 import BattleArena from './components/BattleArena.jsx';
+import HowToPlayPanel from './components/HowToPlayPanel.jsx';
 import { useRoom } from './network/useRoom.js';
 import { useRandomMatch } from './network/useRandomMatch.js';
 import { useIceConfig } from './network/useIceConfig.js';
@@ -42,6 +43,7 @@ const getFinalStats = (sword) => {
 export default function PoseSwordWeb() {
   const [step, setStep] = useState("TITLE");
   const [titleMode, setTitleMode] = useState("DEFAULT");
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [craftReturnStep, setCraftReturnStep] = useState("TITLE");
 
   const [swordList, setSwordList] = useState([]);
@@ -380,7 +382,7 @@ export default function PoseSwordWeb() {
   const renderScreen = () => {
     switch (screen) {
       case "TITLE":
-        return <TitleScreen mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={room.error || systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} connecting={room.connecting} openRandomMatch={openRandomMatch} startRandomMatch={startRandomMatch} matchMode={matchMode} setMatchMode={setMatchMode} direction={transitionDir}/>;
+        return <TitleScreen mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={room.error || systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} connecting={room.connecting} openRandomMatch={openRandomMatch} startRandomMatch={startRandomMatch} matchMode={matchMode} setMatchMode={setMatchMode} direction={transitionDir} onOpenHowToPlay={() => setShowHowToPlay(true)}/>;
       case "MATCHING":
         return <MatchmakingScreen view={randomMatch.view} mySwordData={mySwordData} gameMode={matchMode} onCancel={cancelRandomMatch} />;
       case "NAME_INPUT":
@@ -412,6 +414,9 @@ export default function PoseSwordWeb() {
         }
       `}</style>
       {isFlash && <div style={{ position: 'fixed', inset: 0, backgroundColor: '#fff', zIndex: 9999, pointerEvents: 'none', animation: 'flashFade 0.5s ease-out forwards' }}></div>}
+
+      {/* 遊び方パネル（画面遷移せず、常に最前面にオーバーレイ表示） */}
+      <HowToPlayPanel open={showHowToPlay} onClose={() => setShowHowToPlay(false)} />
 
       {/* 画面描画（遅延なしで瞬時に切り替わり、各画面のCSSアニメーションが発動します） */}
       {screen !== "PLAYING" && renderScreen()}
