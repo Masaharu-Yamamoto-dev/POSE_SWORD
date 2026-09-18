@@ -88,8 +88,7 @@ public class MultiplayerManager : MonoBehaviour
     // 制圧が解ける時刻(Time.unscaledTime)。Hostは発動時に書き込み、ゲストはSYNCの残り秒数から
     // 同じ形に復元するので、IsSuppressed() は両方で同じように使える。
     private readonly Dictionary<string, float> suppressUntil = new Dictionary<string, float>();
-    // 制圧ボタン（ボス本人の画面にだけ実行時生成する）と、制圧中の頭上表示。
-    private GameObject suppressButtonRoot;
+    // 制圧中の頭上表示。
     private readonly Dictionary<string, TextMeshPro> suppressLabels = new Dictionary<string, TextMeshPro>();
     // 制圧の対象領域を示す輪。狙いを付けるための下見(ボス本人のみ)と、撃った瞬間の明滅(全員)に使う。
     private SpriteRenderer suppressRange;
@@ -358,39 +357,6 @@ public class MultiplayerManager : MonoBehaviour
         }
     }
 
-    // 制圧ボタンはシーンに置かず、ここで作ってボス本人にだけ渡す。既存の必殺技ボタンの少し上に、
-    // 同じCanvas・同じ大きさで並べる。後片付けは StopCurrent() の suppressButtonRoot 破棄でまとめて行う。
-    void BuildSuppressButton(SwordBattle battle)
-    {
-        if (hudCanvas == null || suppressButtonRoot != null) return;
-        var template = hudCanvas.transform.Find("SpecialAttackButtonPL1") as RectTransform;
-        if (template == null) return;
-
-        suppressButtonRoot = new GameObject("SuppressButtonBoss", typeof(RectTransform), typeof(Image), typeof(Button));
-        var rect = suppressButtonRoot.GetComponent<RectTransform>();
-        rect.SetParent(template.parent, false);
-        rect.anchorMin = template.anchorMin; rect.anchorMax = template.anchorMax; rect.pivot = template.pivot;
-        rect.sizeDelta = template.sizeDelta;
-        // 既存のボタンに重ならないよう、自分の高さぶん上へ逃がす
-        rect.anchoredPosition = template.anchoredPosition + new Vector2(0, template.sizeDelta.y + 12f);
-        suppressButtonRoot.GetComponent<Image>().color = new Color(.42f, .11f, .60f, .92f);
-
-        var label = new GameObject("Label", typeof(RectTransform)).AddComponent<TextMeshProUGUI>();
-        label.rectTransform.SetParent(rect, false);
-        label.rectTransform.anchorMin = Vector2.zero; label.rectTransform.anchorMax = Vector2.one;
-        label.rectTransform.offsetMin = Vector2.zero; label.rectTransform.offsetMax = Vector2.zero;
-        label.text = "制圧";
-        label.alignment = TextAlignmentOptions.Center;
-        label.enableAutoSizing = true; label.fontSizeMin = 12; label.fontSizeMax = 40;
-        label.color = Color.white;
-        if (battle.nameText != null) label.font = battle.nameText.font;
-
-        var button = suppressButtonRoot.GetComponent<Button>();
-        button.onClick.AddListener(battle.TrySuppress);
-        battle.suppressButton = button;
-        suppressButtonRoot.SetActive(false);
-    }
-
     // ターゲット選定と制圧の範囲判定で共通に使う名簿。
     // 陣営を渡すのは1vs3の時だけ。渡さなければ TargetCandidate は「1人が1チーム」として
     // スロット番号を陣営に使うので、従来どおり自分以外の全員が候補になる。
@@ -528,13 +494,7 @@ public class MultiplayerManager : MonoBehaviour
         if (!generator.LastGenerationSucceeded) throw new InvalidOperationException("Could not generate player sword.");
         // 残りの強化は生成後に掛ける。攻撃力はSwordGeneratorが1〜100を10〜90へ変換した後の
         // 実数値に掛けたいので、変換前の素の値をいじってはいけない。
-        // 制圧ボタンは「自分がボスの時」にだけ作る。ボスの剣自体は全員の画面に作られるので、
-        // ここを絞らないと押せないボタンが他のプレイヤーの画面にも生まれてしまう。
-        if (IsBoss(player))
-        {
-            ApplyBossBuff(battle);
-            if (controller.isLocalControlled) BuildSuppressButton(battle);
-        }
+        if (IsBoss(player)) ApplyBossBuff(battle);
         controller.ApplyPhysicsMode();
         swords.Add(player.playerId, battle); bodies.Add(player.playerId, rb);
         sequences[player.playerId] = 0; inputTimes[player.playerId] = -100;
@@ -1213,7 +1173,6 @@ public class MultiplayerManager : MonoBehaviour
         }
         foreach (var label in suppressLabels.Values) if (label != null) Destroy(label.gameObject);
         suppressLabels.Clear();
-        if (suppressButtonRoot != null) { suppressButtonRoot.SetActive(false); Destroy(suppressButtonRoot); suppressButtonRoot = null; }
         ownedSwordsByPlayer = null; spawnPositionByPlayer = null; lifeIndexByPlayer.Clear();
         foreach (var cache in lifeSpriteCache.Values)
             foreach (var sprite in cache)

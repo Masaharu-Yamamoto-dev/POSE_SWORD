@@ -44,9 +44,13 @@ public class SwordBattle : MonoBehaviour
     public TextMeshProUGUI hpText;   // ▼ 【変更】Text から TextMeshProUGUI に変更
     public Image frameImage;    // プレイヤーのメインカラーで塗る枠（HPパネルの縁など。Editor側で用意して割り当てる）
     public Button specialAttackButton; // 必殺技専用ボタン。自キャラのSPが条件を満たした時だけ表示する（Editor側で用意して割り当てる）
-    // ▼【新規追加】1vs3：ボス専用の「制圧」ボタン。シーンには置かず、MultiplayerManagerが
-    // 実行時に生成してボス本人にだけ割り当てる（シーンを触らずに済ませるため）
-    [HideInInspector] public Button suppressButton;
+    // 1vs3：掌握に切り替わっている間だけ差し替える、共有ボタンの元の見た目
+    TextMeshProUGUI ultimateButtonLabel;
+    Image ultimateButtonImage;
+    string ultimateButtonLabelText;
+    Color ultimateButtonColor;
+    bool suppressSkinCaptured;
+    bool suppressSkinApplied;
     // 制圧されている間の減光率（RGBに掛ける。アルファは保つ）と、今それを掛けているかどうか
     const float SuppressDim = 0.4f;
     bool suppressTinted;
@@ -234,11 +238,17 @@ public static bool matchEnded = false;
     }
 
     // ▼【新規追加】1vs3：ボスの制圧。自分の画面から送るだけで、実際に効くかどうかはHostが決める
-    public void TrySuppress()
+    // ▼【新規追加】1vs3：SPが満タンまで溜まっていて、掌握に切り替わっている状態かどうか。
+    // ボスだけ maxSp が200で、トリオは maxSp が100=通常必殺技のラインなので、
+    // 「満タン かつ 通常必殺技のラインより上」を条件にすればボス以外では立たない。
+    public bool SuppressReady
     {
-        if (controller == null || !controller.isLocalControlled) return;
-        if (MultiplayerOwner == null) return;   // ローカル対戦では使わない
-        MultiplayerOwner.SubmitLocalSuppress();
+        get
+        {
+            return MultiplayerOwner != null && MultiplayerOwner.SoloModeActive &&
+                maxSp > ultimateSp && currentSp >= maxSp &&
+                IsAlive && !isDashing && !MultiplayerOwner.IsSuppressed(PlayerId);
+        }
     }
 
     // ▼【新規追加】Host側の実行口。範囲判定と効果の適用はMultiplayerManagerが持つ
@@ -476,9 +486,8 @@ public static bool matchEnded = false;
             }
 
             // ▼【新規追加】PC操作時のみ：スペースキーでも必殺技専用ボタンと同じ発動ができるようにする
+            // ▼ 1vs3ではSPが満タンになると、このキーで出るものが掌握へ切り替わる（TryUltimate内で振り分ける）
             if (Input.GetKeyDown(KeyCode.Space)) TryUltimate();
-            // ▼【新規追加】1vs3：左Shiftはボスの制圧。通常必殺技(Space)とは別のキーにして撃ち分ける
-            if (Input.GetKeyDown(KeyCode.LeftShift)) TrySuppress();
         }
     }
 
@@ -487,22 +496,40 @@ public static bool matchEnded = false;
     // 自分が操作しているキャラ以外は絶対にこのボタンへ触れないようにする（他人の生死やSPで消えてしまうのを防ぐ）
     void UpdateSpecialAttackButton()
     {
+        if (specialAttackButton == null || controller == null || !controller.isLocalControlled) return;
         // 制圧を受けている間はどの入力も通らないので、押せるように見せない
         bool suppressed = MultiplayerOwner != null && MultiplayerOwner.IsSuppressed(PlayerId);
-        if (specialAttackButton != null && controller != null && controller.isLocalControlled)
-        {
-            bool shouldShow = !isDashing && !suppressed && currentSp >= UltimateThreshold;
-            if (specialAttackButton.gameObject.activeSelf != shouldShow)
-                specialAttackButton.gameObject.SetActive(shouldShow);
-        }
-        // ▼【新規追加】1vs3：制圧ボタンはゲージ満タン(=maxSp)でのみ出す。ボス本人にしか割り当てられない
-        if (suppressButton != null && controller != null && controller.isLocalControlled)
-        {
-            bool shouldShow = !isDashing && !suppressed && currentSp >= maxSp;
-            if (suppressButton.gameObject.activeSelf != shouldShow)
-                suppressButton.gameObject.SetActive(shouldShow);
-        }
+        bool shouldShow = !isDashing && !suppressed && currentSp >= UltimateThreshold;
+        if (specialAttackButton.gameObject.activeSelf != shouldShow)
+            specialAttackButton.gameObject.SetActive(shouldShow);
+        // ▼【新規追加】1vs3：ボタンは1つのまま、SPが満タンになったら掌握へ切り替わる。
+        // どちらが出るのか分かるよう、表示も切り替える
+        ApplySuppressButtonSkin(SuppressReady);
     }
+
+    // 掌握に切り替わっている間だけ、共有の必殺技ボタンの文字と色を差し替える。
+    // 元の値は最初に覚えておき、戻す時と試合終了時(OnDisable)に必ず復帰させる。
+    void ApplySuppressButtonSkin(bool suppressMode)
+    {
+        if (specialAttackButton == null || suppressMode == suppressSkinApplied) return;
+        if (!suppressSkinCaptured)
+        {
+            ultimateButtonLabel = specialAttackButton.GetComponentInChildren<TextMeshProUGUI>(true);
+            ultimateButtonImage = specialAttackButton.GetComponent<Image>();
+            if (ultimateButtonLabel != null) ultimateButtonLabelText = ultimateButtonLabel.text;
+            if (ultimateButtonImage != null) ultimateButtonColor = ultimateButtonImage.color;
+            suppressSkinCaptured = true;
+        }
+        suppressSkinApplied = suppressMode;
+        if (ultimateButtonLabel != null)
+            ultimateButtonLabel.text = suppressMode ? "掌握" : ultimateButtonLabelText;
+        if (ultimateButtonImage != null)
+            ultimateButtonImage.color = suppressMode ? new Color(.42f, .11f, .60f, ultimateButtonColor.a) : ultimateButtonColor;
+    }
+
+    // 試合が終わる・撃破される・剣が消される時に、共有ボタンの見た目を元へ戻す。
+    // このボタンはシーンに1つしか無く、次の試合へ持ち越されるため。
+    void OnDisable() { ApplySuppressButtonSkin(false); }
 
     // ▼【新規追加】残機モード：HPパネル内の「あと何本あるか」アイコン列を、渡された残りの剣の
     // 画像で更新する。今戦っている剣は含まない配列を渡す想定。本数が足りない枠は非表示にする
@@ -1115,7 +1142,14 @@ public static bool matchEnded = false;
         // ボタンを1回押すと全員分のTryUltimate()が呼ばれてしまう。
         // 自分が操作しているキャラでなければ即座に何もしないようにして、他人の必殺技が暴発しないようにする
         if (controller == null || !controller.isLocalControlled) return;
-        if (MultiplayerOwner != null) { MultiplayerOwner.SubmitLocalUltimate(); return; }
+        // ▼【修正】1vs3：ボタンは1つのまま、SP量で撃つものが変わる。満タン(=maxSp)なら掌握、
+        // そこに届いていなければ通常必殺技。実際に撃てるかどうかはHost側が改めて判定する
+        if (MultiplayerOwner != null)
+        {
+            if (SuppressReady) MultiplayerOwner.SubmitLocalSuppress();
+            else MultiplayerOwner.SubmitLocalUltimate();
+            return;
+        }
         if (isDead || matchEnded || isDashing || !isRoundStarted) return;
         if (currentSp < UltimateThreshold) return;
 
