@@ -320,7 +320,8 @@ public class MultiplayerManager : MonoBehaviour
             throw new ArgumentException("A solo match requires one boss and three opponents.");
         var buff = config.soloBuff;
         if (!IsUsableMultiplier(buff.hpMultiplier) || !IsUsableMultiplier(buff.attackMultiplier) ||
-            !IsUsableMultiplier(buff.spGainMultiplier) || !IsUsableMultiplier(buff.maxSp) ||
+            !IsUsableMultiplier(buff.spGainMultiplier) || !IsUsableMultiplier(buff.scaleMultiplier) ||
+            !IsUsableMultiplier(buff.maxSp) ||
             !IsUsableMultiplier(buff.suppressRadius) || !IsUsableMultiplier(buff.suppressDuration) ||
             !IsUsableMultiplier(buff.judgmentPullSeconds) || !IsUsableMultiplier(buff.judgmentPullForce) ||
             !IsUsableMultiplier(buff.judgmentDamageMultiplier) || !IsUsableMultiplier(buff.judgmentKnockback) ||
@@ -566,24 +567,42 @@ public class MultiplayerManager : MonoBehaviour
         var panel = NewPanel("TrioPanel" + slotIndex, new Vector2(.5f, 0f), new Vector2(x, trioPanelBottom),
             trioPanelSize, trioPanelColor);
         float inner = width - 24f - hudSlant;
+        // 行は上から順に積む。SPの行が増えた分はパネルの高さを伸ばして吸収するので、
+        // 位置を決め打ちしていた頃のように下の行と重ならない。
+        const float nameHeight = 26f, hpHeight = 24f, spHeight = 18f, stateHeight = 22f;
+        float y = -8f;
 
         var name = NewLabel(panel, "Name", font, trioNameFontSize, TextAlignmentOptions.Left,
-            new Vector2(hudSlant / 2f, -8), new Vector2(inner, 26));
+            new Vector2(hudSlant / 2f, y), new Vector2(inner, nameHeight));
         name.color = SwordBattle.PlayerColors[Mathf.Clamp(slotIndex, 0, 3)];
-        name.text = (slotIndex + 1) + "P " + battle.swordName;
+        y -= nameHeight + 8f;
 
-        var hp = NewBar(panel, "Hp", new Vector2(0, -42), new Vector2(inner, 24),
+        var hp = NewBar(panel, "Hp", new Vector2(0, y), new Vector2(inner, hpHeight),
             new Color(.3f, .8f, .35f), new Color(.10f, .10f, .12f, .9f));
         var hpText = NewLabel(panel, "HpText", font, trioValueFontSize, TextAlignmentOptions.Right,
-            new Vector2(-14, -42), new Vector2(inner - 16, 22));
+            new Vector2(-14, y), new Vector2(inner - 16, hpHeight - 2));
+        y -= hpHeight + 4f;
+
+        // ▼【新規追加】トリオにもSPゲージを出す。誰がいつ必殺技を撃てるのかが見えないと
+        // 3人で合わせようがないため。ボスのゲージ(2段階・青)と取り違えないよう色を分ける。
+        var sp = NewBar(panel, "Sp", new Vector2(0, y), new Vector2(inner, spHeight),
+            new Color(1f, .78f, .25f), new Color(.10f, .10f, .12f, .9f));
+        var spText = NewLabel(panel, "SpText", font, trioValueFontSize - 2f, TextAlignmentOptions.Right,
+            new Vector2(-14, y), new Vector2(inner - 16, spHeight));
+        y -= spHeight + 4f;
 
         var state = NewLabel(panel, "State", font, trioValueFontSize, TextAlignmentOptions.Center,
-            new Vector2(0, -74), new Vector2(inner, 22));
+            new Vector2(0, y), new Vector2(inner, stateHeight));
         state.color = new Color(.85f, .62f, 1f);
         soloHudStates[battle.PlayerId] = state;
+        y -= stateHeight;
+
+        // 中身が入りきる高さまで伸ばす。指定値より中身が大きい時だけ広げるのはボス枠と同じ作法。
+        panel.sizeDelta = new Vector2(width, Mathf.Max(trioPanelSize.y, -y + 8f));
 
         battle.nameText = name; battle.hpBar = hp.GetComponent<Slider>(); battle.hpText = hpText;
-        battle.spGaugeBar = null; battle.spText = null; battle.delayHpBar = null;
+        battle.spGaugeBar = sp.GetComponent<Slider>(); battle.spText = spText;
+        battle.delayHpBar = null;
         battle.UpdateUI();
         name.text = (slotIndex + 1) + "P " + battle.swordName;
     }
@@ -871,6 +890,9 @@ public class MultiplayerManager : MonoBehaviour
         battle.maxSp = buff.maxSp;
         battle.passiveSpFill *= buff.spGainMultiplier;
         battle.damageSpMultiplier *= buff.spGainMultiplier;
+        // 見た目と当たり判定を一回り大きくする。ConfigureMultiplayerが素の大きさを
+        // 記録した後に呼ばれるので、ここで掛ければ以降の復帰処理にも引き継がれる。
+        battle.ApplyBaseScale(buff.scaleMultiplier);
     }
 
     // ボスのHPは倍率ぶん増える。MatchRulesへ渡す値と、Unity側のmaxHp(=HPバーの上限)を

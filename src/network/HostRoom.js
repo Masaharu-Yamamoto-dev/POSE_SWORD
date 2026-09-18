@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 export const MAX_IMAGE_LENGTH = 4 * 1024 * 1024;
 // 席数は2〜4。通常ロビーは4席で、そろった人数のまま試合を始める。
 // ランダムマッチは希望人数をそのまま席数にし、autoStart で準備ボタンなしに開始する。
@@ -14,6 +14,8 @@ export const SOLO_BUFF = Object.freeze({
   // 3人を相手にするので、通常攻撃1発でトリオの一撃を上回るくらいを狙っている。
   attackMultiplier: 2.0,
   spGainMultiplier: 1.5,    // 時間経過・被弾によるSP獲得量に掛ける
+  // 見た目の大きさに掛ける。剣の当たり判定も一緒に大きくなるので、間合いにも効く。
+  scaleMultiplier: 1.5,
   maxSp: 200,               // ボスだけSPゲージが2段階（100=通常必殺 / 200=制圧）
   suppressRadius: 8.0,      // 掌握が届く半径
   // 操作不能になる秒数。溜め1秒＋薙ぎ払いの後、ボスが自由に殴れる時間がここから引いた分になる。

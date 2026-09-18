@@ -63,6 +63,8 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
     public float hpMultiplier = 3.0f;
     public float attackMultiplier = 2.0f;
     public float spGainMultiplier = 1.5f;
+    [Tooltip("ボスの見た目の大きさに掛ける。剣の当たり判定も一緒に大きくなる")]
+    public float scaleMultiplier = 1.5f;
     [Tooltip("ボスのSPゲージ上限。通常必殺技は100のままで、満タンの200で制圧を撃てる")]
     public float bossMaxSp = 200f;
     [Tooltip("制圧が届く半径。発動した瞬間にこの範囲内にいた敵だけが対象になる")]
@@ -186,6 +188,7 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
             hpMultiplier = hpMultiplier,
             attackMultiplier = attackMultiplier,
             spGainMultiplier = spGainMultiplier,
+            scaleMultiplier = scaleMultiplier,
             maxSp = bossMaxSp,
             suppressRadius = suppressRadius,
             suppressDuration = suppressDuration,

@@ -289,6 +289,19 @@ public static bool matchEnded = false;
     // 制圧の発動で消費するSP。ゲージ満タンぶんを使い切る
     public void ConsumeSuppressSp() { currentSp = 0f; }
 
+    // ▼【新規追加】1vs3：ボスを一回り大きくする。
+    // baselineScale ごと掛けるのが要点。ここを現在の localScale だけにすると、
+    // 残機モードの持ち替え(ReviveFromDefeat)や必殺技演出の後始末で baselineScale へ
+    // 戻された瞬間にボスが元の大きさに縮んでしまう。
+    // Host側は localScale.x をSYNCで配っているので、ゲストの画面にもそのまま乗る。
+    public void ApplyBaseScale(float multiplier)
+    {
+        if (multiplier <= 0f || Mathf.Approximately(multiplier, 1f)) return;
+        baselineScale = new Vector3(baselineScale.x * multiplier, baselineScale.y * multiplier, baselineScale.z);
+        transform.localScale = new Vector3(transform.localScale.x * multiplier,
+            transform.localScale.y * multiplier, transform.localScale.z);
+    }
+
     // ▼【新規追加】1vs3：掌握の2段目。範囲の中心で剣を大きくして回し、集めた相手を薙ぎ払う。
     // 大きさの退避と復帰は既存の巨大回転斬(GiantSpinRoutine)と同じ作法にしてある。
     // 位置・回転・大きさはいずれも同期に乗っているので、ゲストの画面にもそのまま見える。
