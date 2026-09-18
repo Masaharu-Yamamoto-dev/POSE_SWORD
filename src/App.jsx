@@ -6,7 +6,7 @@ import TitleScreen from './screens/TitleScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import ResultScreen from './screens/ResultScreen';
 import { NameInputScreen, CraftPoseScreen, CraftingApiScreen, CraftCompleteScreen } from './screens/CraftingScreens';
-import SwordListScreen from './screens/SwordListScreen';
+import SwordListScreen, { HILT_DATABASE } from './screens/SwordListScreen';
 import MatchmakingScreen from './screens/MatchmakingScreen';
 import BattleArena from './components/BattleArena.jsx';
 import { useRoom } from './network/useRoom.js';
@@ -15,15 +15,11 @@ import { useIceConfig } from './network/useIceConfig.js';
 
 const ACTIVE_PHASES = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 const ROOM_STEPS = ['LOBBY', 'PLAYING', 'RESULT'];
-// 武器の中身が変わったかどうかだけを見る。IDが同じでも撮り直しを検出する。
-// ▼【修正】hiltType(柄の種類)が入っていなかったため、ステータスや画像を変えずに柄だけ
-// 変更すると同じキーになってしまい、room.updateSword()による同期がスキップされていた
-// (画面上は選んだ柄に見えるのに、実際に対戦相手へは古い柄のままのデータが送られ続けていた)
-const swordKey = sword => sword && `${sword.id}:${sword.name}:${sword.hp}:${sword.attack}:${sword.weight}:${sword.imageStr?.length ?? 0}:${sword.hiltType ?? '0'}`;
-// ▼【新規追加】残機モード用のswords[](装備中以外も含む3本分)まで含めた同期判定キー。
-// swordKeyは装備中の1本しか見ていないため、2本目・3本目(=装備していない剣)の柄だけを変更しても
-// 変化なしと判定されてroom.updateSword()が呼ばれず、Unity側には古い(登録時点の)柄のままの
-// データが送られ続けてしまっていた。createSyncSwordData()が返す実際の送信内容全体をキーにする
+
+// 武器の中身が変わったかどうかだけを見る。
+const swordKey = sword => sword && `${sword.id}:${sword.name}:${sword.hp}:${sword.attack}:${sword.weight}:${sword.hiltType}:${sword.imageStr?.length ?? 0}`;
+
+// 🌟 残機モード用のswords[](装備中以外も含む3本分)まで含めた同期判定キー
 const syncKey = sync => {
   if (!sync) return null;
   const slots = (sync.swords || [])
@@ -32,75 +28,87 @@ const syncKey = sync => {
   return `${swordKey(sync)}:${sync.equippedIndex}:${slots}`;
 };
 
+// 🌟 柄の補正適用および下限1の設定を行うヘルパー関数
+const getFinalStats = (sword) => {
+  if (!sword) return { hp: 1, attack: 1, weight: 1 };
+  const hilt = HILT_DATABASE[sword.hiltType || "0"] || HILT_DATABASE["0"];
+  return {
+    hp: Math.max(1, (sword.hp || 0) + (hilt.hpBonus || 0)),
+    attack: Math.max(1, (sword.attack || 0) + (hilt.attackBonus || 0)),
+    weight: Math.max(1, (sword.weight || 0) + (hilt.weightBonus || 0)),
+  };
+};
+
 export default function PoseSwordWeb() {
   const [step, setStep] = useState("TITLE");
-
   const [titleMode, setTitleMode] = useState("DEFAULT");
   const [craftReturnStep, setCraftReturnStep] = useState("TITLE");
 
-  // ストレージと剣のリスト管理
   const [swordList, setSwordList] = useState([]);
   const [craftingTargetId, setCraftingTargetId] = useState(null);
   const [mySwordData, setMySwordData] = useState(null);
   const mySwordRef = useRef(null);
   useEffect(() => { mySwordRef.current = mySwordData; }, [mySwordData]);
 
+  // 🌟 通信・Unity送信用のデータ生成
   const createSyncSwordData = (list, equipped) => {
-  if (!equipped) return null;
+    if (!equipped) return null;
 
-  // 3本分の配列を生成（無いスロットは空のダミー）
-  const swords = [0, 1, 2].map(index => {
-    const sword = list[index];
-    if (sword) {
-      return {
-        name: sword.name,
-        hp: sword.hp,
-        attack: sword.attack,
-        weight: sword.weight,
-        imageStr: sword.imageStr,
-        hiltType: sword.hiltType || "0",
-        isEmpty: false // 通常の剣
-      };
-    } else {
-      return {
-        name: "empty",
-        hp: 1,
-        attack: 1,
-        weight: 1,
-        imageStr: "",
-        hiltType: "0",
-        isEmpty: true // 空きスロット
-      };
-    }
-  });
+    const swords = [0, 1, 2].map(index => {
+      const sword = list[index];
+      if (sword) {
+        const stats = getFinalStats(sword);
+        return {
+          name: sword.name,
+          hp: stats.hp,
+          attack: stats.attack,
+          weight: stats.weight,
+          imageStr: sword.imageStr,
+          hiltType: Number(sword.hiltType || 0),
+          isEmpty: false
+        };
+      } else {
+        return {
+          name: "empty",
+          hp: 1,
+          attack: 1,
+          weight: 1,
+          imageStr: "",
+          hiltType: 0,
+          isEmpty: true
+        };
+      }
+    });
 
-  const equippedIndex = Math.max(0, list.findIndex(s => s.id === equipped.id));
+    const equippedIndex = Math.max(0, list.findIndex(s => s.id === equipped.id));
+    const equippedStats = getFinalStats(equipped);
 
-  const result = {
-    ...equipped, // 従来の1本分のプロパティ（LobbyScreen等の表示用）を維持
-    hiltType: equipped.hiltType || "0",
-    swords: swords,           // ★ 3本分の配列
-    equippedIndex: equippedIndex // ★ 現在選んでいる番号(0, 1, 2)
+    return {
+      ...equipped,
+      hp: equippedStats.hp,
+      attack: equippedStats.attack,
+      weight: equippedStats.weight,
+      hiltType: Number(equipped.hiltType || 0),
+      swords: swords,
+      equippedIndex: equippedIndex
+    };
   };
 
-
-  return result;
-};
-
-// 実際の送信データ（これに置き換えます）
-const currentSyncSword = createSyncSwordData(swordList, mySwordData);
-
+  const currentSyncSword = createSyncSwordData(swordList, mySwordData);
 
   const [userName, setUserName] = useState("");
   const [targetId, setTargetId] = useState("");
-
   const [captureCountdown, setCaptureCountdown] = useState(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-
   const [capturedImage, setCapturedImage] = useState(null);
   const [systemMessage, setSystemMessage] = useState("");
   const [isCopied, setIsCopied] = useState(false);
+
+  // 🌟 アニメーション・撮り直し用の状態管理
+  const [transitionDir, setTransitionDir] = useState("forward");
+  const [lastCraftWasRecapture, setLastCraftWasRecapture] = useState(false);
+  const [isFlash, setIsFlash] = useState(false);
 
   const resetToTitleRef = useRef(null);
   // STUN/TURN は毎回サーバーに発行してもらう。固定の資格情報を埋め込まない。
@@ -121,10 +129,7 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
   }, []);
   useEffect(() => { resetToTitleRef.current = resetToTitle; }, [resetToTitle]);
 
-  // ▼【修正】結果が届いた瞬間に結果画面へ切り替えると、Unity側の決着演出(MatchEndCinematic、
-  // 2.5秒のスローモーション)がBattleArenaごと隠れてしまい、プレイヤーからは見えないまま終わっていた。
-  // 結果を受け取ってから2.5秒(Unity側の演出時間と同じ)だけ結果画面への切り替えを遅らせ、
-  // その間はPLAYING画面のまま(=Unity画面を表示したまま)にして演出を見せる
+  // ▼【復元】決着演出(2.5秒)を見せるためのディレイ
   const resultMatchId = view?.result?.matchId ?? null;
   const [resultDelayDone, setResultDelayDone] = useState(false);
   useEffect(() => {
@@ -134,7 +139,6 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
     return () => clearTimeout(timer);
   }, [resultMatchId]);
 
-  // 部屋の局面がそのまま画面になる。錬成中（武器庫・撮影）だけは自分の画面を保つ。
   const roomScreen = (() => {
     if (!view?.room || view.closed) return null;
     const me = view.room.players.find(p => p.playerId === view.localPlayerId);
@@ -142,25 +146,20 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
     if (view.result && me && !me.inLobby) return resultDelayDone ? "RESULT" : "PLAYING";
     return "LOBBY";
   })();
-  // 相手を探している間は、自分の部屋ができていても探索画面を出し続ける。
   const seeking = Boolean(randomMatch.view?.seeking);
-  // 部屋が無い状態で部屋の画面は出さない。
+
+  // 🌟 displayScreen を廃止し、直接 screen を使ってアニメーションを即座に発動させる
   const screen = seeking ? "MATCHING"
     : ROOM_STEPS.includes(step) || step === "TITLE" ? (roomScreen ?? "TITLE")
     : step;
 
-  // 武器を持ち替えたら部屋にも反映する（本人の準備は解除される）
-  // ▼【修正】依存配列がmySwordData(装備中の1本)だけだったため、2本目・3本目(装備していない剣)の
-  // 柄だけを武器庫で変更しても、装備中の剣自体は変化していないのでこのeffectが再実行されず、
-  // room.updateSword()が呼ばれないまま(=古いままの柄が送られ続ける)ことがあった。swordListの変化も
-  // 見るようにし、比較キーもswords[]全体を含むsyncKeyに変更した
   useEffect(() => {
     if (!view?.room || !mySwordData) return;
     const key = syncKey(currentSyncSword);
     if (sentSwordRef.current === key) return;
     sentSwordRef.current = key;
     room.updateSword(currentSyncSword);
-  }, [mySwordData, swordList, view?.room, room]);
+  }, [mySwordData, swordList, view?.room, room, currentSyncSword]);
 
   useEffect(() => {
     let stream = null;
@@ -179,17 +178,13 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
         return () => clearTimeout(timer);
       } else {
         setCaptureCountdown(null);
-        executeCaptureAndCraft(); 
+        executeCaptureAndCraft();
       }
     }
   }, [captureCountdown]);
 
-  // ===============================
-  // ▼ 武器庫（アーセナル）機能
-  // ===============================
-  const equipSword = (sword) => {
-    setMySwordData(sword);
-  };
+  const equipSword = (sword) => setMySwordData(sword);
+  const reorderSwords = (newList) => setSwordList(newList);
 
   const deleteSword = (idToRemove) => {
     if (!window.confirm("本当にこの剣を破棄しますか？")) return;
@@ -209,61 +204,49 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
   const toggleSwordFlip = (targetId) => {
     const target = swordList.find(s => s.id === targetId);
     if (!target) return;
-
     const img = new Image();
     img.src = target.imageSrc;
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      canvas.width = img.width; canvas.height = img.height;
       const ctx = canvas.getContext('2d');
-      
-      // 画像を物理的に反転させる
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(img, 0, 0);
-
+      ctx.translate(canvas.width, 0); ctx.scale(-1, 1); ctx.drawImage(img, 0, 0);
       const flippedSrc = canvas.toDataURL('image/png');
       const flippedStr = flippedSrc.split(',')[1];
-
-      // 新しく生成した反転画像データで上書き保存！
-      updateSword(targetId, {
-        imageSrc: flippedSrc,
-        imageStr: flippedStr
-      });
+      updateSword(targetId, { imageSrc: flippedSrc, imageStr: flippedStr });
     };
   };
 
   const startRecapture = (targetId) => {
     const target = swordList.find(s => s.id === targetId);
     if (target) {
-      setCraftingTargetId(targetId);
-      setUserName(target.baseName);
+      setCraftingTargetId(targetId); setUserName(target.baseName);
+      setTransitionDir("forward");
       setStep("CRAFT_POSE");
     }
   };
 
   const startNewCrafting = () => {
-    setCraftingTargetId(null);
-    setUserName("");
+    setCraftingTargetId(null); setUserName("");
+    setTransitionDir("forward");
     setStep("NAME_INPUT");
   };
 
   const goToCrafting = (returnStep) => {
-    // ロビーから武器庫へ行く間は準備完了を外す
     if (returnStep === "LOBBY") room.setReady(false);
     setCraftReturnStep(returnStep);
+    setTransitionDir("forward");
     if (swordList.length === 0) {
-      setCraftingTargetId(null);
-      setUserName("");
-      setStep("NAME_INPUT");
+      setCraftingTargetId(null); setUserName(""); setStep("NAME_INPUT");
     } else {
       setStep("SWORD_LIST");
     }
   };
 
-  const cancelList = () => setStep(craftReturnStep);
-  // ===============================
+  const cancelList = () => {
+    setTransitionDir("back");
+    setStep(craftReturnStep);
+  };
 
   const handleLeave = () => {
     randomMatch.cancel();
@@ -289,7 +272,6 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
     resetToTitle("");
   };
 
-  // 同じ部屋を畳んで、新しい相手を探しに行く
   const findNewOpponents = () => {
     room.leave();
     sentSwordRef.current = syncKey(currentSyncSword);
@@ -298,9 +280,8 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
 
   const handleCopyId = () => {
     if (!room.roomId) return;
-    navigator.clipboard.writeText(room.roomId).then(() => { 
-      setIsCopied(true); 
-      setTimeout(() => setIsCopied(false), 2000); 
+    navigator.clipboard.writeText(room.roomId).then(() => {
+      setIsCopied(true); setTimeout(() => setIsCopied(false), 2000);
     }).catch(e => console.error(e));
   };
 
@@ -309,6 +290,17 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
     setSystemMessage(""); setTitleMode("DEFAULT");
     sentSwordRef.current = syncKey(currentSyncSword);
     room.createRoom(currentSyncSword);
+  };
+
+  const connectToHost = () => {
+    setSystemMessage("");
+    if (!targetId.trim()) return setSystemMessage("IDを入力してください。");
+    if (!/^\d+$/.test(targetId)) return setSystemMessage("半角数字のみで入力してください。");
+    if (targetId.length < 6) return setSystemMessage("6桁で入力してください。");
+    if (!mySwordData) return setSystemMessage("先に剣を錬成してください。");
+
+    sentSwordRef.current = syncKey(currentSyncSword);
+    room.joinRoom(targetId, currentSyncSword);
   };
 
   const handleJoinRoom = () => {
@@ -320,141 +312,111 @@ const currentSyncSword = createSyncSwordData(swordList, mySwordData);
     room.leave();
   };
 
-  const connectToHost = () => {
-    setSystemMessage("");
-    if (!targetId.trim()) return setSystemMessage("IDを入力してください。");
-    if (!/^\d+$/.test(targetId)) return setSystemMessage("半角数字のみで入力してください。");
-    if (targetId.length < 6) return setSystemMessage("6桁で入力してください。");
-    if (!mySwordData) return setSystemMessage("先に剣を錬成してください。");
-    setSystemMessage("接続中...");
-    sentSwordRef.current = syncKey(currentSyncSword);
-    room.joinRoom(targetId, currentSyncSword);
-  };
-
   const startCaptureCountdown = () => setCaptureCountdown(5);
 
   const executeCaptureAndCraft = () => {
-    setStep("CRAFTING_API");
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    const context = canvas.getContext('2d');
-    context.save(); context.scale(-1, 1); context.translate(-canvas.width, 0);
-    context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    context.restore(); 
-    
-    const base64Full = canvas.toDataURL('image/jpeg');
-    setCapturedImage(base64Full);
-    const base64DataOnly = base64Full.split(',')[1]; 
-    // 既定は Vercel 関数経由。関数側が Cloud Run の錬成APIへ中継し、APIキーを付ける。
-    const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? '/api'}/cutout`;
+    setIsFlash(true);
+    setTimeout(() => setIsFlash(false), 500);
 
-    fetch(pythonApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: base64DataOnly, userName: userName }) })
-    .then(res => { if (!res.ok) throw new Error(`HTTPエラー`); return res.json(); })
-    .then((data) => {
-      if (craftingTargetId) {
-        // 【A】姿の撮り直し（上書き）の場合
-        const updatedProps = {
-          hp: data.params.hp,
-          attack: data.params.attack,
-          weight: data.params.weight,
-          imageStr: data.imageData,
-          imageSrc: "data:image/png;base64," + data.imageData
-        };
-        updateSword(craftingTargetId, updatedProps);
-        
-        const targetOld = swordList.find(s => s.id === craftingTargetId);
-        if (targetOld) {
-          setMySwordData({ ...targetOld, ...updatedProps });
-        }
-        
-        setCraftingTargetId(null);
-      } else {
-        // 【B】新規錬成の場合
-        const newSword = {
-          id: Date.now().toString(),
-          baseName: userName,
-          name: data.swordName || "無銘の剣",
-          hp: data.params.hp,
-          attack: data.params.attack,
-          weight: data.params.weight,
-          imageStr: data.imageData,  
-          imageSrc: "data:image/png;base64," + data.imageData,
-          hiltType: "0"
-        };
-        setSwordList(prev => {
-          let updatedList = [...prev];
-          if (updatedList.length >= 3) updatedList.shift();
-          updatedList.push(newSword);
-          return updatedList;
-        });
-        setMySwordData(newSword);
-      }
+    setTimeout(() => {
+      setStep("CRAFTING_API");
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas) return;
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      context.save(); context.scale(-1, 1); context.translate(-canvas.width, 0);
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      context.restore();
 
-      setStep("CRAFT_COMPLETE");
-    })
-    .catch((error) => { console.error(error); alert("AIサーバーとの通信に失敗しました。"); setStep("CRAFT_POSE"); });
+      const base64Full = canvas.toDataURL('image/jpeg');
+      setCapturedImage(base64Full);
+      const base64DataOnly = base64Full.split(',')[1];
+      const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? '/api'}/cutout`;
+
+      fetch(pythonApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: base64DataOnly, userName: userName }) })
+        .then(res => { if (!res.ok) throw new Error(`HTTPエラー`); return res.json(); })
+        .then((data) => {
+          setLastCraftWasRecapture(!!craftingTargetId);
+
+          if (craftingTargetId) {
+            const updatedProps = { hp: data.params.hp, attack: data.params.attack, weight: data.params.weight, imageStr: data.imageData, imageSrc: "data:image/png;base64," + data.imageData };
+            updateSword(craftingTargetId, updatedProps);
+            const targetOld = swordList.find(s => s.id === craftingTargetId);
+            if (targetOld) setMySwordData({ ...targetOld, ...updatedProps });
+            setCraftingTargetId(null);
+          } else {
+            const newSword = { id: Date.now().toString(), baseName: userName, name: data.swordName || "無銘の剣", hp: data.params.hp, attack: data.params.attack, weight: data.params.weight, imageStr: data.imageData, imageSrc: "data:image/png;base64," + data.imageData, hiltType: "0" };
+            setSwordList(prev => {
+              let updatedList = [...prev];
+              if (updatedList.length >= 3) updatedList.shift();
+              updatedList.push(newSword);
+              return updatedList;
+            });
+            setMySwordData(newSword);
+          }
+          setStep("CRAFT_COMPLETE");
+        })
+        .catch((error) => { console.error(error); alert("AIサーバーとの通信に失敗しました。"); setStep("CRAFT_POSE"); });
+    }, 50);
   };
 
-  // ▼ 名前入力画面でキャンセルした時の処理
   const handleCancelCrafting = () => {
-    setUserName("");
-    setCraftingTargetId(null);
-    if (swordList.length > 0) {
-      setStep("SWORD_LIST");
-    } else {
-      setStep(craftReturnStep);
-    }
+    setUserName(""); setCraftingTargetId(null);
+    setTransitionDir("back");
+    if (swordList.length > 0) setStep("SWORD_LIST");
+    else setStep(craftReturnStep);
   };
 
-  // ▼ ポーズ撮影画面で戻るを押した時の処理
   const handleBackFromPose = () => {
+    setTransitionDir("back");
     if (craftingTargetId !== null) {
-      setCraftingTargetId(null);
-      setStep("SWORD_LIST");
+      setCraftingTargetId(null); setStep("SWORD_LIST");
     } else {
       setStep("NAME_INPUT");
     }
   };
 
-
   const renderScreen = () => {
     switch (screen) {
       case "TITLE":
-        return <TitleScreen mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={room.error || systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} connecting={room.connecting} openRandomMatch={openRandomMatch} startRandomMatch={startRandomMatch} matchMode={matchMode} setMatchMode={setMatchMode} />;
-
+        return <TitleScreen mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={room.error || systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} connecting={room.connecting} openRandomMatch={openRandomMatch} startRandomMatch={startRandomMatch} matchMode={matchMode} setMatchMode={setMatchMode} direction={transitionDir}/>;
       case "MATCHING":
         return <MatchmakingScreen view={randomMatch.view} mySwordData={mySwordData} gameMode={matchMode} onCancel={cancelRandomMatch} />;
-      
       case "NAME_INPUT":
-        return <NameInputScreen userName={userName} setUserName={setUserName} mySwordData={mySwordData} setMySwordData={setMySwordData} setStep={setStep} craftReturnStep={craftReturnStep} handleCancel={handleCancelCrafting}/>;
-      
+        return <NameInputScreen direction={transitionDir} userName={userName} setUserName={setUserName} mySwordData={mySwordData} setMySwordData={setMySwordData} setStep={setStep} handleCancel={handleCancelCrafting} />;
       case "CRAFT_POSE":
-        return <CraftPoseScreen videoRef={videoRef} canvasRef={canvasRef} captureCountdown={captureCountdown} startCaptureCountdown={startCaptureCountdown} setStep={setStep} handleBack={handleBackFromPose}/>;
-      
+        return <CraftPoseScreen direction={transitionDir} videoRef={videoRef} canvasRef={canvasRef} captureCountdown={captureCountdown} startCaptureCountdown={startCaptureCountdown} forceCapture={() => setCaptureCountdown(0)} handleBack={handleBackFromPose} />;
       case "CRAFTING_API":
         return <CraftingApiScreen capturedImage={capturedImage} />;
-      
       case "CRAFT_COMPLETE":
-        return <CraftCompleteScreen mySwordData={mySwordData} setStep={setStep} startNewCrafting={startNewCrafting} craftReturnStep={craftReturnStep} />;
-
+        return <CraftCompleteScreen mySwordData={mySwordData} setStep={(s) => { setTransitionDir("forward"); setStep(s); }} startNewCrafting={startNewCrafting} craftReturnStep={craftReturnStep} swordListLength={swordList.length} isRecapture={lastCraftWasRecapture} />;
       case "SWORD_LIST":
-        return <SwordListScreen swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} deleteSword={deleteSword} startNewCrafting={startNewCrafting} startRecapture={startRecapture} updateSword={updateSword} cancelList={cancelList} toggleSwordFlip={toggleSwordFlip} />;
-
+        return <SwordListScreen direction={transitionDir} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} deleteSword={deleteSword} startNewCrafting={startNewCrafting} startRecapture={startRecapture} updateSword={updateSword} cancelList={cancelList} toggleSwordFlip={toggleSwordFlip} />;
       case "LOBBY":
-        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onSoloMode={room.setSoloMode} onBossPlayer={room.setBossPlayer} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
-
+        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} reorderSwords={reorderSwords} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onSoloMode={room.setSoloMode} onBossPlayer={room.setBossPlayer} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
       case "RESULT":
-        return <ResultScreen view={view} onReturnToLobby={room.returnToLobby} onLeave={handleLeave}
-          onFindNewOpponents={view?.room?.autoStart ? findNewOpponents : null} />;
-      
+        return <ResultScreen view={view} onReturnToLobby={room.returnToLobby} onLeave={handleLeave} onFindNewOpponents={view?.room?.autoStart ? findNewOpponents : null} />;
       default: return null;
     }
   };
 
   return (
     <div style={{ fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#f5f5f5', minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>
+      
+      {/* 撮影フラッシュ演出用のスタイル */}
+      <style>{`
+        @keyframes flashFade {
+          0% { opacity: 1; }
+          100% { opacity: 0; }
+        }
+      `}</style>
+      {isFlash && <div style={{ position: 'fixed', inset: 0, backgroundColor: '#fff', zIndex: 9999, pointerEvents: 'none', animation: 'flashFade 0.5s ease-out forwards' }}></div>}
+
+      {/* 画面描画（遅延なしで瞬時に切り替わり、各画面のCSSアニメーションが発動します） */}
       {screen !== "PLAYING" && renderScreen()}
+
+      {/* Unity側の描画 */}
       {room.hasArena && (
         <div style={{ ...styles.unityContainer, display: screen === "PLAYING" ? 'flex' : 'none', margin: '0 auto' }}>
           <BattleArena bridge={room.bridge} view={view} onLoadFailed={room.reportLoadFailure} />

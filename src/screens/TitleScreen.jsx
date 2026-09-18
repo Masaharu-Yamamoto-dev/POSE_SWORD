@@ -3,6 +3,7 @@ import React from 'react';
 import { styles } from '../styles';
 
 export default function TitleScreen({
+  direction = "forward", // 🌟 追加：遷移方向を受け取る
   mySwordData,
   titleMode,          
   targetId,           
@@ -19,8 +20,11 @@ export default function TitleScreen({
   matchMode,
   setMatchMode
 }) {
+  // 🌟 追加：アニメーションクラスの判定
+  const animClass = direction === "back" ? "page-enter-back" : "page-enter-forward";
+
   return (
-    <div style={styles.container}>
+    <div className={animClass} style={styles.container}>
       {mySwordData?.imageSrc && (
         <img src={mySwordData.imageSrc} alt="Background Sword" style={{ ...styles.bgImageCenter, transform: 'translate(-50%, -50%)' }} />
       )}
@@ -28,7 +32,6 @@ export default function TitleScreen({
       <div style={styles.contentWrapper}>
         <img src="/logo.png" alt="オレブレード" style={{ width: '90%', maxWidth: '800px', marginBottom: '40px', objectFit: 'contain' }} />
         
-        {/* ▼ titleMode によって表示を切り替え */}
         {titleMode === "DEFAULT" ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', maxWidth: '300px' }}>
             <div className="ink-btn-container">
@@ -38,7 +41,7 @@ export default function TitleScreen({
                 style={{ '--btn-color': '#4CAF50' }}
                 onClick={() => goToCrafting("TITLE")}
               >
-                {mySwordData ? "⚔️ 剣を再錬成する" : "⚔️ 剣を錬成する"}
+                {mySwordData ? "⚔️ 武器庫を開く" : "⚔️ 剣を錬成する"}
               </button>
             </div>
             
@@ -71,7 +74,6 @@ export default function TitleScreen({
             </div>
           </div>
         ) : titleMode === "MATCH_SIZE" ? (
-          /* ▼ ランダムマッチの人数選択 */
           <div className="glass" style={{ width: '100%', maxWidth: '400px', padding: '25px', boxSizing: 'border-box' }}>
             <p style={{ fontSize: '18px', fontWeight: 'bold', color: '#000', margin: '0 0 5px 0' }}>
               何人で戦いますか
@@ -80,7 +82,6 @@ export default function TitleScreen({
               見知らぬ相手と自動で合流します。集まりしだい開始します。
             </p>
 
-            {/* 自分が部屋を立てたときのルール。相手の部屋に入った場合はその部屋に従う。 */}
             <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
               {[["0", "🗡️ 剣"], ["1", "🌀 独楽"]].map(([value, label]) => (
                 <button
@@ -123,7 +124,6 @@ export default function TitleScreen({
             </div>
           </div>
         ) : (
-          /* ▼ ID入力モードのUI */
           <div className="glass" style={{ width: '100%', maxWidth: '400px', padding: '25px', boxSizing: 'border-box' }}>
             <p style={{ fontSize: '18px', fontWeight: 'bold', color: '#000', margin: '0 0 20px 0' }}>
               ロビーID（6桁の数字）を入力
@@ -167,7 +167,6 @@ export default function TitleScreen({
               </button>
             </div>
 
-            {/* キャンセルボタン */}
             <div style={{ marginTop: '30px', width: '100%', display: 'flex', justifyContent: 'center' }}>
               <div className="ink-btn-container" style={{ width: '200px' }}>
                 <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />

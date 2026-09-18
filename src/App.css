@@ -304,3 +304,69 @@
   border-top: 1px solid rgba(255, 255, 255, 0.5);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
 }
+
+/* --- 画面遷移アニメーション --- */
+
+/* ① 進む時：現在の画面が左へはける */
+@keyframes slideOutLeft {
+  0% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(-50px); } 
+}
+/* ② 進む時：次の画面が右から入ってくる */
+@keyframes slideInRight {
+  0% { opacity: 0; transform: translateX(50px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+/* ③ 戻る時：現在の画面が右へはける */
+@keyframes slideOutRight {
+  0% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(50px); }
+}
+/* ④ 戻る時：前の画面が左から入ってくる */
+@keyframes slideInLeft {
+  0% { opacity: 0; transform: translateX(-50px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+/* --- クラスの割り当て --- */
+/* 進む時用 */
+.page-exit-forward { animation: slideOutLeft 0.3s ease-in forwards; }
+.page-enter-forward { animation: slideInRight 0.3s ease-out forwards; }
+
+/* 戻る時用 */
+.page-exit-back { animation: slideOutRight 0.3s ease-in forwards; }
+.page-enter-back { animation: slideInLeft 0.3s ease-out forwards; }
+
+/* --- 部分クロスフェード用 --- */
+.section-fade-out {
+  animation: fadeOut 0.2s ease-out forwards;
+}
+.section-fade-in {
+  animation: fadeIn 0.2s ease-in forwards;
+}
+@keyframes fadeOut {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(10px); } /* 少し下に落ちながら消える */
+}
+@keyframes fadeIn {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* --- 暗転（フェードトゥブラック）用 --- */
+.blackout-overlay {
+  position: fixed;
+  /* top, left, width, height の代わりに inset を使用して隙間をなくす */
+  inset: 0; 
+  background-color: #000;
+  opacity: 0;
+  pointer-events: none; 
+  z-index: 9999; 
+  /* 暗転速度を 0.1秒 に少し早める */
+  transition: opacity 0.1s ease-in-out;
+}
+.blackout-overlay.active {
+  opacity: 1;
+  pointer-events: auto; 
+}
