@@ -111,6 +111,12 @@ public class MultiplayerManager : MonoBehaviour
             // 古いローカルデモの進行だけを止める（テキスト自体はUpdate()側で生きたまま更新する）
             scene.StopAllCoroutines();
             scene.autoTestOnStart = false;
+            // ▼【修正】autoTestOnStart(ローカルデモ)がp3HudTemplate/p4HudTemplate未設定のまま
+            // 3・4人目を動的生成すると、WireClonedHudがHPバー・名前表示などを複製してしまう。
+            // このクローンはStartBattle()が再度呼ばれない限り自分では破棄されないため、
+            // 本番のマルチプレイ対戦がそのまま始まると「消したはずの名前表示等が残って見える」
+            // 不具合の原因になっていた。マルチプレイ開始時に必ず一度破棄しておく
+            scene.ClearDynamicObjects();
             countdownText = scene.countdownText;
             countdownUiPhase = "IDLE";
             if (countdownText != null) countdownText.gameObject.SetActive(false);
@@ -151,7 +157,15 @@ public class MultiplayerManager : MonoBehaviour
             // 明示的に表示/非表示を揃える(これが無いと2〜3人戦でも4人分のHPバーが残って見えてしまう)
             SceneController.SetHudTemplateVisible(scene.p3HudTemplate, config.players.Length >= 3);
             SceneController.SetHudTemplateVisible(scene.p4HudTemplate, config.players.Length >= 4);
-            foreach (var tutorial in FindObjectsByType<TutorialManager>(FindObjectsSortMode.None)) tutorial.enabled = false;
+            // ▼【修正】enabled=falseで止めるだけだと、ちょうどチュートリアルの文字が流れている
+            // 最中(黒い帯が表示中)だった場合にUpdate()が二度と回らなくなり、帯を隠す処理
+            // (UpdateBarVisibility)も一緒に止まってしまい、帯が表示されたまま残ってしまっていた。
+            // 止める前に必ず明示的に非表示にしてから無効化する
+            foreach (var tutorial in FindObjectsByType<TutorialManager>(FindObjectsSortMode.None))
+            {
+                tutorial.ForceHideAndStop();
+                tutorial.enabled = false;
+            }
             if (BackgroundManager.Instance != null) BackgroundManager.Instance.enabled = false;
             if (CutinManager.Instance != null) CutinManager.Instance.StopAllCoroutines();
             Time.timeScale = 1;
@@ -235,6 +249,9 @@ public class MultiplayerManager : MonoBehaviour
         // 共有してしまう。ResolveOwnHandle()が複製した自分自身の子から名前で探し直すことで、
         // Inspectorの配線ミスに関わらず必ず「自分の」柄を使うようにする
         controller.ResolveOwnHandle();
+        // ▼【調査用ログ】実機のクライアント側だけ柄が透明/非表示になる不具合を追うための診断ログ
+        Debug.Log($"🗡️ CreateSword: playerId={player.playerId}, IsHost={IsHost}, " +
+            $"isLocalControlled={controller.isLocalControlled}, resolvedHandle={(controller.handleObject != null ? controller.handleObject.name + "(id=" + controller.handleObject.GetInstanceID() + ")" : "null")}");
         // ▼【修正】SceneController側の3・4人目動的生成(CreateDynamicPlayerSword)と同じく、
         // テンプレートに既にSwordGeneratorが付いていればそれを再利用する（無条件AddComponentは二重生成の恐れがあった）
         var generator = obj.GetComponent<SwordGenerator>();
@@ -507,8 +524,10 @@ public class MultiplayerManager : MonoBehaviour
         UpdateTargets(false);
         // ▼【修正】オレ達シールド展開中も本体は無敵にする(SwordBattle.TakeDamage側の無敵判定と同じ条件)。
         // これが無いと、Client側は正しいHPを受け取れても、Host自身のOnCollisionEnter2D→QueueHitでは
-        // シールドの反射に加えて本体にも通常ダメージが通ってしまっていた
-        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing || p.Value.HasActiveLeafShield;
+        // シールドの反射に加えて本体にも通常ダメージが通ってしまっていた。
+        // ▼【新規追加】残機モードのリスポーン直後無敵(IsRespawnInvincible)もここに加える。
+        // これが無いと見た目は点滅していても、Host権威のダメージ判定では素通しになってしまう
+        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing || p.Value.HasActiveLeafShield || p.Value.IsRespawnInvincible;
         Physics2D.Simulate(Time.fixedDeltaTime);
         if (!IsPlaying) return;
         rules.ResolveStep(++physicsTick, hits, forfeits);
@@ -844,6 +863,13 @@ public class MultiplayerManager : MonoBehaviour
         var result = JsonUtility.FromJson<MultiplayerResult>(json);
         if (config == null || result == null || result.matchId != config.matchId || phase == "RESULT") return;
         phase = "RESULT"; SwordBattle.matchEnded = true; SwordBattle.isRoundStarted = false;
+        // ▼【修正】SwordBattle.Update()は isRoundStarted/matchEnded を見た時点で即returnするため、
+        // ちょうど必殺技ボタンが表示中(SP満タン)のままここに来ると、ボタンの表示を消す
+        // UpdateSpecialAttackButton()が二度と呼ばれなくなり、結果画面になってもボタンが
+        // 表示されたまま残ってしまっていた。Update()を止める前に明示的に隠しておく
+        var firstSword = swords.Values.FirstOrDefault();
+        var specialButton = firstSword != null ? firstSword.specialAttackButton : null;
+        if (specialButton != null) specialButton.gameObject.SetActive(false);
         foreach (var sword in swords.Values) { sword.StopAllCoroutines(); bodies[sword.PlayerId].simulated = false; }
         // ▼【修正】ローカルのDefeatRoutine後半(カメラロック・シェイク・スローモーション・完全停止)と同じ決着演出。
         // カメラロック自体はLateUpdate()がphase=="RESULT"を見て自動的に行う
@@ -876,6 +902,11 @@ public class MultiplayerManager : MonoBehaviour
     void StopCurrent()
     {
         StopAllCoroutines();
+        // ▼【修正】FinishMultiplayerを経ずに対戦が中断される場合(フォーフェイト・再接続など)にも、
+        // 必殺技ボタンが表示中のまま残ってしまわないよう、剣を破棄する前に明示的に隠しておく
+        var firstSword = swords.Values.FirstOrDefault();
+        var specialButton = firstSword != null ? firstSword.specialAttackButton : null;
+        if (specialButton != null) specialButton.gameObject.SetActive(false);
         foreach (var sword in swords.Values) if (sword != null) { sword.StopAllCoroutines(); sword.gameObject.SetActive(false); }
         if (arena != null) { arena.SetActive(false); Destroy(arena); }
         if (ownsSimulation) { Physics2D.simulationMode = previousSimulationMode; ownsSimulation = false; }
