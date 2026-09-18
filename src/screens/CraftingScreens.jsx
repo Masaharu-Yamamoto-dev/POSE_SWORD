@@ -54,27 +54,26 @@ export function NameInputScreen({ direction = "forward", userName, setUserName, 
           style={styles.input}
         />
 
-        <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', maxWidth: '300px', margin: '30px auto 0' }}>
-          
-          <div className={`ink-btn-container ${!userName.trim() ? 'disabled' : ''}`} style={{ width: '100%' }}>
+        <div style={{ marginTop: '30px', display: 'flex', gap: '4%', width: '100%', maxWidth: '400px' }}>
+          <div className="ink-btn-container" style={{ flex: 1 }}>
+            <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+            {}
+            <button className="sharp-button" onClick={handleCancel}>
+              キャンセル
+            </button>
+          </div>
+
+          <div className={`ink-btn-container ${!userName.trim() ? 'disabled' : ''}`} style={{ flex: 1 }}>
             <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
             <button 
               style={{ '--btn-color': '#4CAF50' }}
               className="sharp-button"
-              onClick={onNext}
+              onClick={() => setStep("CRAFT_POSE")}
               disabled={!userName.trim()}
             >
               ポーズを撮影する
             </button>
           </div>
-
-          <div className="ink-btn-container" style={{ width: '100%' }}>
-            <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-            <button className="sharp-button" style={{ '--btn-color': '#666' }} onClick={onCancel}>
-              キャンセル
-            </button>
-          </div>
-
         </div>
       </div>
     </div>
@@ -97,7 +96,7 @@ export function CraftPoseScreen({ direction = "forward", videoRef, canvasRef, ca
                     (direction === "back" ? "page-enter-back" : "page-enter-forward");
 
   return (
-    <div style={{ ...styles.container, overflowX: 'hidden' }} className={animClass}>
+    <div style={styles.container}>
       <div style={styles.contentWrapper}>
         <h2>ポーズ撮影</h2>
         
@@ -110,7 +109,6 @@ export function CraftPoseScreen({ direction = "forward", videoRef, canvasRef, ca
             </div>
           )}
         </div>
-
         <canvas ref={canvasRef} width="640" height="480" style={{ display: 'none' }} />
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px', margin: '0 auto' }}>
@@ -151,10 +149,11 @@ export function CraftPoseScreen({ direction = "forward", videoRef, canvasRef, ca
 
           <div className={`ink-btn-container ${captureCountdown !== null ? 'disabled' : ''}`}>
             <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
+            {}
             <button 
               className="sharp-button"
               style={{ '--btn-color': '#666666' }}
-              onClick={onBack}
+              onClick={handleBack}
               disabled={captureCountdown !== null}
             >
               {captureCountdown !== null ? "" : "戻る"}
@@ -332,7 +331,7 @@ export function CraftCompleteScreen({ mySwordData, setStep, startNewCrafting, cr
                     style={{ '--btn-color': '#FF9800' }}
                     onClick={onReturnTitle}
                   >
-                    {craftReturnStep === "TITLE" ? "タイトルに戻って対戦だ！" : "ロビーに戻って対戦だ！"}
+                    {craftReturnStep === "TITLE" ? "タイトルに戻って対戦！" : "ロビーに戻って対戦！"}
                   </button>
                 </div>
 
@@ -343,7 +342,7 @@ export function CraftCompleteScreen({ mySwordData, setStep, startNewCrafting, cr
                     style={{ '--btn-color': '#4CAF50' }}
                     onClick={onGoArmory}
                   >
-                    武器庫（一覧）へ進む
+                    武器庫へ進む
                   </button>
                 </div>
 
@@ -355,7 +354,7 @@ export function CraftCompleteScreen({ mySwordData, setStep, startNewCrafting, cr
                       style={{ '--btn-color': '#000' }}
                       onClick={onCraftAnother}
                     >
-                      続けてもう1本錬成する
+                      もう1本錬成する
                     </button>
                   </div>
                 )}

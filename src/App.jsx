@@ -1,4 +1,3 @@
-// src/App.jsx
 import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
 import { styles } from './styles';
@@ -27,7 +26,18 @@ const PEER_ICE_CONFIG = {
 
 const ACTIVE_PHASES = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 const ROOM_STEPS = ['LOBBY', 'PLAYING', 'RESULT'];
+
+// 武器の中身が変わったかどうかだけを見る。
 const swordKey = sword => sword && `${sword.id}:${sword.name}:${sword.hp}:${sword.attack}:${sword.weight}:${sword.hiltType}:${sword.imageStr?.length ?? 0}`;
+
+// 🌟 残機モード用のswords[](装備中以外も含む3本分)まで含めた同期判定キー
+const syncKey = sync => {
+  if (!sync) return null;
+  const slots = (sync.swords || [])
+    .map(s => `${s.name}:${s.hp}:${s.attack}:${s.weight}:${s.imageStr?.length ?? 0}:${s.hiltType ?? '0'}:${s.isEmpty ? 1 : 0}`)
+    .join('|');
+  return `${swordKey(sync)}:${sync.equippedIndex}:${slots}`;
+};
 
 // 🌟 柄の補正適用および下限1の設定を行うヘルパー関数
 const getFinalStats = (sword) => {
@@ -51,20 +61,19 @@ export default function PoseSwordWeb() {
   const mySwordRef = useRef(null);
   useEffect(() => { mySwordRef.current = mySwordData; }, [mySwordData]);
 
-  // 🌟 通信・Unity送信用のデータ生成（柄のステータス補正を反映）
+  // 🌟 通信・Unity送信用のデータ生成
   const createSyncSwordData = (list, equipped) => {
     if (!equipped) return null;
 
-    // 3本分の配列を生成（無いスロットは空のダミー）
     const swords = [0, 1, 2].map(index => {
       const sword = list[index];
       if (sword) {
         const stats = getFinalStats(sword);
         return {
           name: sword.name,
-          hp: stats.hp,         // ★ 補正適用後（下限1）
-          attack: stats.attack, // ★ 補正適用後（下限1）
-          weight: stats.weight, // ★ 補正適用後（下限1）
+          hp: stats.hp,
+          attack: stats.attack,
+          weight: stats.weight,
           imageStr: sword.imageStr,
           hiltType: Number(sword.hiltType || 0),
           isEmpty: false
@@ -85,16 +94,15 @@ export default function PoseSwordWeb() {
     const equippedIndex = Math.max(0, list.findIndex(s => s.id === equipped.id));
     const equippedStats = getFinalStats(equipped);
 
-    const result = {
+    return {
       ...equipped,
-      hp: equippedStats.hp,         // ★ メイン装備のステータスも補正済みに上書き
+      hp: equippedStats.hp,
       attack: equippedStats.attack,
       weight: equippedStats.weight,
       hiltType: Number(equipped.hiltType || 0),
       swords: swords,
       equippedIndex: equippedIndex
     };
-    return result;
   };
 
   const currentSyncSword = createSyncSwordData(swordList, mySwordData);
@@ -108,11 +116,9 @@ export default function PoseSwordWeb() {
   const [systemMessage, setSystemMessage] = useState("");
   const [isCopied, setIsCopied] = useState(false);
 
-  // 画面遷移の方向と、撮り直しの判定
+  // 🌟 アニメーション・撮り直し用の状態管理
   const [transitionDir, setTransitionDir] = useState("forward");
   const [lastCraftWasRecapture, setLastCraftWasRecapture] = useState(false);
-
-  // 撮影時のフラッシュ演出用
   const [isFlash, setIsFlash] = useState(false);
 
   const resetToTitleRef = useRef(null);
@@ -132,55 +138,37 @@ export default function PoseSwordWeb() {
   }, []);
   useEffect(() => { resetToTitleRef.current = resetToTitle; }, [resetToTitle]);
 
+  // ▼【復元】決着演出(2.5秒)を見せるためのディレイ
+  const resultMatchId = view?.result?.matchId ?? null;
+  const [resultDelayDone, setResultDelayDone] = useState(false);
+  useEffect(() => {
+    if (!resultMatchId) { setResultDelayDone(false); return; }
+    setResultDelayDone(false);
+    const timer = setTimeout(() => setResultDelayDone(true), 2500);
+    return () => clearTimeout(timer);
+  }, [resultMatchId]);
+
   const roomScreen = (() => {
     if (!view?.room || view.closed) return null;
     const me = view.room.players.find(p => p.playerId === view.localPlayerId);
     if (ACTIVE_PHASES.includes(view.room.phase)) return "PLAYING";
-    if (view.result && me && !me.inLobby) return "RESULT";
+    if (view.result && me && !me.inLobby) return resultDelayDone ? "RESULT" : "PLAYING";
     return "LOBBY";
   })();
   const seeking = Boolean(randomMatch.view?.seeking);
 
-  const logicalScreen = seeking ? "MATCHING"
+  // 🌟 displayScreen を廃止し、直接 screen を使ってアニメーションを即座に発動させる
+  const screen = seeking ? "MATCHING"
     : ROOM_STEPS.includes(step) || step === "TITLE" ? (roomScreen ?? "TITLE")
-      : step;
+    : step;
 
-  const [displayScreen, setDisplayScreen] = useState(logicalScreen);
-  const [isBlackout, setIsBlackout] = useState(false);
-
-  useEffect(() => {
-    if (logicalScreen === displayScreen) return;
-
-    const isNetworkTransition =
-      ROOM_STEPS.includes(logicalScreen) || logicalScreen === "MATCHING" ||
-      ROOM_STEPS.includes(displayScreen) || displayScreen === "MATCHING";
-
-    if (isNetworkTransition) {
-      setIsBlackout(true);
-      const timer = setTimeout(() => {
-        setDisplayScreen(logicalScreen);
-        setIsBlackout(false);
-      }, 300);
-      return () => clearTimeout(timer);
-    } else {
-      setDisplayScreen(logicalScreen);
-    }
-  }, [logicalScreen, displayScreen]);
-
-  useEffect(() => {
-    if (displayScreen === "LOBBY" || displayScreen === "PLAYING" || room?.error) {
-      setIsBlackout(false);
-    }
-  }, [displayScreen, room?.error]);
-
-  // 🌟 装備変更やデータ更新時に補正済みの最新情報をルームに送信
   useEffect(() => {
     if (!view?.room || !mySwordData) return;
-    const key = swordKey(mySwordData);
+    const key = syncKey(currentSyncSword);
     if (sentSwordRef.current === key) return;
     sentSwordRef.current = key;
     room.updateSword(currentSyncSword);
-  }, [mySwordData, view?.room, room, currentSyncSword]);
+  }, [mySwordData, swordList, view?.room, room, currentSyncSword]);
 
   useEffect(() => {
     let stream = null;
@@ -205,11 +193,7 @@ export default function PoseSwordWeb() {
   }, [captureCountdown]);
 
   const equipSword = (sword) => setMySwordData(sword);
-
-  // 🌟 ロビーや武器庫からの並び替え関数
-  const reorderSwords = (newList) => {
-    setSwordList(newList);
-  };
+  const reorderSwords = (newList) => setSwordList(newList);
 
   const deleteSword = (idToRemove) => {
     if (!window.confirm("本当にこの剣を破棄しますか？")) return;
@@ -288,7 +272,7 @@ export default function PoseSwordWeb() {
     if (!mySwordData) return;
     setMatchSize(size);
     setSystemMessage(""); setTitleMode("DEFAULT");
-    sentSwordRef.current = swordKey(mySwordData);
+    sentSwordRef.current = syncKey(currentSyncSword);
     randomMatch.start(size, matchMode);
   };
 
@@ -299,7 +283,7 @@ export default function PoseSwordWeb() {
 
   const findNewOpponents = () => {
     room.leave();
-    sentSwordRef.current = swordKey(mySwordData);
+    sentSwordRef.current = syncKey(currentSyncSword);
     randomMatch.start(matchSize, matchMode);
   };
 
@@ -313,7 +297,7 @@ export default function PoseSwordWeb() {
   const handleCreateRoom = () => {
     if (!mySwordData) return;
     setSystemMessage(""); setTitleMode("DEFAULT");
-    sentSwordRef.current = swordKey(mySwordData);
+    sentSwordRef.current = syncKey(currentSyncSword);
     room.createRoom(currentSyncSword);
   };
 
@@ -324,7 +308,7 @@ export default function PoseSwordWeb() {
     if (targetId.length < 6) return setSystemMessage("6桁で入力してください。");
     if (!mySwordData) return setSystemMessage("先に剣を錬成してください。");
 
-    sentSwordRef.current = swordKey(mySwordData);
+    sentSwordRef.current = syncKey(currentSyncSword);
     room.joinRoom(targetId, currentSyncSword);
   };
 
@@ -347,10 +331,11 @@ export default function PoseSwordWeb() {
       setStep("CRAFTING_API");
       const video = videoRef.current;
       const canvas = canvasRef.current;
+      if (!video || !canvas) return;
       canvas.width = video.videoWidth; canvas.height = video.videoHeight;
       const context = canvas.getContext('2d');
       context.save(); context.scale(-1, 1); context.translate(-canvas.width, 0);
-      context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
       context.restore();
 
       const base64Full = canvas.toDataURL('image/jpeg');
@@ -402,9 +387,9 @@ export default function PoseSwordWeb() {
   };
 
   const renderScreen = () => {
-    switch (displayScreen) {
+    switch (screen) {
       case "TITLE":
-        return <TitleScreen mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={room.error || systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} connecting={room.connecting} openRandomMatch={openRandomMatch} startRandomMatch={startRandomMatch} matchMode={matchMode} setMatchMode={setMatchMode} />;
+        return <TitleScreen mySwordData={mySwordData} titleMode={titleMode} targetId={targetId} setTargetId={setTargetId} systemMessage={room.error || systemMessage} goToCrafting={goToCrafting} handleCreateRoom={handleCreateRoom} handleJoinRoom={handleJoinRoom} handleCancelJoin={handleCancelJoin} connectToHost={connectToHost} connecting={room.connecting} openRandomMatch={openRandomMatch} startRandomMatch={startRandomMatch} matchMode={matchMode} setMatchMode={setMatchMode} direction={transitionDir}/>;
       case "MATCHING":
         return <MatchmakingScreen view={randomMatch.view} mySwordData={mySwordData} gameMode={matchMode} onCancel={cancelRandomMatch} />;
       case "NAME_INPUT":
@@ -418,7 +403,7 @@ export default function PoseSwordWeb() {
       case "SWORD_LIST":
         return <SwordListScreen direction={transitionDir} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} deleteSword={deleteSword} startNewCrafting={startNewCrafting} startRecapture={startRecapture} updateSword={updateSword} cancelList={cancelList} toggleSwordFlip={toggleSwordFlip} />;
       case "LOBBY":
-        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} reorderSwords={reorderSwords} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
+        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} reorderSwords={reorderSwords} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onSoloMode={room.setSoloMode} onBossPlayer={room.setBossPlayer} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
       case "RESULT":
         return <ResultScreen view={view} onReturnToLobby={room.returnToLobby} onLeave={handleLeave} onFindNewOpponents={view?.room?.autoStart ? findNewOpponents : null} />;
       default: return null;
@@ -427,8 +412,8 @@ export default function PoseSwordWeb() {
 
   return (
     <div style={{ fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#f5f5f5', minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>
-
-      {/* 撮影フラッシュ演出用のスタイルと要素 */}
+      
+      {/* 撮影フラッシュ演出用のスタイル */}
       <style>{`
         @keyframes flashFade {
           0% { opacity: 1; }
@@ -437,19 +422,20 @@ export default function PoseSwordWeb() {
       `}</style>
       {isFlash && <div style={{ position: 'fixed', inset: 0, backgroundColor: '#fff', zIndex: 9999, pointerEvents: 'none', animation: 'flashFade 0.5s ease-out forwards' }}></div>}
 
-      {displayScreen !== "PLAYING" && renderScreen()}
+      {/* 画面描画（遅延なしで瞬時に切り替わり、各画面のCSSアニメーションが発動します） */}
+      {screen !== "PLAYING" && renderScreen()}
 
+      {/* Unity側の描画 */}
       {room.hasArena && (
-        <div style={{ ...styles.unityContainer, display: displayScreen === "PLAYING" ? 'flex' : 'none', margin: '0 auto' }}>
+        <div style={{ ...styles.unityContainer, display: screen === "PLAYING" ? 'flex' : 'none', margin: '0 auto' }}>
           <BattleArena bridge={room.bridge} view={view} onLoadFailed={room.reportLoadFailure} />
         </div>
       )}
-      {displayScreen === "PLAYING" && !room.hasArena && (
+      {screen === "PLAYING" && !room.hasArena && (
         <div style={{ ...styles.container, justifyContent: 'center', minHeight: '100vh' }}>
           <p style={{ fontSize: '20px', fontWeight: 'bold' }}>対戦を準備しています…</p>
         </div>
       )}
-      <div className={`blackout-overlay ${isBlackout ? 'active' : ''}`}></div>
     </div>
   );
 }

@@ -7,6 +7,29 @@ using UnityEngine;
     public int slotIndex;
     public int spawnIndex;
     public SwordData swordData;
+    // ▼【新規追加】1vs3の陣営。0=ボス(1人側) / 1=トリオ(3人側)。
+    // soloModeでない試合では全員0で、その場合は陣営を使わず従来どおりの個人戦として扱う
+    public int team;
+}
+// ▼【新規追加】1vs3のボス強化。全クライアントが同じ値を使う必要があるため、
+// ホストが決めた値をこの形で配る（Web側 HostRoom.js の SOLO_BUFF が出どころ）
+[Serializable] public class MultiplayerSoloBuff
+{
+    public float hpMultiplier;
+    public float attackMultiplier;
+    public float spGainMultiplier;
+    public float maxSp;
+    public float suppressRadius;
+    public float suppressDuration;
+    // 掌握は「引き寄せ → 薙ぎ払い」の2段構え
+    public float judgmentPullSeconds;
+    public float judgmentPullForce;
+    public float judgmentDamageMultiplier;
+    public float judgmentKnockback;
+    // 薙ぎ払いの動き（ボスが範囲の中心で大きく回って斬り抜ける）
+    public float judgmentSweepSeconds;
+    public float judgmentSweepSpin;
+    public float judgmentSweepScale;
 }
 [Serializable] public class MultiplayerConfig
 {
@@ -17,6 +40,9 @@ using UnityEngine;
     // ▼【新規追加】残機モード：剣/独楽どちらとも組み合わせられる独立したON/OFFフラグ。
     // trueの時だけ各playerのswordData.swords[]を持ち替え用のライフとして使う
     public bool livesMode;
+    // ▼【新規追加】1vs3モード。trueの時だけ players[].team と soloBuff を使う
+    public bool soloMode;
+    public MultiplayerSoloBuff soloBuff;
     public MultiplayerPlayerConfig[] players;
 }
 [Serializable] public class MultiplayerCommand
@@ -44,6 +70,9 @@ using UnityEngine;
     // ゲスト側はlifeIndexが増えたことを検知して、そのプレイヤーの持ち替え演出(剣の再生成・復活)を再現する
     public int lifeIndex;
     public int livesRemaining;
+    // ▼【新規追加】1vs3：ボスの制圧を受けている残り秒数。0なら通常。ゲストはこの値から
+    // 操作不能の表示を出し、自分の必殺技ボタンを隠す
+    public float suppressedRemaining;
 }
 // ▼【新規追加】分身突進（hiltType:"2"）・リーフシールド（hiltType:"3"）など、
 // 本体以外に複数体表示する"付随体"1体分の見た目同期用データ
@@ -77,5 +106,8 @@ using UnityEngine;
     public string matchId;
     public string winnerId;
     public bool draw;
+    // ▼【新規追加】勝利した陣営(引き分け・未決着は -1)。1vs3では勝者が3人になりうるため
+    // winnerId が空になる。その場合はこちらを見ること
+    public int winnerTeam;
     public MultiplayerScore[] standings;
 }

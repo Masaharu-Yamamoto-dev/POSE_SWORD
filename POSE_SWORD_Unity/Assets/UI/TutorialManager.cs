@@ -374,6 +374,16 @@ public class TutorialManager : MonoBehaviour
     {
         ClearNormalTickers();
         ClearSpecialTickers();
-        if (backgroundBarObj != null) backgroundBarObj.SetActive(false); 
+        if (backgroundBarObj != null) backgroundBarObj.SetActive(false);
+    }
+
+    // ▼【新規追加】マルチプレイ開始時にこのコンポーネントをenabled=falseで止める前に呼ぶ。
+    // Update()が止まるとUpdateBarVisibility()も二度と呼ばれなくなるため、チュートリアルの
+    // 文字が流れている最中(黒い帯が表示中)にちょうど止めてしまうと、帯が消えないまま
+    // 表示され続けてしまっていた。止める前に明示的にすべて非表示にしておく
+    public void ForceHideAndStop()
+    {
+        ClearAllTickers();
+        isShowingUltimate = false;
     }
 }

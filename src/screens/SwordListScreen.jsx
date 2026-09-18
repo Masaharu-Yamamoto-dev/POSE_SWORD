@@ -155,9 +155,11 @@ export default function SwordListScreen({
         <div style={{ width: '80px' }}></div>
       </div>
 
+      {/* ▼ 変更：左右のカラム分けを廃止し、2×2のグリッド（マス目）に直接配置して高さを同期 */}
       <div className="armory-grid" style={{ width: '100%', maxWidth: '1000px', display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '20px', padding: '0 20px', boxSizing: 'border-box' }}>
 
         {/* ======================= 行1：左上（プレビュー） ======================= */}
+        {/* 高さを固定せず、右上のパネルと自動で高さが揃うようにしました */}
         <div className="panel" style={{ minHeight: '280px', position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '30px', border: isEquipped ? '4px solid #4CAF50' : '2px solid transparent' }}>
           {isEquipped && <div style={{ position: 'absolute', top: 10, left: 10, backgroundColor: '#4CAF50', color: 'white', padding: '5px 15px', fontWeight: 'bold', borderRadius: '5px' }}>★ 装備中</div>}
 
@@ -219,6 +221,7 @@ export default function SwordListScreen({
         </div>
 
         {/* ======================= 行2：左下（アクションボタン） ======================= */}
+        {/* 高さを自動で右下のパネルと同期させます */}
         <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '10px', justifyContent: 'center' }}>
           <button
             style={{ padding: '15px', fontSize: '18px', fontWeight: 'bold', backgroundColor: isEquipped ? '#ccc' : '#2196F3', color: 'white', border: 'none', borderRadius: '8px', cursor: isEquipped ? 'default' : 'pointer' }}
@@ -456,7 +459,7 @@ export default function SwordListScreen({
 
         @media (max-width: 800px) {
           .armory-grid {
-            grid-template-columns: 1fr !important;
+            grid-template-columns: 1fr !important; /* スマホでは1列に自動で並び替わります */
           }
         }
       `}</style>

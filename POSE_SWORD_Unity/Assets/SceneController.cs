@@ -40,6 +40,13 @@ public class SceneController : MonoBehaviour
     public Vector3 komaLeftPosition = new Vector3(-4f, 3f, 0f); // 例: 剣モードより少し上で、少し近い
     public Vector3 komaRightPosition = new Vector3(4f, 3f, 0f);
 
+    [Header("開始位置（2人用・任意）")]
+    [Tooltip("対応する要素([0]=1人目/左, [1]=2人目/右)にTransformを割り当てると、そのシーン上の位置を" +
+        "上のVector3の数値より優先して使う。PlayerSword1/PlayerSword2自身をここにドラッグしてSceneビュー上で" +
+        "動かせば、その位置がそのままスポーン地点になる。要素が未設定(null)の場合は従来通り上の数値を使う。")]
+    public Transform[] sword2PSpawnPoints = new Transform[2];
+    public Transform[] koma2PSpawnPoints = new Transform[2];
+
     [Header("開始位置（剣モード・3〜4人用）")]
     public Vector3[] sword3PPositions = new Vector3[] {
         new Vector3(-6f, 0f, 0f), new Vector3(0f, 0f, 0f), new Vector3(6f, 0f, 0f)
@@ -55,6 +62,19 @@ public class SceneController : MonoBehaviour
     public Vector3[] koma4PPositions = new Vector3[] {
         new Vector3(-6f, 3f, 0f), new Vector3(-2f, 3f, 0f), new Vector3(2f, 3f, 0f), new Vector3(6f, 3f, 0f)
     };
+
+    [Header("開始位置（1vs3・4人用）")]
+    [Tooltip("要素0がボス(1人側)、要素1〜3がトリオ(3人側)。ボスが片側、トリオが反対側に並ぶ配置を想定。" +
+        "未設定（要素数が4でない）の場合は通常の4人用配置がそのまま使われる。")]
+    public Vector3[] sword1v3Positions = new Vector3[] {
+        new Vector3(-9f, 0f, 0f), new Vector3(5f, 0f, 0f), new Vector3(8f, 0f, 0f), new Vector3(11f, 0f, 0f)
+    };
+    public Vector3[] koma1v3Positions = new Vector3[] {
+        new Vector3(0f, 7f, 0f), new Vector3(-5f, -3f, 0f), new Vector3(0f, -3f, 0f), new Vector3(5f, -3f, 0f)
+    };
+    [Tooltip("上の数値より優先してシーン上のTransformの位置を使う。要素0がボス。")]
+    public Transform[] sword1v3SpawnPoints = new Transform[4];
+    public Transform[] koma1v3SpawnPoints = new Transform[4];
 
     [Header("開始位置（3〜4人用・任意）")]
     [Tooltip("対応する要素にTransformを割り当てると、そのシーン上の位置(そのTransform自身の座標)を上の配列の数値より優先して使う。" +
@@ -93,6 +113,20 @@ public class SceneController : MonoBehaviour
     private readonly List<GameObject> dynamicSwords = new List<GameObject>();
     private readonly List<GameObject> dynamicHudPieces = new List<GameObject>();
 
+    // ▼【新規追加】StartBattle()(autoTestOnStartのローカルデバッグ含む)が3・4人目用に動的生成した
+    // 剣・HPバー(名前表示のクローンも含む)を破棄する。StartBattle()自身の冒頭だけでなく、
+    // MultiplayerManager.InitializeMultiplayer側からも呼べるように public 化した。
+    // 以前はMultiplayerManager側からはこれが呼ばれておらず、autoTestOnStartでp3HudTemplate/
+    // p4HudTemplateが未設定の場合にWireClonedHudが複製した名前表示等のUIが、本番のマルチプレイ
+    // 対戦が始まっても破棄されずに残ってしまっていた(消したはずの要素が復活して見える不具合の原因)
+    public void ClearDynamicObjects()
+    {
+        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
+        dynamicSwords.Clear();
+        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
+        dynamicHudPieces.Clear();
+    }
+
     void Start()
     {
         if (autoTestOnStart && debugBattleJsonFile != null && !string.IsNullOrEmpty(debugBattleJsonFile.text))
@@ -127,10 +161,7 @@ public class SceneController : MonoBehaviour
         Vector3[] positions = GetSpawnPositions(playerCount);
 
         // ▼ 前回のStartBattle()で3・4人目用に動的生成したもの(剣・HPバー)を破棄してから作り直す
-        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
-        dynamicSwords.Clear();
-        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
-        dynamicHudPieces.Clear();
+        ClearDynamicObjects();
 
         if (NetworkManager.Instance != null)
         {
@@ -312,9 +343,17 @@ public class SceneController : MonoBehaviour
 
     // ▼【N人対応】人数・モードに応じたスポーン座標を返す(2人時は従来のleft/rightをそのまま使用)
     // MultiplayerManagerからも同じ校正済みの座標を使うため公開している
-    public Vector3[] GetSpawnPositions(int playerCount)
+    // soloLayout: 1vs3。ボスとトリオが入り混じって始まらないよう、[0]をボス、[1..3]をトリオに使う。
+    // 専用の配置が未設定なら従来の4人用にそのまま戻す（配置が無くても試合は成立する）。
+    public Vector3[] GetSpawnPositions(int playerCount, bool soloLayout = false)
     {
         bool koma = SwordController.isKomaMode;
+        if (soloLayout && playerCount == 4)
+        {
+            Vector3[] fallback = koma ? koma1v3Positions : sword1v3Positions;
+            if (fallback != null && fallback.Length == 4)
+                return ResolveSpawnPositions(fallback, koma ? koma1v3SpawnPoints : sword1v3SpawnPoints);
+        }
         switch (playerCount)
         {
             case 3:
@@ -322,10 +361,8 @@ public class SceneController : MonoBehaviour
             case 4:
                 return ResolveSpawnPositions(koma ? koma4PPositions : sword4PPositions, koma ? koma4PSpawnPoints : sword4PSpawnPoints);
             default:
-                return new Vector3[] {
-                    koma ? komaLeftPosition : leftPosition,
-                    koma ? komaRightPosition : rightPosition
-                };
+                Vector3[] fallback2P = { koma ? komaLeftPosition : leftPosition, koma ? komaRightPosition : rightPosition };
+                return ResolveSpawnPositions(fallback2P, koma ? koma2PSpawnPoints : sword2PSpawnPoints);
         }
     }
 
