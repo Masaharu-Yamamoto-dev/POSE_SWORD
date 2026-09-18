@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
 import { styles } from './styles';
@@ -6,7 +7,7 @@ import TitleScreen from './screens/TitleScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import ResultScreen from './screens/ResultScreen';
 import { NameInputScreen, CraftPoseScreen, CraftingApiScreen, CraftCompleteScreen } from './screens/CraftingScreens';
-import SwordListScreen from './screens/SwordListScreen';
+import SwordListScreen, { HILT_DATABASE } from './screens/SwordListScreen';
 import MatchmakingScreen from './screens/MatchmakingScreen';
 import BattleArena from './components/BattleArena.jsx';
 import { useRoom } from './network/useRoom.js';
@@ -28,6 +29,17 @@ const ACTIVE_PHASES = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 const ROOM_STEPS = ['LOBBY', 'PLAYING', 'RESULT'];
 const swordKey = sword => sword && `${sword.id}:${sword.name}:${sword.hp}:${sword.attack}:${sword.weight}:${sword.hiltType}:${sword.imageStr?.length ?? 0}`;
 
+// 🌟 柄の補正適用および下限1の設定を行うヘルパー関数
+const getFinalStats = (sword) => {
+  if (!sword) return { hp: 1, attack: 1, weight: 1 };
+  const hilt = HILT_DATABASE[sword.hiltType || "0"] || HILT_DATABASE["0"];
+  return {
+    hp: Math.max(1, (sword.hp || 0) + (hilt.hpBonus || 0)),
+    attack: Math.max(1, (sword.attack || 0) + (hilt.attackBonus || 0)),
+    weight: Math.max(1, (sword.weight || 0) + (hilt.weightBonus || 0)),
+  };
+};
+
 export default function PoseSwordWeb() {
   const [step, setStep] = useState("TITLE");
   const [titleMode, setTitleMode] = useState("DEFAULT");
@@ -39,6 +51,7 @@ export default function PoseSwordWeb() {
   const mySwordRef = useRef(null);
   useEffect(() => { mySwordRef.current = mySwordData; }, [mySwordData]);
 
+  // 🌟 通信・Unity送信用のデータ生成（柄のステータス補正を反映）
   const createSyncSwordData = (list, equipped) => {
     if (!equipped) return null;
 
@@ -46,14 +59,15 @@ export default function PoseSwordWeb() {
     const swords = [0, 1, 2].map(index => {
       const sword = list[index];
       if (sword) {
+        const stats = getFinalStats(sword);
         return {
           name: sword.name,
-          hp: sword.hp,
-          attack: sword.attack,
-          weight: sword.weight,
+          hp: stats.hp,         // ★ 補正適用後（下限1）
+          attack: stats.attack, // ★ 補正適用後（下限1）
+          weight: stats.weight, // ★ 補正適用後（下限1）
           imageStr: sword.imageStr,
           hiltType: Number(sword.hiltType || 0),
-          isEmpty: false // 通常の剣
+          isEmpty: false
         };
       } else {
         return {
@@ -63,18 +77,22 @@ export default function PoseSwordWeb() {
           weight: 1,
           imageStr: "",
           hiltType: 0,
-          isEmpty: true // 空きスロット
+          isEmpty: true
         };
       }
     });
 
     const equippedIndex = Math.max(0, list.findIndex(s => s.id === equipped.id));
+    const equippedStats = getFinalStats(equipped);
 
     const result = {
-      ...equipped, // 従来の1本分のプロパティ（LobbyScreen等の表示用）を維持
+      ...equipped,
+      hp: equippedStats.hp,         // ★ メイン装備のステータスも補正済みに上書き
+      attack: equippedStats.attack,
+      weight: equippedStats.weight,
       hiltType: Number(equipped.hiltType || 0),
-      swords: swords,           // ★ 3本分の配列
-      equippedIndex: equippedIndex // ★ 現在選んでいる番号(0, 1, 2)
+      swords: swords,
+      equippedIndex: equippedIndex
     };
     return result;
   };
@@ -90,11 +108,11 @@ export default function PoseSwordWeb() {
   const [systemMessage, setSystemMessage] = useState("");
   const [isCopied, setIsCopied] = useState(false);
 
-  // 🌟追加：画面遷移の方向と、撮り直しの判定
+  // 画面遷移の方向と、撮り直しの判定
   const [transitionDir, setTransitionDir] = useState("forward");
   const [lastCraftWasRecapture, setLastCraftWasRecapture] = useState(false);
 
-  // 🌟追加：撮影時のフラッシュ演出用
+  // 撮影時のフラッシュ演出用
   const [isFlash, setIsFlash] = useState(false);
 
   const resetToTitleRef = useRef(null);
@@ -155,13 +173,14 @@ export default function PoseSwordWeb() {
     }
   }, [displayScreen, room?.error]);
 
+  // 🌟 装備変更やデータ更新時に補正済みの最新情報をルームに送信
   useEffect(() => {
     if (!view?.room || !mySwordData) return;
     const key = swordKey(mySwordData);
     if (sentSwordRef.current === key) return;
     sentSwordRef.current = key;
     room.updateSword(currentSyncSword);
-  }, [mySwordData, view?.room, room]);
+  }, [mySwordData, view?.room, room, currentSyncSword]);
 
   useEffect(() => {
     let stream = null;
@@ -186,12 +205,19 @@ export default function PoseSwordWeb() {
   }, [captureCountdown]);
 
   const equipSword = (sword) => setMySwordData(sword);
+
+  // 🌟 ロビーや武器庫からの並び替え関数
+  const reorderSwords = (newList) => {
+    setSwordList(newList);
+  };
+
   const deleteSword = (idToRemove) => {
     if (!window.confirm("本当にこの剣を破棄しますか？")) return;
     const newList = swordList.filter(s => s.id !== idToRemove);
     setSwordList(newList);
     if (mySwordRef.current?.id === idToRemove) setMySwordData(newList.length > 0 ? newList[0] : null);
   };
+
   const updateSword = (targetId, newProps) => {
     setSwordList(prev => {
       const newList = prev.map(s => s.id === targetId ? { ...s, ...newProps } : s);
@@ -220,14 +246,14 @@ export default function PoseSwordWeb() {
     const target = swordList.find(s => s.id === targetId);
     if (target) {
       setCraftingTargetId(targetId); setUserName(target.baseName);
-      setTransitionDir("forward"); // 🌟バグ修正：進む判定を付与
+      setTransitionDir("forward");
       setStep("CRAFT_POSE");
     }
   };
 
   const startNewCrafting = () => {
     setCraftingTargetId(null); setUserName("");
-    setTransitionDir("forward"); // 🌟バグ修正：進む判定を付与
+    setTransitionDir("forward");
     setStep("NAME_INPUT");
   };
 
@@ -314,11 +340,9 @@ export default function PoseSwordWeb() {
   const startCaptureCountdown = () => setCaptureCountdown(5);
 
   const executeCaptureAndCraft = () => {
-    // 🌟フラッシュ演出を起動
     setIsFlash(true);
     setTimeout(() => setIsFlash(false), 500);
 
-    // フラッシュの真っ白な瞬間に画面を切り替える（50ミリ秒だけ待つ）
     setTimeout(() => {
       setStep("CRAFTING_API");
       const video = videoRef.current;
@@ -337,8 +361,7 @@ export default function PoseSwordWeb() {
       fetch(pythonApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: base64DataOnly, userName: userName }) })
         .then(res => { if (!res.ok) throw new Error(`HTTPエラー`); return res.json(); })
         .then((data) => {
-
-          setLastCraftWasRecapture(!!craftingTargetId); // 🌟撮り直しかどうかを記憶
+          setLastCraftWasRecapture(!!craftingTargetId);
 
           if (craftingTargetId) {
             const updatedProps = { hp: data.params.hp, attack: data.params.attack, weight: data.params.weight, imageStr: data.imageData, imageSrc: "data:image/png;base64," + data.imageData };
@@ -364,13 +387,13 @@ export default function PoseSwordWeb() {
 
   const handleCancelCrafting = () => {
     setUserName(""); setCraftingTargetId(null);
-    setTransitionDir("back"); // 🌟戻る判定
+    setTransitionDir("back");
     if (swordList.length > 0) setStep("SWORD_LIST");
     else setStep(craftReturnStep);
   };
 
   const handleBackFromPose = () => {
-    setTransitionDir("back"); // 🌟戻る判定
+    setTransitionDir("back");
     if (craftingTargetId !== null) {
       setCraftingTargetId(null); setStep("SWORD_LIST");
     } else {
@@ -395,8 +418,7 @@ export default function PoseSwordWeb() {
       case "SWORD_LIST":
         return <SwordListScreen direction={transitionDir} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} deleteSword={deleteSword} startNewCrafting={startNewCrafting} startRecapture={startRecapture} updateSword={updateSword} cancelList={cancelList} toggleSwordFlip={toggleSwordFlip} />;
       case "LOBBY":
-        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
-
+        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} reorderSwords={reorderSwords} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
       case "RESULT":
         return <ResultScreen view={view} onReturnToLobby={room.returnToLobby} onLeave={handleLeave} onFindNewOpponents={view?.room?.autoStart ? findNewOpponents : null} />;
       default: return null;
@@ -406,7 +428,7 @@ export default function PoseSwordWeb() {
   return (
     <div style={{ fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#f5f5f5', minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>
 
-      {/* 🌟 撮影フラッシュ演出用のスタイルと要素 */}
+      {/* 撮影フラッシュ演出用のスタイルと要素 */}
       <style>{`
         @keyframes flashFade {
           0% { opacity: 1; }
