@@ -23,3 +23,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Unity editor build output (not needed for web deploy; only public/POSE_SWORD_Unity/Builds is served)
+POSE_SWORD_Unity/Builds/
