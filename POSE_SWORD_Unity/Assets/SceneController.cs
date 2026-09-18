@@ -40,6 +40,13 @@ public class SceneController : MonoBehaviour
     public Vector3 komaLeftPosition = new Vector3(-4f, 3f, 0f); // 例: 剣モードより少し上で、少し近い
     public Vector3 komaRightPosition = new Vector3(4f, 3f, 0f);
 
+    [Header("開始位置（2人用・任意）")]
+    [Tooltip("対応する要素([0]=1人目/左, [1]=2人目/右)にTransformを割り当てると、そのシーン上の位置を" +
+        "上のVector3の数値より優先して使う。PlayerSword1/PlayerSword2自身をここにドラッグしてSceneビュー上で" +
+        "動かせば、その位置がそのままスポーン地点になる。要素が未設定(null)の場合は従来通り上の数値を使う。")]
+    public Transform[] sword2PSpawnPoints = new Transform[2];
+    public Transform[] koma2PSpawnPoints = new Transform[2];
+
     [Header("開始位置（剣モード・3〜4人用）")]
     public Vector3[] sword3PPositions = new Vector3[] {
         new Vector3(-6f, 0f, 0f), new Vector3(0f, 0f, 0f), new Vector3(6f, 0f, 0f)
@@ -333,10 +340,8 @@ public class SceneController : MonoBehaviour
             case 4:
                 return ResolveSpawnPositions(koma ? koma4PPositions : sword4PPositions, koma ? koma4PSpawnPoints : sword4PSpawnPoints);
             default:
-                return new Vector3[] {
-                    koma ? komaLeftPosition : leftPosition,
-                    koma ? komaRightPosition : rightPosition
-                };
+                Vector3[] fallback2P = { koma ? komaLeftPosition : leftPosition, koma ? komaRightPosition : rightPosition };
+                return ResolveSpawnPositions(fallback2P, koma ? koma2PSpawnPoints : sword2PSpawnPoints);
         }
     }
 

@@ -148,7 +148,10 @@ public class MultiplayerManager : MonoBehaviour
             // ▼【修正】以前は両方とも非表示にして、コードで生成した簡易な壁4枚だけのアリーナに差し替えていたが、
             // それだと背景美術も、SceneController側で校正済みの3〜4人用スポーン座標の前提となる床の高さ等も失われていた。
             // ゲームモードに応じた本来のステージ（床・壁のコライダー込み）をそのまま使う
-            if (network.swordStage != null) network.swordStage.SetActive(!SwordController.isKomaMode);
+            // ▼【新規追加】剣モードは2人用(SwordStage)と3・4人用(SwordStage_3)でステージを使い分ける
+            bool use3PSwordStage = !SwordController.isKomaMode && config.players.Length >= 3;
+            if (network.swordStage != null) network.swordStage.SetActive(!SwordController.isKomaMode && !use3PSwordStage);
+            if (network.swordStage3P != null) network.swordStage3P.SetActive(use3PSwordStage);
             if (network.komaStage != null) network.komaStage.SetActive(SwordController.isKomaMode);
             foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
                 if (canvas != hudCanvas) canvas.enabled = false;

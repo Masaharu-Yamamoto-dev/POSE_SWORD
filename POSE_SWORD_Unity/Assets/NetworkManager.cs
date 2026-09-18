@@ -45,6 +45,9 @@ public class NetworkManager : MonoBehaviour
     [Header("ステージ設定")]
     public GameObject swordStage;
     public GameObject komaStage;
+    [Tooltip("剣モードの3・4人戦専用ステージ(任意)。割り当てておくと、3人以上の剣モード対戦の時だけ" +
+        "swordStageの代わりにこちらが表示される。未設定ならこれまで通りswordStageが常に使われる。")]
+    public GameObject swordStage3P;
 
     [DllImport("__Internal")]
     private static extern void SendToReact(string type, string jsonString);
@@ -343,7 +346,11 @@ public class NetworkManager : MonoBehaviour
             }
         }
 
-        if (swordStage != null) swordStage.SetActive(!SwordController.isKomaMode);
+        // ▼【新規追加】MultiplayerManager.InitializeMultiplayerと同様、剣モードは2人用(swordStage)と
+        // 3・4人用(swordStage3P)でステージを使い分ける
+        bool use3PSwordStage = !SwordController.isKomaMode && playerCount >= 3;
+        if (swordStage != null) swordStage.SetActive(!SwordController.isKomaMode && !use3PSwordStage);
+        if (swordStage3P != null) swordStage3P.SetActive(use3PSwordStage);
         if (komaStage != null) komaStage.SetActive(SwordController.isKomaMode);
     }
 }
