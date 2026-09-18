@@ -6,10 +6,10 @@ export default function BattleArena({ bridge, view, onLoadFailed }) {
   const { unityProvider, sendMessage, isLoaded, initialisationError, loadingProgression } = useUnityContext({
     // ビルドはバージョン付きのフォルダに置く。差し替えるときはここだけ変える。
     // 古いビルドを残しておけば、問題があれば戻せる。
-    loaderUrl: '/POSE_SWORD_Unity/Builds/ver3.10/Build/ver3.10.loader.js',
-    dataUrl: '/POSE_SWORD_Unity/Builds/ver3.10/Build/ver3.10.data',
-    frameworkUrl: '/POSE_SWORD_Unity/Builds/ver3.10/Build/ver3.10.framework.js',
-    codeUrl: '/POSE_SWORD_Unity/Builds/ver3.10/Build/ver3.10.wasm',
+    loaderUrl: '/POSE_SWORD_Unity/Builds/ver3.11/Build/ver3.11.loader.js',
+    dataUrl: '/POSE_SWORD_Unity/Builds/ver3.11/Build/ver3.11.data',
+    frameworkUrl: '/POSE_SWORD_Unity/Builds/ver3.11/Build/ver3.11.framework.js',
+    codeUrl: '/POSE_SWORD_Unity/Builds/ver3.11/Build/ver3.11.wasm',
   });
   
   const room = view?.room;

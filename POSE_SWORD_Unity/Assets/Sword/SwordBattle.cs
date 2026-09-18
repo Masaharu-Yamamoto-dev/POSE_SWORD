@@ -101,7 +101,11 @@ public static bool matchEnded = false;
     [HideInInspector] public bool isDashing = false;
     [HideInInspector] public bool isDashShooting = false;
     private float dashDamageBonus = 1.0f;
-    private bool hasHitDuringGiantSpin = false;
+    // ▼【修正】単一のboolだと「最初に当てた1人」以降、他の誰にも一切ヒットしなくなってしまい、
+    // 3〜4人戦で2人目・3人目に必殺技が当たらない不具合の原因になっていた。回転中に同じ相手へ
+    // 何度も連続ヒットするのを防ぎたいだけなので、「すでに当てた相手の集合」で管理し、
+    // 別の相手には引き続き当たるようにする
+    private readonly HashSet<SwordBattle> giantSpinHitTargets = new HashSet<SwordBattle>();
 
     // ▼【新規追加】オレ達シールド(旧リーフシールド)が展開されている間の本体無敵管理。
     // シールドのCollider2DはisTrigger(=当たっても攻撃側の移動を止めない)なので、これが無いと
@@ -132,7 +136,22 @@ public static bool matchEnded = false;
     // ▼【新規追加】カメラが追従するための、画像サイズに左右されない本物の中心座標
     [HideInInspector] public Vector3 currentCenterPosition;
 
-    public static bool isRoundStarted = false;
+    // ▼【修正】false→trueに切り替わった瞬間のTime.unscaledTimeを自動記録するプロパティにした。
+    // Host/Clientそれぞれが「自分がisRoundStartedをtrueだと認識した瞬間」を記録するため、
+    // Time.time(アプリ起動からの経過時間、端末ごとにバラバラ)より遥かに揃った「試合開始からの経過時間」の
+    // 基準点として使える(動く足場などの演出をHost/ゲスト間で位相を揃えるために利用する)
+    private static bool _isRoundStarted = false;
+    public static bool isRoundStarted
+    {
+        get => _isRoundStarted;
+        set
+        {
+            if (value && !_isRoundStarted) roundStartUnscaledTime = Time.unscaledTime;
+            _isRoundStarted = value;
+        }
+    }
+    // ▼ isRoundStartedが最後にtrueになった時刻(Time.unscaledTime基準)。まだ一度もtrueになっていなければ-1
+    public static float roundStartUnscaledTime = -1f;
 
     // ▼【N人対応】生存者数の管理。試合開始時にSceneControllerからプレイヤー人数がセットされ、
     // 誰かが撃破されるたびにReportElimination()で減算。残り1人になった時だけ試合終了とする。
@@ -344,6 +363,7 @@ public static bool matchEnded = false;
             case 2: skillName = "竜巻猛突!!"; themeColor = new Color(1f, 0.8f, 0.2f); break;
             case 3: skillName = "大回転斬!!"; themeColor = new Color(0.5f, 1f, 1f); break;
             case 4: skillName = "巨大回転斬!!"; themeColor = new Color(1f, 0.3f, 0.3f); break;
+            
             case 5: skillName = "オレ達アタック!!"; themeColor = new Color(0.3f, 0.6f, 1f); break;
             case 6: skillName = "オレ達シールド!!"; themeColor = new Color(0.4f, 0.95f, 0.5f); break;
             default: return;
@@ -427,7 +447,18 @@ public static bool matchEnded = false;
         if (controller != null && controller.isLocalControlled)
         {
             // ▼【変更】画面の「右半分」か「左半分」かを判定してジャンプ！（必殺技はここでは発動しない）
-            if (Input.GetMouseButtonDown(0))
+            // ▼【修正】必殺技ボタンをクリックした時にもGetMouseButtonDown(0)は真になってしまい、
+            // 「画面タップ」としての通常アクション(独楽モードなら小ダッシュ)も同時に暴発していた。
+            // これが必殺技ボタンを押した直後にSPを食い合ってしまい、SPが70超あっても直前の小ダッシュで
+            // 0まで消費された状態でULTIMATE入力が処理される→しきい値未満で不発、という不具合の原因だった。
+            // ▼【修正】最初はEventSystem.IsPointerOverGameObject()でUI全般を除外していたが、これだと
+            // HPバー・名前表示・チュートリアルの帯など、必殺技ボタンと無関係なUI要素の上をタップしただけでも
+            // 通常アクションが握りつぶされ、「画面を押してもジャンプできないことがある」不具合になっていた。
+            // 必殺技ボタン自身の範囲と重なっている時だけ除外するよう、判定を絞り込む
+            bool overSpecialButton = specialAttackButton != null && specialAttackButton.gameObject.activeInHierarchy &&
+                RectTransformUtility.RectangleContainsScreenPoint(
+                    specialAttackButton.GetComponent<RectTransform>(), Input.mousePosition, null);
+            if (Input.GetMouseButtonDown(0) && !overSpecialButton)
             {
                 // クリックしたX座標が、画面幅の半分より大きければ「右（true）」、小さければ「左（false）」
                 bool clickedRight = Input.mousePosition.x > (Screen.width / 2f);
@@ -1238,7 +1269,7 @@ public static bool matchEnded = false;
         isDashing = true;
         currentDashType = 4;
         currentSp = 0f;
-        hasHitDuringGiantSpin = false;
+        giantSpinHitTargets.Clear();
 
         // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
         // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
@@ -1563,7 +1594,7 @@ public static bool matchEnded = false;
     void OnTriggerEnter2D(Collider2D other)
     {
         if (isDead || matchEnded) return;
-        if (currentDashType != 4 || hasHitDuringGiantSpin) return;
+        if (currentDashType != 4) return;
 
         // ▼【重要】トリガー判定はKinematic同士でも発火してしまう。
         // 他の必殺技と同様、実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行い、
@@ -1572,8 +1603,10 @@ public static bool matchEnded = false;
 
         SwordBattle target = other.GetComponentInParent<SwordBattle>();
         if (target == null || target == this) return;
-
-        hasHitDuringGiantSpin = true;
+        // ▼【修正】同じ相手への連続ヒット(回転中に何度もすれ違う)だけを防ぐ。Add()はこの相手が
+        // 初めてなら追加してtrueを返すので、既にヒット済みの相手ならここでreturnして二重ヒットを防止しつつ、
+        // 別の相手(初めて触れた相手)には引き続き当たるようにする
+        if (!giantSpinHitTargets.Add(target)) return;
 
         bool isWeakPoint = other.CompareTag("Handle");
         int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier);
