@@ -4,12 +4,14 @@ import './BattleArena.css';
 
 export default function BattleArena({ bridge, view, onLoadFailed }) {
   const { unityProvider, sendMessage, isLoaded, initialisationError, loadingProgression } = useUnityContext({
-    // ビルドはバージョン付きのフォルダに置く。差し替えるときはここだけ変える。
-    // 古いビルドを残しておけば、問題があれば戻せる。
-    loaderUrl: '/multiplayer/ver3.2/Build/ver3.2.loader.js',
-    dataUrl: '/multiplayer/ver3.2/Build/ver3.2.data',
-    frameworkUrl: '/multiplayer/ver3.2/Build/ver3.2.framework.js',
-    codeUrl: '/multiplayer/ver3.2/Build/ver3.2.wasm',
+    // 「POSE SWORD/Build four-player WebGL」の出力先。スクリプトが public/multiplayer 直下へ
+    // 出すので、フォルダ名と同じ multiplayer.* という名前になる。差し替えるときはここだけ変える。
+    // 以前のバージョン付きビルド(ver3.0〜ver3.3)も同じ階層に残してあるので、
+    // 問題があればそちらのパスへ戻せる。
+    loaderUrl: '/multiplayer/Build/multiplayer.loader.js',
+    dataUrl: '/multiplayer/Build/multiplayer.data',
+    frameworkUrl: '/multiplayer/Build/multiplayer.framework.js',
+    codeUrl: '/multiplayer/Build/multiplayer.wasm',
   });
   
   const room = view?.room;
