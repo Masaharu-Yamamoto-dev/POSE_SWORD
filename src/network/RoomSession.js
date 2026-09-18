@@ -4,11 +4,31 @@ const ACTIVE = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 // 自動開始の部屋のタイミング。席が埋まれば少し待って開始し、埋まらなければ人数を切り上げる。
 export const AUTO_START_DELAY = 3000;
 export const FILL_TIMEOUT = 60000;
-const withoutImages = room => ({ ...room, players: room.players.map(p => {
-  const stats = { ...p.swordData };
+// 剣画像は ROSTER でしか配らない。STATE は同じ形のまま imageStr だけを落とす。
+// 残機モードの swords[] は3本それぞれが画像を持つので、そこまで潜って削る。
+// ここを浅く削ると STATE 1通が数MBになり、心拍が詰まって接続が切れる。
+const stripImages = sword => {
+  const stats = { ...sword };
   delete stats.imageStr;
-  return { ...p, swordData: stats };
-}) });
+  if (Array.isArray(stats.swords)) stats.swords = stats.swords.map(slot => {
+    const copy = { ...slot };
+    delete copy.imageStr;
+    return copy;
+  });
+  return stats;
+};
+const withoutImages = room => ({ ...room,
+  players: room.players.map(p => ({ ...p, swordData: stripImages(p.swordData) })) });
+
+// 画像を抜いた STATE が、ROSTER で受け取った画像を消してしまわないように重ねる。
+// swords[] はスロットの位置そのものが意味を持つので、添字で対応させる。
+const mergeSword = (previous, next) => {
+  const merged = { ...previous, ...next };
+  if (Array.isArray(next?.swords)) {
+    merged.swords = next.swords.map((slot, i) => ({ ...previous?.swords?.[i], ...slot }));
+  }
+  return merged;
+};
 
 // Transport adapter for PeerJS DataConnection. Time is injected so barriers,
 // disconnects and retransmission can be tested without browser timers.
@@ -157,7 +177,7 @@ export class RoomSession {
             (this.room && m.room.revision < this.room.revision)) return;
         const previous = this.room;
         this.room = { ...m.room, players: m.room.players.map(p => ({ ...p,
-          swordData: { ...previous?.players.find(old => old.playerId === p.playerId)?.swordData, ...p.swordData } })) };
+          swordData: mergeSword(previous?.players.find(old => old.playerId === p.playerId)?.swordData, p.swordData) })) };
         if (m.type === 'ROSTER') {
           this.room.players.forEach(p => validateSword(p.swordData));
           this.send(link, 'ROSTER_ACK', { assetVersion: m.assetVersion });
