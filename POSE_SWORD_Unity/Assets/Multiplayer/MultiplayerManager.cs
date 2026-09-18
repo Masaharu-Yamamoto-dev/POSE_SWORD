@@ -94,11 +94,26 @@ public class MultiplayerManager : MonoBehaviour
     private SpriteRenderer suppressRange;
     private Sprite suppressRangeSprite;
     private string bossPlayerId;
-    private float suppressFlashUntil;
-    private Vector3 suppressFlashCentre;
     // ゲストは「誰かが制圧され始めた」瞬間を検知して明滅を出す。専用の同期項目を足さずに済ませるため。
     private readonly HashSet<string> wasSuppressed = new HashSet<string>();
-    const float SuppressFlashSeconds = 0.7f;
+    // 掌握の2段目（引き寄せ → 薙ぎ払い）の進行状態。対象は発動時に確定し、途中で増減しない。
+    private readonly List<string> judgmentTargets = new List<string>();
+    private Vector3 judgmentCentre;
+    private float judgmentStrikeAt;
+    private bool judgmentPending;
+    // 吸引中だけ重力を切るので、元の値を預かっておく
+    private readonly Dictionary<string, float> judgmentGravity = new Dictionary<string, float>();
+    // 輪の演出の起点。Hostは発動時、ゲストは同期で拘束が始まった瞬間に入れる。
+    // どちらも soloBuff の溜め時間を持っているので、同じ時間割で動かせる。
+    private float judgmentVisualStart = -999f;
+    const float JudgmentBurstSeconds = 0.35f;
+
+    void RestoreJudgmentGravity()
+    {
+        foreach (var pair in judgmentGravity)
+            if (bodies.ContainsKey(pair.Key)) bodies[pair.Key].gravityScale = pair.Value;
+        judgmentGravity.Clear();
+    }
     private Dictionary<string, List<SwordSlotData>> ownedSwordsByPlayer;
     private Dictionary<string, Vector3> spawnPositionByPlayer;
     private readonly Dictionary<string, int> lifeIndexByPlayer = new Dictionary<string, int>();
@@ -252,7 +267,11 @@ public class MultiplayerManager : MonoBehaviour
         var buff = config.soloBuff;
         if (!IsUsableMultiplier(buff.hpMultiplier) || !IsUsableMultiplier(buff.attackMultiplier) ||
             !IsUsableMultiplier(buff.spGainMultiplier) || !IsUsableMultiplier(buff.maxSp) ||
-            !IsUsableMultiplier(buff.suppressRadius) || !IsUsableMultiplier(buff.suppressDuration))
+            !IsUsableMultiplier(buff.suppressRadius) || !IsUsableMultiplier(buff.suppressDuration) ||
+            !IsUsableMultiplier(buff.judgmentPullSeconds) || !IsUsableMultiplier(buff.judgmentPullForce) ||
+            !IsUsableMultiplier(buff.judgmentDamageMultiplier) || !IsUsableMultiplier(buff.judgmentKnockback) ||
+            !IsUsableMultiplier(buff.judgmentSweepSeconds) || !IsUsableMultiplier(buff.judgmentSweepSpin) ||
+            !IsUsableMultiplier(buff.judgmentSweepScale))
             throw new ArgumentException("The solo buff carries an unusable value.");
     }
 
@@ -278,22 +297,47 @@ public class MultiplayerManager : MonoBehaviour
     void UpdateSuppressRange()
     {
         if (!soloModeActive || config.soloBuff == null) { HideSuppressRange(); return; }
-        bool flashing = Time.unscaledTime < suppressFlashUntil;
+        var buff = config.soloBuff;
+        float elapsed = Time.unscaledTime - judgmentVisualStart;
+        bool pulling = elapsed >= 0f && elapsed < buff.judgmentPullSeconds;
+        bool bursting = elapsed >= buff.judgmentPullSeconds &&
+            elapsed < buff.judgmentPullSeconds + JudgmentBurstSeconds;
+
         SwordBattle boss = bossPlayerId != null && swords.ContainsKey(bossPlayerId) ? swords[bossPlayerId] : null;
-        bool aiming = !flashing && boss != null && IsPlaying && boss.IsAlive &&
+        bool aiming = !pulling && !bursting && boss != null && IsPlaying && boss.IsAlive &&
             boss.PlayerId == config.localPlayerId && boss.currentSp >= boss.maxSp && !IsSuppressed(boss.PlayerId);
-        if (!flashing && !aiming) { HideSuppressRange(); return; }
+        if (!pulling && !bursting && !aiming) { HideSuppressRange(); return; }
 
         if (suppressRange == null) BuildSuppressRange();
         if (suppressRange == null) return;
-        Vector3 centre = flashing ? suppressFlashCentre : boss.currentCenterPosition;
+
+        float diameter;
+        float alpha;
+        if (pulling)
+        {
+            // 輪が中心へすぼまっていく。これが「吸い込まれている」ことの一番の手がかりになる
+            float t = elapsed / buff.judgmentPullSeconds;
+            diameter = Mathf.Lerp(buff.suppressRadius * 2f, buff.suppressRadius * 0.35f, t * t);
+            alpha = Mathf.Lerp(0.35f, 0.95f, t);
+        }
+        else if (bursting)
+        {
+            // 薙ぎ払いの瞬間に一気に広がって消える
+            float t = (elapsed - buff.judgmentPullSeconds) / JudgmentBurstSeconds;
+            diameter = Mathf.Lerp(buff.suppressRadius * 0.35f, buff.suppressRadius * 2.6f, t);
+            alpha = Mathf.Lerp(0.95f, 0f, t);
+        }
+        else
+        {
+            diameter = buff.suppressRadius * 2f;
+            alpha = 0.28f;
+        }
+
+        Vector3 centre = aiming ? boss.currentCenterPosition : judgmentCentre;
         centre.z = 0.5f;   // 剣より奥に置いて、輪が剣を隠さないようにする
         suppressRange.transform.position = centre;
-        // スプライトは直径1として作ってあるので、半径の2倍がそのまま拡大率になる
-        suppressRange.transform.localScale = Vector3.one * (config.soloBuff.suppressRadius * 2f);
-        float alpha = flashing
-            ? Mathf.Lerp(0.15f, 0.85f, (suppressFlashUntil - Time.unscaledTime) / SuppressFlashSeconds)
-            : 0.28f;
+        // スプライトは直径1として作ってあるので、拡大率がそのまま直径になる
+        suppressRange.transform.localScale = Vector3.one * diameter;
         suppressRange.color = new Color(.78f, .45f, 1f, alpha);
         if (!suppressRange.gameObject.activeSelf) suppressRange.gameObject.SetActive(true);
     }
@@ -402,14 +446,89 @@ public class MultiplayerManager : MonoBehaviour
         float until = Time.unscaledTime + config.soloBuff.suppressDuration;
         foreach (var id in caught) suppressUntil[id] = until;
         // 輪は撃った場所に置いたままにする。判定が発動時の一度きりであることを見た目でも示すため。
-        StartSuppressFlash(centre);
+        StartJudgmentVisual(centre);
         RefreshSuppression();
+
+        // ここから2段目。捕らえた相手を撃った場所へ引き寄せ、溜めが終わったら薙ぎ払う。
+        judgmentTargets.Clear();
+        judgmentTargets.AddRange(caught);
+        judgmentCentre = centre;
+        judgmentStrikeAt = Time.unscaledTime + config.soloBuff.judgmentPullSeconds;
+        judgmentPending = judgmentTargets.Count > 0;
     }
 
-    void StartSuppressFlash(Vector3 centre)
+    // 掌握の2段目。引き寄せ中は毎ステップ力を加え、溜めが終わった瞬間に一度だけ斬る。
+    // Physics2D.Simulate の前に呼ぶこと。QueueHit で積んだダメージは、そのステップの
+    // rules.ResolveStep() でまとめて裁定される。
+    void UpdateJudgment()
     {
-        suppressFlashCentre = centre;
-        suppressFlashUntil = Time.unscaledTime + SuppressFlashSeconds;
+        if (!judgmentPending) return;
+        var buff = config.soloBuff;
+        if (Time.unscaledTime < judgmentStrikeAt)
+        {
+            // ボスは渦の要としてその場に踏みとどまる。剣モードでは1秒で5ユニット近く落ちてしまい、
+            // 薙ぎ払う頃には集めた相手から離れてしまうため。
+            if (bossPlayerId != null && bodies.ContainsKey(bossPlayerId) && swords[bossPlayerId].IsAlive)
+            {
+                var bossRb = bodies[bossPlayerId];
+                if (!judgmentGravity.ContainsKey(bossPlayerId))
+                { judgmentGravity[bossPlayerId] = bossRb.gravityScale; bossRb.gravityScale = 0f; }
+                bossRb.linearVelocity *= 0.85f;
+            }
+            foreach (var id in judgmentTargets)
+            {
+                if (!bodies.ContainsKey(id) || !swords[id].IsAlive) continue;
+                var rb = bodies[id];
+                // 吸引中だけ重力を切る。剣モードで落下と綱引きになると「吸われている」ではなく
+                // 「落ちている」ように見えてしまうため。元の値は覚えておいて薙ぎ払いの時に戻す。
+                if (!judgmentGravity.ContainsKey(id)) { judgmentGravity[id] = rb.gravityScale; rb.gravityScale = 0f; }
+                Vector2 toCentre = (Vector2)judgmentCentre - rb.position;
+                if (toCentre.sqrMagnitude < 0.09f) continue;
+                Vector2 dir = toCentre.normalized;
+                // 中心へ向かう速度はそのまま伸ばし、横滑りの成分だけを削る。
+                // 一律に減衰させると等速移動になって加速感が消える（＝吸われている感じが出ない）。
+                Vector2 velocity = rb.linearVelocity;
+                Vector2 radial = dir * Vector2.Dot(velocity, dir);
+                rb.linearVelocity = radial + (velocity - radial) * 0.80f;
+                rb.AddForce(dir * (buff.judgmentPullForce * rb.mass), ForceMode2D.Force);
+                // 揉まれている感じを出すため、引かれながら回す
+                rb.AddTorque(buff.judgmentPullForce * rb.mass * Time.fixedDeltaTime * 4f, ForceMode2D.Force);
+            }
+            return;
+        }
+
+        judgmentPending = false;
+        RestoreJudgmentGravity();
+        // 溜めの途中でボスが倒れていたら斬撃は出ない。拘束だけが残る
+        if (bossPlayerId == null || !swords.ContainsKey(bossPlayerId) || !swords[bossPlayerId].IsAlive)
+        {
+            judgmentTargets.Clear();
+            return;
+        }
+        var attacker = swords[bossPlayerId];
+        // ボスの剣が実際に範囲を薙ぎ払う。位置・回転・大きさは同期に乗るのでゲストにも見える。
+        bodies[bossPlayerId].angularVelocity = buff.judgmentSweepSpin;
+        attacker.BeginJudgmentSweep(buff.judgmentSweepSeconds, buff.judgmentSweepScale);
+        int damage = Mathf.Max(1, Mathf.RoundToInt(attacker.attack * buff.judgmentDamageMultiplier));
+        foreach (var id in judgmentTargets)
+        {
+            if (!bodies.ContainsKey(id) || !swords[id].IsAlive) continue;
+            QueueHit(attacker, swords[id], damage);
+            var rb = bodies[id];
+            Vector2 outward = rb.position - (Vector2)judgmentCentre;
+            if (outward.sqrMagnitude < 0.01f) outward = Vector2.up;
+            rb.AddForce(outward.normalized * (buff.judgmentKnockback * rb.mass), ForceMode2D.Impulse);
+        }
+        judgmentTargets.Clear();
+        TriggerShake(0.25f, 0.5f);
+    }
+
+    // 輪の演出（すぼまる → 炸裂）の起点。溜め時間は全員が同じ soloBuff を持っているので、
+    // Hostとゲストで同じ時間割になり、専用の同期項目を足さずに揃う。
+    void StartJudgmentVisual(Vector3 centre)
+    {
+        judgmentCentre = centre;
+        judgmentVisualStart = Time.unscaledTime;
     }
 
     // 独楽の自動追尾を止めるためのフラグを配る。剣モードでは入力が通らないだけで足りるが、
@@ -750,6 +869,8 @@ public class MultiplayerManager : MonoBehaviour
         UpdateTargets(false);
         // 制圧の残り時間は実時間で切れるので、毎ステップ配り直して独楽の追尾抑止を最新にする
         RefreshSuppression();
+        // 引き寄せの力と薙ぎ払いは、物理を進める前に積む（QueueHitはこのステップの裁定に乗る）
+        UpdateJudgment();
         // ▼【修正】オレ達シールド展開中も本体は無敵にする(SwordBattle.TakeDamage側の無敵判定と同じ条件)。
         // これが無いと、Client側は正しいHPを受け取れても、Host自身のOnCollisionEnter2D→QueueHitでは
         // シールドの反射に加えて本体にも通常ダメージが通ってしまっていた
@@ -796,7 +917,7 @@ public class MultiplayerManager : MonoBehaviour
         // 味方同士はダメージにしない。弾き合いはOnCollisionEnter2D側で既に済んでいるので、
         // ここで捨てるのは数値・撃破数・ダメージ表示だけ。最終的な裁定はMatchRules側でも同じ条件で行う。
         if (rules.Get(attacker.PlayerId).Team == rules.Get(target.PlayerId).Team) return;
-        // ブレード掌握を受けている剣は攻撃力ゼロ。入力を止めるだけでは、慣性で突っ込んだ衝突や
+        // オレ掌握斬を受けている剣は攻撃力ゼロ。入力を止めるだけでは、慣性で突っ込んだ衝突や
         // 発動済みの分身・シールドからダメージが通ってしまうので、与える側の経路をここで断つ。
         // 与えるダメージが消えるだけで、受ける側としては通常どおり成立する。
         if (IsSuppressed(attacker.PlayerId)) return;
@@ -997,7 +1118,7 @@ public class MultiplayerManager : MonoBehaviour
                 // 0秒から立ち上がった瞬間＝ボスが今撃った、とみなして輪を明滅させる。
                 // 専用の同期項目を足さずに済ませるため、ボスの現在位置を中心として使う。
                 if (wasSuppressed.Add(data.playerId) && bossPlayerId != null && swords.ContainsKey(bossPlayerId))
-                    StartSuppressFlash(swords[bossPlayerId].currentCenterPosition);
+                    StartJudgmentVisual(swords[bossPlayerId].currentCenterPosition);
             }
             else { suppressUntil.Remove(data.playerId); wasSuppressed.Remove(data.playerId); }
             targets[data.playerId] = data.targetPlayerId;
@@ -1164,7 +1285,9 @@ public class MultiplayerManager : MonoBehaviour
         shakeDuration = 0f; hasLockedCameraPosition = false;
         livesModeActive = false; soloModeActive = false;
         suppressUntil.Clear(); wasSuppressed.Clear();
-        bossPlayerId = null; suppressFlashUntil = 0f;
+        judgmentTargets.Clear(); judgmentPending = false; judgmentStrikeAt = 0f;
+        bossPlayerId = null; judgmentVisualStart = -999f;
+        RestoreJudgmentGravity();
         if (suppressRange != null) { Destroy(suppressRange.gameObject); suppressRange = null; }
         if (suppressRangeSprite != null)
         {

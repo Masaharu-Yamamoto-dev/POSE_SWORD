@@ -56,7 +56,7 @@ public class SwordBattle : MonoBehaviour
     bool suppressTinted;
     // 制圧の技番号。既存の1〜6と衝突しない値にして、色分けとカットインの同期にそのまま乗せる
     public const int SuppressDashType = 7;
-    public const string SuppressSkillName = "ブレード掌握!!";
+    public const string SuppressSkillName = "オレ掌握斬!!";
     // ▼【新規追加】残機モード：HPパネル内に表示する「あと何本あるか」の小さいアイコン列。
     // 今戦っている剣は含めない(残りの手持ちの剣だけ)。MultiplayerManager.WireHudBarが実行時に生成して渡す
     [HideInInspector] public Image[] reserveSwordIcons;
@@ -260,6 +260,24 @@ public static bool matchEnded = false;
 
     // 制圧の発動で消費するSP。ゲージ満タンぶんを使い切る
     public void ConsumeSuppressSp() { currentSp = 0f; }
+
+    // ▼【新規追加】1vs3：掌握の2段目。範囲の中心で剣を大きくして回し、集めた相手を薙ぎ払う。
+    // 大きさの退避と復帰は既存の巨大回転斬(GiantSpinRoutine)と同じ作法にしてある。
+    // 位置・回転・大きさはいずれも同期に乗っているので、ゲストの画面にもそのまま見える。
+    public void BeginJudgmentSweep(float seconds, float scale)
+    {
+        if (!IsAlive) return;
+        StartCoroutine(JudgmentSweepRoutine(seconds, scale));
+    }
+
+    IEnumerator JudgmentSweepRoutine(float seconds, float scale)
+    {
+        Vector3 originalScale = transform.localScale;
+        if (scale > 0f) transform.localScale = originalScale * scale;
+        yield return new WaitForSecondsRealtime(seconds);
+        transform.localScale = originalScale;
+        if (rb != null) rb.angularVelocity *= 0.25f;   // 回したままにせず、振り抜いたところで収める
+    }
 
     // ▼【新規追加】剣本体以外（分身・リーフシールドなど）からも、TakeDamage/QueueHitへの正しい経路で
     // ダメージを与えられるようにする共通口。ローカルではTakeDamageへ、オンラインではHost権威のQueueHitへ回す
@@ -522,7 +540,7 @@ public static bool matchEnded = false;
         }
         suppressSkinApplied = suppressMode;
         if (ultimateButtonLabel != null)
-            ultimateButtonLabel.text = suppressMode ? "掌握" : ultimateButtonLabelText;
+            ultimateButtonLabel.text = suppressMode ? "掌握斬" : ultimateButtonLabelText;
         if (ultimateButtonImage != null)
             ultimateButtonImage.color = suppressMode ? new Color(.42f, .11f, .60f, ultimateButtonColor.a) : ultimateButtonColor;
     }

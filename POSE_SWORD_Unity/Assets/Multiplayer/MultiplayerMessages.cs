@@ -21,6 +21,15 @@ using UnityEngine;
     public float maxSp;
     public float suppressRadius;
     public float suppressDuration;
+    // 掌握は「引き寄せ → 薙ぎ払い」の2段構え
+    public float judgmentPullSeconds;
+    public float judgmentPullForce;
+    public float judgmentDamageMultiplier;
+    public float judgmentKnockback;
+    // 薙ぎ払いの動き（ボスが範囲の中心で大きく回って斬り抜ける）
+    public float judgmentSweepSeconds;
+    public float judgmentSweepSpin;
+    public float judgmentSweepScale;
 }
 [Serializable] public class MultiplayerConfig
 {

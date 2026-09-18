@@ -10,11 +10,31 @@ export const SOLO_MODE_PLAYERS = 4;
 // 数値はすべて調整中。ここだけを直せば全員に反映される。
 export const SOLO_BUFF = Object.freeze({
   hpMultiplier: 3.0,        // MatchRules へ渡すHPと Unity 側の maxHp に掛ける
-  attackMultiplier: 1.3,    // 攻撃力に掛ける
+  // 攻撃力に掛ける。ボスの通常攻撃・必殺技・薙ぎ払いのすべてに効く。
+  // 3人を相手にするので、通常攻撃1発でトリオの一撃を上回るくらいを狙っている。
+  attackMultiplier: 2.0,
   spGainMultiplier: 1.5,    // 時間経過・被弾によるSP獲得量に掛ける
   maxSp: 200,               // ボスだけSPゲージが2段階（100=通常必殺 / 200=制圧）
-  suppressRadius: 8.0,      // 制圧が届く半径
-  suppressDuration: 10.0,   // 制圧されている秒数
+  suppressRadius: 8.0,      // 掌握が届く半径
+  // 操作不能になる秒数。溜め1秒＋薙ぎ払いの後、ボスが自由に殴れる時間がここから引いた分になる。
+  // 長くすると「3人が何もできずに見ているだけ」の時間がそのまま伸びるので、上げ下げの影響が一番大きい。
+  suppressDuration: 4.0,
+  // 掌握は「引き寄せ → 薙ぎ払い」の2段構え。下は薙ぎ払いまでの調整値。
+  judgmentPullSeconds: 1.0,      // 引き寄せてから斬るまでの溜め
+  judgmentPullForce: 60.0,       // 引き寄せる力（質量に掛ける）。重力の約6倍
+  // 通常攻撃のダメージ式は「衝突速度(上限20) × 攻撃力 × 0.05」なので、最大の一撃が攻撃力ぶん。
+  // 薙ぎ払いはその2発ぶんに留め、とどめは残りの拘束時間で自分で殴って取る想定。
+  judgmentDamageMultiplier: 1.3,
+  // Impulse で質量を掛けるため、この値がそのまま「速度変化(units/秒)」になる。
+  // シーンの通常衝突が bounceForce 20 なので、その2倍を手応えの基準にしている。
+  // 上げすぎると相手が遠くへ散り、せっかくの拘束時間を追いかけるだけで使ってしまう。
+  judgmentKnockback: 40.0,
+  // 薙ぎ払いの動き。ボスが範囲の中心で大きく回って斬り抜ける。
+  judgmentSweepSeconds: 0.4,   // 薙ぎ払っている時間
+  // 回転速度（度/秒）。既存の巨大回転斬が1080なので、それより遅くして一振りとして読めるようにする。
+  // 720 × 0.4秒 ＝ 約0.8回転。ちょうど一回転させたいなら judgmentSweepSeconds を 0.5 にする。
+  judgmentSweepSpin: 720.0,
+  judgmentSweepScale: 2.0,     // 薙ぎ払い中の剣の大きさ（元の大きさに掛ける）
 });
 
 export function validateSword(sword) {

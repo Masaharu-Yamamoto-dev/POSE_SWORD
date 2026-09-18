@@ -53,14 +53,30 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
 
     [Header("1vs3：ボス強化（本番の既定値は HostRoom.js の SOLO_BUFF）")]
     public float hpMultiplier = 3.0f;
-    public float attackMultiplier = 1.3f;
+    public float attackMultiplier = 2.0f;
     public float spGainMultiplier = 1.5f;
     [Tooltip("ボスのSPゲージ上限。通常必殺技は100のままで、満タンの200で制圧を撃てる")]
     public float bossMaxSp = 200f;
     [Tooltip("制圧が届く半径。発動した瞬間にこの範囲内にいた敵だけが対象になる")]
     public float suppressRadius = 8f;
-    [Tooltip("制圧されている秒数")]
-    public float suppressDuration = 10f;
+    [Tooltip("操作不能になる秒数。溜め1秒＋薙ぎ払いの後、ボスが自由に殴れる時間がここから引いた分。強さへの影響が一番大きい")]
+    public float suppressDuration = 4f;
+
+    [Header("1vs3：掌握の2段目（引き寄せ → 薙ぎ払い）")]
+    [Tooltip("引き寄せてから斬るまでの溜め時間")]
+    public float judgmentPullSeconds = 1f;
+    [Tooltip("引き寄せる力（質量に掛ける）。弱いと集まりきらない")]
+    public float judgmentPullForce = 60f;
+    [Tooltip("薙ぎ払いのダメージ（ボスの攻撃力に掛ける）。通常攻撃の最大の一撃が攻撃力ぶんなので、1.3なら通常1.3発ぶん")]
+    public float judgmentDamageMultiplier = 1.3f;
+    [Tooltip("薙ぎ払いで外へ吹き飛ばす力。そのまま速度変化(units/秒)になる。通常の剣同士の衝突は20")]
+    public float judgmentKnockback = 40f;
+    [Tooltip("ボスが薙ぎ払っている時間")]
+    public float judgmentSweepSeconds = 0.4f;
+    [Tooltip("薙ぎ払いの回転速度(度/秒)。既存の巨大回転斬が1080。720なら0.4秒で約0.8回転＝一振りとして読める")]
+    public float judgmentSweepSpin = 720f;
+    [Tooltip("薙ぎ払い中の剣の大きさ(元の大きさに掛ける)")]
+    public float judgmentSweepScale = 2f;
 
     MultiplayerManager manager;
     SceneController scene;
@@ -164,7 +180,14 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
             spGainMultiplier = spGainMultiplier,
             maxSp = bossMaxSp,
             suppressRadius = suppressRadius,
-            suppressDuration = suppressDuration
+            suppressDuration = suppressDuration,
+            judgmentPullSeconds = judgmentPullSeconds,
+            judgmentPullForce = judgmentPullForce,
+            judgmentDamageMultiplier = judgmentDamageMultiplier,
+            judgmentKnockback = judgmentKnockback,
+            judgmentSweepSeconds = judgmentSweepSeconds,
+            judgmentSweepSpin = judgmentSweepSpin,
+            judgmentSweepScale = judgmentSweepScale
         };
     }
 
