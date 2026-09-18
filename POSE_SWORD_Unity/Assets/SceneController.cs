@@ -63,6 +63,19 @@ public class SceneController : MonoBehaviour
         new Vector3(-6f, 3f, 0f), new Vector3(-2f, 3f, 0f), new Vector3(2f, 3f, 0f), new Vector3(6f, 3f, 0f)
     };
 
+    [Header("開始位置（1vs3・4人用）")]
+    [Tooltip("要素0がボス(1人側)、要素1〜3がトリオ(3人側)。ボスが片側、トリオが反対側に並ぶ配置を想定。" +
+        "未設定（要素数が4でない）の場合は通常の4人用配置がそのまま使われる。")]
+    public Vector3[] sword1v3Positions = new Vector3[] {
+        new Vector3(-9f, 0f, 0f), new Vector3(5f, 0f, 0f), new Vector3(8f, 0f, 0f), new Vector3(11f, 0f, 0f)
+    };
+    public Vector3[] koma1v3Positions = new Vector3[] {
+        new Vector3(0f, 7f, 0f), new Vector3(-5f, -3f, 0f), new Vector3(0f, -3f, 0f), new Vector3(5f, -3f, 0f)
+    };
+    [Tooltip("上の数値より優先してシーン上のTransformの位置を使う。要素0がボス。")]
+    public Transform[] sword1v3SpawnPoints = new Transform[4];
+    public Transform[] koma1v3SpawnPoints = new Transform[4];
+
     [Header("開始位置（3〜4人用・任意）")]
     [Tooltip("対応する要素にTransformを割り当てると、そのシーン上の位置(そのTransform自身の座標)を上の配列の数値より優先して使う。" +
         "空のGameObjectをシーンに置いてドラッグするだけで、そのプレイヤー(3人目・4人目など)のスポーン位置をSceneビュー上で視覚的に決められる。" +
@@ -330,9 +343,17 @@ public class SceneController : MonoBehaviour
 
     // ▼【N人対応】人数・モードに応じたスポーン座標を返す(2人時は従来のleft/rightをそのまま使用)
     // MultiplayerManagerからも同じ校正済みの座標を使うため公開している
-    public Vector3[] GetSpawnPositions(int playerCount)
+    // soloLayout: 1vs3。ボスとトリオが入り混じって始まらないよう、[0]をボス、[1..3]をトリオに使う。
+    // 専用の配置が未設定なら従来の4人用にそのまま戻す（配置が無くても試合は成立する）。
+    public Vector3[] GetSpawnPositions(int playerCount, bool soloLayout = false)
     {
         bool koma = SwordController.isKomaMode;
+        if (soloLayout && playerCount == 4)
+        {
+            Vector3[] fallback = koma ? koma1v3Positions : sword1v3Positions;
+            if (fallback != null && fallback.Length == 4)
+                return ResolveSpawnPositions(fallback, koma ? koma1v3SpawnPoints : sword1v3SpawnPoints);
+        }
         switch (playerCount)
         {
             case 3:

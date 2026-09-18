@@ -38,8 +38,11 @@ namespace PoseSword.Multiplayer
         public int LivesRemaining { get; internal set; }
         public int CurrentLifeIndex { get; internal set; }
         public int RespawnSeq { get; internal set; }
+        // 陣営。個人戦では「1人が1チーム」とみなしてスロット番号がそのまま入るので、
+        // 味方判定も決着判定も個人戦とチーム戦で同じ式のまま扱える。
+        public int Team { get; private set; }
 
-        internal PlayerScore(string id, int slotIndex, int[] lives)
+        internal PlayerScore(string id, int slotIndex, int[] lives, int team)
         {
             PlayerId = id;
             SlotIndex = slotIndex;
@@ -49,6 +52,7 @@ namespace PoseSword.Multiplayer
             CurrentLifeIndex = 0;
             Hp = lives[0];
             EliminationTick = -1;
+            Team = team;
         }
 
         // 現在の剣のHPが0になった時に、まだ残機があれば次の剣のHPへ切り替える
@@ -65,33 +69,50 @@ namespace PoseSword.Multiplayer
     // batch AFTER each physics step; no collision callback may decide the winner.
     public sealed class MatchRules
     {
+        // 1vs3のボスはHPに倍率が掛かるため、素の剣の上限(validateSword側の1000)より高い値が来る。
+        // 上限を広げるだけなので、1000以下しか来ない既存の試合の挙動は変わらない。
+        public const int MaxHitPoints = 4000;
+
         private readonly Dictionary<string, PlayerScore> byId;
         private readonly IReadOnlyList<PlayerScore> players;
+        // チーム戦として構成されたか。個人戦(teams未指定)のときは順位付けに一切手を入れない。
+        private readonly bool teamMatch;
         public IReadOnlyList<PlayerScore> Players { get { return players; } }
         public int LastTick { get; private set; }
         public bool Ended { get; private set; }
         public bool Draw { get; private set; }
         public string WinnerId { get; private set; }
+        // 勝利した陣営。未決着と引き分けは -1。
+        public int WinnerTeam { get; private set; }
 
         // 通常(残機モードなし)：各プレイヤーHP1つだけの1本勝負
         public MatchRules(string[] playerIds, int[] hitPoints)
-            : this(playerIds, hitPoints == null ? null : hitPoints.Select(hp => new[] { hp }).ToArray())
+            : this(playerIds, hitPoints == null ? null : hitPoints.Select(hp => new[] { hp }).ToArray(), null)
         {
         }
 
-        // 残機モード：各プレイヤーが複数本の剣(lives[slot][0]が現在の剣、以降は持ち替え先)を持つ
-        public MatchRules(string[] playerIds, int[][] lives)
+        // 残機モード：各プレイヤーが複数本の剣(lives[slot][0]が現在の剣、以降は持ち替え先)を持つ。
+        // teams: 陣営を指定するとチーム戦になる(同じ番号同士は攻撃が通らず、決着も順位も陣営単位)。
+        // 未指定なら従来どおりの個人戦で、1人が1チームとして扱われる。
+        public MatchRules(string[] playerIds, int[][] lives, int[] teams = null)
         {
             if (playerIds == null || lives == null ||
                 playerIds.Length < 2 || playerIds.Length > 4 || playerIds.Length != lives.Length ||
                 playerIds.Any(string.IsNullOrWhiteSpace) || playerIds.Distinct().Count() != playerIds.Length ||
-                lives.Any(l => l == null || l.Length < 1 || l.Any(hp => hp < 1 || hp > 1000)))
+                lives.Any(l => l == null || l.Length < 1 || l.Any(hp => hp < 1 || hp > MaxHitPoints)))
                 throw new ArgumentException("A match requires two to four distinct players with valid HP and lives.");
+            // 全員が同じ陣営だと誰も倒せず決着が付かないので、2陣営以上を必須にする。
+            if (teams != null && (teams.Length != playerIds.Length || teams.Any(t => t < 0) ||
+                teams.Distinct().Count() < 2))
+                throw new ArgumentException("A team match requires one team per player and at least two teams.");
 
-            var roster = playerIds.Select((id, slot) => new PlayerScore(id, slot, lives[slot])).ToList();
+            teamMatch = teams != null;
+            var roster = playerIds.Select((id, slot) =>
+                new PlayerScore(id, slot, lives[slot], teamMatch ? teams[slot] : slot)).ToList();
             players = roster.AsReadOnly();
             byId = roster.ToDictionary(p => p.PlayerId);
             LastTick = -1;
+            WinnerTeam = -1;
         }
 
         public PlayerScore Get(string id) { return byId[id]; }
@@ -105,10 +126,13 @@ namespace PoseSword.Multiplayer
             // callback reordering. A confirmed disconnection is not a damaging attack.
             var alive = new HashSet<string>(players.Where(p => p.Alive).Select(p => p.PlayerId));
             var disconnected = new HashSet<string>((forfeits ?? Enumerable.Empty<string>()).Where(alive.Contains));
+            // 味方判定(最後の条件)はIDの存在が保証されてから評価する。alive.Contains が先に
+            // 偽になるので、名簿に無いIDが Get() に渡ることはない。
             var attacks = hits.Where(h => h != null && h.Damage > 0 &&
                     h.AttackerId != null && h.TargetId != null && h.AttackerId != h.TargetId &&
                     alive.Contains(h.AttackerId) && alive.Contains(h.TargetId) &&
-                    !disconnected.Contains(h.AttackerId) && !disconnected.Contains(h.TargetId))
+                    !disconnected.Contains(h.AttackerId) && !disconnected.Contains(h.TargetId) &&
+                    Get(h.AttackerId).Team != Get(h.TargetId).Team)
                 .GroupBy(h => new { h.AttackerId, h.TargetId })
                 .Select(g => new Hit(g.Key.AttackerId, g.Key.TargetId, g.Max(h => h.Damage)))
                 .ToArray();
@@ -158,15 +182,27 @@ namespace PoseSword.Multiplayer
                 player.EliminationTick = tick;
             }
             LastTick = tick;
-            if (survivors.Length > 1) return;
+            // 生存している陣営が1つになったら決着。個人戦は1人が1チームなので、
+            // この式は「生存者が1人以下」と完全に同じ意味になる。
+            var survivingTeams = survivors.Select(p => p.Team).Distinct().ToArray();
+            if (survivingTeams.Length > 1) return;
 
             Ended = true;
-            Draw = survivors.Length == 0;
-            if (!Draw)
+            Draw = survivingTeams.Length == 0;
+            if (Draw) return;
+
+            WinnerTeam = survivingTeams[0];
+            if (!teamMatch)
             {
                 survivors[0].Rank = 1;
                 WinnerId = survivors[0].PlayerId;
+                return;
             }
+            // チーム戦は陣営単位の勝敗。途中で撃破された味方も勝利チームなら1位にする。
+            foreach (var player in players) player.Rank = player.Team == WinnerTeam ? 1 : 2;
+            var winners = players.Where(p => p.Team == WinnerTeam).ToArray();
+            // 勝者が複数いる陣営では代表を決められないので、WinnerId は空のままにする(WinnerTeam を見ること)。
+            if (winners.Length == 1) WinnerId = winners[0].PlayerId;
         }
 
         private sealed class Share

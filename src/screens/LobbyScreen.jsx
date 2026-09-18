@@ -1,11 +1,12 @@
 import { PLAYER_COLORS, styles, swordImageSource } from '../styles';
-import { MAX_PLAYERS, MIN_PLAYERS } from '../network/HostRoom';
+import { MAX_PLAYERS, MIN_PLAYERS, SOLO_MODE_PLAYERS } from '../network/HostRoom';
 
 // 部屋は4席。2人以上そろえば、その人数のまま対戦を始められる。
+// 1vs3（soloMode）だけは1人対3人が揃う必要があるので4人ちょうどを待つ。
 export default function LobbyScreen({
   view, roomId, isCopied, handleCopyId,
   swordList, mySwordData, equipSword,
-  onReady, onGameMode, onLivesMode, onStart, onLeave, goToCrafting, error
+  onReady, onGameMode, onLivesMode, onSoloMode, onBossPlayer, onStart, onLeave, goToCrafting, error
 }) {
   const room = view?.room;
   const me = room?.players.find(p => p.playerId === view.localPlayerId);
@@ -14,9 +15,15 @@ export default function LobbyScreen({
   const isHost = view.isHost;
   const gameMode = room.gameMode;
   const livesMode = Boolean(room.livesMode);
+  const soloMode = Boolean(room.soloMode);
   const seatLimit = room.seatLimit ?? MAX_PLAYERS;
   // ランダムマッチの部屋は準備ボタンを使わず、人数がそろえば自動で始まる。
   const auto = Boolean(room.autoStart);
+  // 1vs3 はホストがボスを指名するまで開始できない。
+  // ※ auto を参照するので、必ず auto の宣言より後に置くこと（前に置くと 1vs3 をONにした
+  //   瞬間に初期化前アクセスで描画が落ちる）。
+  const bossPlayerId = room.bossPlayerId ?? null;
+  const canPickBoss = soloMode && isHost && !auto;
   const playerCount = room.players.length;
   const readyCount = room.players.filter(p => p.ready).length;
   const otherSeats = Array.from({ length: seatLimit }, (_, slot) => slot)
@@ -28,7 +35,12 @@ export default function LobbyScreen({
     : room.startsInMs <= 10000 ? 'まもなく開始します'
     : `${Math.ceil(room.startsInMs / 1000)}秒以内に開始します`;
 
+  // 1vs3 は4人ちょうどでしか成立しないので、不足している間は人数を出して待つ。
+  const soloShortage = soloMode ? SOLO_MODE_PLAYERS - playerCount : 0;
+
   const status = auto ? autoStatus
+    : soloShortage > 0 ? `1vs3 には${SOLO_MODE_PLAYERS}人必要です（あと${soloShortage}人）`
+    : soloMode && !bossPlayerId ? 'ボスを指名してください'
     : playerCount < MIN_PLAYERS ? `参加者を待っています（最低${MIN_PLAYERS}人・最大${seatLimit}人）`
     : readyCount < playerCount ? `準備完了 ${readyCount} / ${playerCount}人`
     : isHost ? `${playerCount}人全員の準備が完了。対戦を開始できます`
@@ -42,7 +54,18 @@ export default function LobbyScreen({
         <div className="lobby-panel self-panel" style={{ display: 'flex', flexDirection: 'column' }}>
           <h2 style={{ margin: '0 0 15px 0', fontSize: '28px', color: PLAYER_COLORS[me.slotIndex], borderBottom: `2px solid ${PLAYER_COLORS[me.slotIndex]}`, paddingBottom: '5px' }}>
             {me.slotIndex + 1}P: あなた ({isHost ? "ホスト" : "ゲスト"})
+            {soloMode && me.playerId === bossPlayerId && " 👑"}
           </h2>
+
+          {/* 1vs3：ホストは自分をボスに指名できる */}
+          {canPickBoss && me.playerId !== bossPlayerId && (
+            <button
+              style={{ marginBottom: '10px', padding: '6px 12px', backgroundColor: '#6a1b9a', color: 'white', border: 'none', borderRadius: '5px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer', alignSelf: 'flex-start' }}
+              onClick={() => onBossPlayer(me.playerId)}
+            >
+              👑 自分がボスになる
+            </button>
+          )}
 
           {mySwordData ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, justifyContent: 'center' }}>
@@ -120,6 +143,7 @@ export default function LobbyScreen({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '5px', marginBottom: '10px' }}>
                 <span style={{ fontWeight: 'bold', color: PLAYER_COLORS[slot] }}>
                   {slot + 1}P: {player ? (player.playerId === 'p0' ? "ホスト" : "プレイヤー") : "空き枠"}
+                  {soloMode && player && player.playerId === bossPlayerId && " 👑"}
                 </span>
                 {player && (
                   <span style={{ backgroundColor: player.ready ? '#4CAF50' : '#9e9e9e', color: 'white', padding: '3px 10px', borderRadius: '15px', fontSize: '12px', fontWeight: 'bold' }}>
@@ -136,6 +160,14 @@ export default function LobbyScreen({
                   <div style={{ textAlign: 'left' }}>
                     <p style={{ margin: '0 0 5px 0', fontWeight: 'bold', fontSize: '16px' }}>{player.swordData.name}</p>
                     <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>HP:{player.swordData.hp} / 攻:{player.swordData.attack} / 重:{player.swordData.weight}</p>
+                    {canPickBoss && player.playerId !== bossPlayerId && (
+                      <button
+                        style={{ marginTop: '6px', padding: '4px 10px', backgroundColor: '#6a1b9a', color: 'white', border: 'none', borderRadius: '5px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+                        onClick={() => onBossPlayer(player.playerId)}
+                      >
+                        👑 ボスにする
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -153,16 +185,19 @@ export default function LobbyScreen({
 
           <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
             <div style={{ width: '100px', height: '100px', backgroundColor: '#e0f7fa', borderRadius: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: '40px' }}>
-              {gameMode === "1" ? "🌀" : "🗡️"}
+              {soloMode ? "👑" : gameMode === "1" ? "🌀" : "🗡️"}
             </div>
 
             <div style={{ flex: 1, textAlign: 'left' }}>
               <h4 style={{ margin: '0 0 5px 0', fontSize: '22px' }}>
                 {gameMode === "1" ? "独楽（見下ろし）モード" : "剣（横視点・重力）モード"}
                 {livesMode && <span style={{ marginLeft: '8px', fontSize: '14px', color: '#c62828' }}>⚔️ 残機制</span>}
+                {soloMode && <span style={{ marginLeft: '8px', fontSize: '14px', color: '#6a1b9a' }}>👑 1 vs 3</span>}
               </h4>
               <p style={{ margin: '0 0 15px 0', color: '#666', fontSize: '14px' }}>
-                {playerCount >= 3 ? "最後の1人になるまで戦う個人戦" : gameMode === "1" ? "独楽のようにぶつかり合う半自動戦闘モード" : "剣を振り回して戦うモード"}
+                {soloMode ? "1人（ボス）対3人。3人側は同士討ちしません。ボスは開始時にランダムで決まります"
+                  : playerCount >= 3 ? "最後の1人になるまで戦う個人戦"
+                  : gameMode === "1" ? "独楽のようにぶつかり合う半自動戦闘モード" : "剣を振り回して戦うモード"}
                 {livesMode && "（所持している剣がすべて撃破されるまで敗北しません）"}
               </p>
 
@@ -179,6 +214,13 @@ export default function LobbyScreen({
                     onClick={() => onLivesMode(!livesMode)}
                   >
                     {livesMode ? "⚔️ 残機制: ON" : "残機制: OFF"}
+                  </button>
+                  {/* 1vs3 と残機制は当面併用しない。どちらかをONにすると、もう一方は自動で外れる。 */}
+                  <button
+                    style={{ padding: '8px 15px', backgroundColor: soloMode ? '#6a1b9a' : '#9e9e9e', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}
+                    onClick={() => onSoloMode(!soloMode)}
+                  >
+                    {soloMode ? "👑 1 vs 3: ON" : "1 vs 3: OFF"}
                   </button>
                 </div>
               )}
@@ -220,7 +262,7 @@ export default function LobbyScreen({
               onClick={onStart}
               disabled={!view.canStart}
             >
-              ⚔️ {playerCount}人で対戦開始
+              {soloMode ? "👑 1 vs 3 で対戦開始" : `⚔️ ${playerCount}人で対戦開始`}
             </button>
           )}
 

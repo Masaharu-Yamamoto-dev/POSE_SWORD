@@ -30,4 +30,32 @@ public static class MultiplayerLocalTestSetup
         EditorUtility.DisplayDialog("Multiplayer Local Test Harness",
             "GameManagerにMultiplayerLocalTestHarnessを追加しました。シーンを保存してPlayを押すと、ホスト側のマルチプレイ対戦が自動で始まります。", "OK");
     }
+
+    // ▼【新規追加】MultiplayerManagerは普段 SceneController.Awake が実行時に足しているため、
+    // Inspectorで設定した値がシーンに残らない。1vs3のHUDレイアウトを調整できるよう、
+    // コンポーネントをシーンへ常設するためのメニュー。
+    [MenuItem("POSE SWORD/Add Multiplayer Manager to Scene")]
+    public static void AddManager()
+    {
+        var gameManager = GameObject.Find("GameManager");
+        if (gameManager == null)
+        {
+            EditorUtility.DisplayDialog("Multiplayer Manager",
+                "シーン内に \"GameManager\" という名前のオブジェクトが見つかりませんでした。", "OK");
+            return;
+        }
+        if (gameManager.GetComponent<MultiplayerManager>() != null)
+        {
+            EditorUtility.DisplayDialog("Multiplayer Manager",
+                "GameManagerには既にMultiplayerManagerが付いています。Inspectorの「1vs3 HUD」でレイアウトを調整できます。", "OK");
+            Selection.activeGameObject = gameManager;
+            return;
+        }
+        Undo.AddComponent<MultiplayerManager>(gameManager);
+        EditorUtility.SetDirty(gameManager);
+        EditorSceneManager.MarkSceneDirty(gameManager.scene);
+        Selection.activeGameObject = gameManager;
+        EditorUtility.DisplayDialog("Multiplayer Manager",
+            "GameManagerにMultiplayerManagerを追加しました。シーンを保存すると、Inspectorの「1vs3 HUD」で調整した値が残るようになります。", "OK");
+    }
 }

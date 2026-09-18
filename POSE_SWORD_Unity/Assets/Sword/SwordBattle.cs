@@ -32,7 +32,10 @@ public class SwordBattle : MonoBehaviour
     };
     public Color PlayerMainColor => PlayerColors[Mathf.Clamp(playerNumber - 1, 0, PlayerColors.Length - 1)];
     // 必殺技が撃てるようになるSPのライン（独楽モードは竜巻の70、剣モードは満タン）
-    public float UltimateThreshold => SwordController.isKomaMode ? 70f : maxSp;
+    // 通常必殺技の発動ライン。既定の100は maxSp の既定値と同じなので、従来の挙動は変わらない。
+    // 1vs3のボスだけ maxSp が200になるが、通常必殺技は100のままにしたいので参照先を分けてある。
+    public float ultimateSp = 100f;
+    public float UltimateThreshold => SwordController.isKomaMode ? 70f : ultimateSp;
 
     [Header("UI設定")]
     public Slider hpBar;        // 手前の緑ゲージ
@@ -41,6 +44,19 @@ public class SwordBattle : MonoBehaviour
     public TextMeshProUGUI hpText;   // ▼ 【変更】Text から TextMeshProUGUI に変更
     public Image frameImage;    // プレイヤーのメインカラーで塗る枠（HPパネルの縁など。Editor側で用意して割り当てる）
     public Button specialAttackButton; // 必殺技専用ボタン。自キャラのSPが条件を満たした時だけ表示する（Editor側で用意して割り当てる）
+    // 1vs3：掌握に切り替わっている間だけ差し替える、共有ボタンの元の見た目
+    TextMeshProUGUI ultimateButtonLabel;
+    Image ultimateButtonImage;
+    string ultimateButtonLabelText;
+    Color ultimateButtonColor;
+    bool suppressSkinCaptured;
+    bool suppressSkinApplied;
+    // 制圧されている間の減光率（RGBに掛ける。アルファは保つ）と、今それを掛けているかどうか
+    const float SuppressDim = 0.4f;
+    bool suppressTinted;
+    // 制圧の技番号。既存の1〜6と衝突しない値にして、色分けとカットインの同期にそのまま乗せる
+    public const int SuppressDashType = 7;
+    public const string SuppressSkillName = "オレ掌握斬!!";
     // ▼【新規追加】残機モード：HPパネル内に表示する「あと何本あるか」の小さいアイコン列。
     // 今戦っている剣は含めない(残りの手持ちの剣だけ)。MultiplayerManager.WireHudBarが実行時に生成して渡す
     [HideInInspector] public Image[] reserveSwordIcons;
@@ -226,7 +242,7 @@ public static bool matchEnded = false;
     {
         if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
         string action = PoseSword.Multiplayer.BattlePolicies.PrimaryAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, isDashing, right);
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing, right, MultiplayerOwner.IsSuppressed(PlayerId));
         switch (action)
         {
             case "KomaDash": StartCoroutine(DashRoutine()); break;
@@ -241,10 +257,54 @@ public static bool matchEnded = false;
     public void ExecuteMultiplayerUltimate()
     {
         if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
+        // 閾値はUIと同じ ultimateSp を渡す。ここを固定値にすると、ボス(maxSp=200)で
+        // 「ボタンは出ていないのに撃てる」ような食い違いが起きる。
         string action = PoseSword.Multiplayer.BattlePolicies.UltimateAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, isDashing);
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing, MultiplayerOwner.IsSuppressed(PlayerId), ultimateSp);
         if (action == null) return;
         StartCoroutine(UltimateRoutine());
+    }
+
+    // ▼【新規追加】1vs3：ボスの制圧。自分の画面から送るだけで、実際に効くかどうかはHostが決める
+    // ▼【新規追加】1vs3：SPが満タンまで溜まっていて、掌握に切り替わっている状態かどうか。
+    // ボスだけ maxSp が200で、トリオは maxSp が100=通常必殺技のラインなので、
+    // 「満タン かつ 通常必殺技のラインより上」を条件にすればボス以外では立たない。
+    public bool SuppressReady
+    {
+        get
+        {
+            return MultiplayerOwner != null && MultiplayerOwner.SoloModeActive &&
+                maxSp > ultimateSp && currentSp >= maxSp &&
+                IsAlive && !isDashing && !MultiplayerOwner.IsSuppressed(PlayerId);
+        }
+    }
+
+    // ▼【新規追加】Host側の実行口。範囲判定と効果の適用はMultiplayerManagerが持つ
+    public void ExecuteMultiplayerSuppress()
+    {
+        if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
+        MultiplayerOwner.ApplySuppress(PlayerId);
+    }
+
+    // 制圧の発動で消費するSP。ゲージ満タンぶんを使い切る
+    public void ConsumeSuppressSp() { currentSp = 0f; }
+
+    // ▼【新規追加】1vs3：掌握の2段目。範囲の中心で剣を大きくして回し、集めた相手を薙ぎ払う。
+    // 大きさの退避と復帰は既存の巨大回転斬(GiantSpinRoutine)と同じ作法にしてある。
+    // 位置・回転・大きさはいずれも同期に乗っているので、ゲストの画面にもそのまま見える。
+    public void BeginJudgmentSweep(float seconds, float scale)
+    {
+        if (!IsAlive) return;
+        StartCoroutine(JudgmentSweepRoutine(seconds, scale));
+    }
+
+    IEnumerator JudgmentSweepRoutine(float seconds, float scale)
+    {
+        Vector3 originalScale = transform.localScale;
+        if (scale > 0f) transform.localScale = originalScale * scale;
+        yield return new WaitForSecondsRealtime(seconds);
+        transform.localScale = originalScale;
+        if (rb != null) rb.angularVelocity *= 0.25f;   // 回したままにせず、振り抜いたところで収める
     }
 
     // ▼【新規追加】剣本体以外（分身・リーフシールドなど）からも、TakeDamage/QueueHitへの正しい経路で
@@ -328,23 +388,74 @@ public static bool matchEnded = false;
         if (dashType != previousDashType) TryPlayUltimateCutin(dashType);
         if (spriteRenderer != null)
         {
-            Color tint = dashType == 1 ? new Color(1, .5f, .5f) :
-                dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) :
-                dashType == 4 ? new Color(1f, .3f, .3f) : dashType == 5 ? new Color(.3f, .6f, 1f) :
-                dashType == 6 ? new Color(.4f, .95f, .5f) : Color.white;
-            // ▼【新規追加】リスポーン無敵中の点滅(Update()側でアルファだけ操作)を上書きしてしまわないよう、
+            Color tint = ColorForDashType(dashType);
+            // ▼ リスポーン無敵中の点滅(Update()側でアルファだけ操作)を上書きしないよう、
             // 現在のアルファ値は維持したまま色(RGB)だけ差し替える
             tint.a = spriteRenderer.color.a;
             spriteRenderer.color = tint;
         }
-        // ▼【修正】Host側は自分の剣のlocalScale.xだけをSYNCで送っており(MultiplayerManager.Snapshot)、
-        // これをVector3.one * scaleでそのまま復元するとZ軸まで巻き込んで上書きしてしまっていた。
-        // このテンプレートは元々X/Y=2・Z=1という非対称なスケールで作られており(柄(Handle-A)は
-        // ローカルZ座標を-5に固定しているため)、親のZスケールが1→2に化けると柄のワールドZ座標が
-        // -5→-10まで移動してカメラ(Z=-10)の目の前・ニアクリップ面のすぐ手前まで来てしまい、
-        // 柄がカリングされて画面に描画されなくなる不具合の原因になっていた。
-        // Z軸はConfigureMultiplayerで記録した本来のbaselineScaleのまま維持し、X/Yだけ同期する
+        // ▼ Host側は localScale.x だけをSYNCで送っている。Vector3.one * scale で戻すとZ軸まで
+        // 上書きしてしまい、柄(Handle-A)のワールドZがカメラのニアクリップ面まで来て描画されなくなる。
+        // Z軸は ConfigureMultiplayer で記録した baselineScale のまま維持し、X/Yだけ同期する
         if (scale > 0f) transform.localScale = new Vector3(scale, scale, baselineScale.z);
+    }
+
+    // 技の種別に対応する刀身の色。制圧の減光でも「本来の色」を引くのに使う。
+    public static Color ColorForDashType(int dashType)
+    {
+        return dashType == 1 ? new Color(1, .5f, .5f) :
+            dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) :
+            dashType == 4 ? new Color(1f, .3f, .3f) : dashType == 5 ? new Color(.3f, .6f, 1f) :
+            dashType == 6 ? new Color(.4f, .95f, .5f) :
+            dashType == SuppressDashType ? new Color(.78f, .45f, 1f) : Color.white;
+    }
+
+    // ▼【新規追加】1vs3：制圧のカットイン。技番号を一瞬だけ立てることで、同期を受け取った側の
+    // ApplyMultiplayerVisuals からも同じ経路でカットインが出る（専用の同期項目を足さずに済む）。
+    // isDashing は触らないので、制圧を撃ったボスが無敵になったり突進扱いになったりはしない。
+    public void PlaySuppressCutin()
+    {
+        if (!IsAlive) return;
+        StartCoroutine(SuppressCutinRoutine());
+    }
+
+    IEnumerator SuppressCutinRoutine()
+    {
+        currentDashType = SuppressDashType;
+        if (spriteRenderer != null)
+        {
+            spriteRenderer.color = ColorForDashType(SuppressDashType);
+            if (CutinManager.Instance != null)
+                CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, SuppressSkillName,
+                    ColorForDashType(SuppressDashType), PlayerMainColor, MultiplayerOwner == null);
+        }
+        yield return new WaitForSecondsRealtime(0.8f);
+        // 待っている間に別の技が始まっていたら、その技の番号と色を尊重して何もしない
+        if (currentDashType != SuppressDashType) yield break;
+        currentDashType = 0;
+        if (spriteRenderer != null && IsAlive && !isDashing) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】1vs3：制圧されている間は刀身を暗く落として、操作できない相手を見分けやすくする。
+    // 色は技ごとの色分けや撃破時のグレーなど16箇所から書き込まれるので、それらには手を触れず
+    // 「制圧されている間だけ毎フレーム塗り直す」方式にしている。本来の色は保存せず currentDashType
+    // から引き直すので、制圧中に発動済みの技が終わって色が変わっても破綻しない。
+    void UpdateSuppressTint()
+    {
+        if (spriteRenderer == null) return;
+        bool suppressed = MultiplayerOwner != null && IsAlive && MultiplayerOwner.IsSuppressed(PlayerId);
+        if (suppressed)
+        {
+            Color baseColor = ColorForDashType(currentDashType);
+            spriteRenderer.color = new Color(baseColor.r * SuppressDim, baseColor.g * SuppressDim,
+                baseColor.b * SuppressDim, baseColor.a);
+            suppressTinted = true;
+            return;
+        }
+        if (!suppressTinted) return;
+        suppressTinted = false;
+        // 撃破済みならグレーのまま。ここで戻すと ApplyMultiplayerHealth が塗った色を消してしまう。
+        if (IsAlive) spriteRenderer.color = ColorForDashType(currentDashType);
     }
 
     // ▼【新規追加】dashType(2〜6)に対応する必殺技のカットインを、スローモーションなしで再生する
@@ -366,6 +477,9 @@ public static bool matchEnded = false;
             
             case 5: skillName = "オレ達アタック!!"; themeColor = new Color(0.3f, 0.6f, 1f); break;
             case 6: skillName = "オレ達シールド!!"; themeColor = new Color(0.4f, 0.95f, 0.5f); break;
+            // ▼【新規追加】1vs3：制圧。Host側は SuppressCutinRoutine で直接鳴らし、
+            // 他プレイヤーの画面には dashType の同期を通じてここから出る
+            case SuppressDashType: skillName = SuppressSkillName; themeColor = ColorForDashType(SuppressDashType); break;
             default: return;
         }
         CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, themeColor, PlayerMainColor, false);
@@ -443,6 +557,7 @@ public static bool matchEnded = false;
 
         UpdateUltimateAura();
         UpdateSpecialAttackButton();
+        UpdateSuppressTint();
 
         if (controller != null && controller.isLocalControlled)
         {
@@ -466,6 +581,7 @@ public static bool matchEnded = false;
             }
 
             // ▼【新規追加】PC操作時のみ：スペースキーでも必殺技専用ボタンと同じ発動ができるようにする
+            // ▼ 1vs3ではSPが満タンになると、このキーで出るものが掌握へ切り替わる（TryUltimate内で振り分ける）
             if (Input.GetKeyDown(KeyCode.Space)) TryUltimate();
         }
     }
@@ -476,10 +592,39 @@ public static bool matchEnded = false;
     void UpdateSpecialAttackButton()
     {
         if (specialAttackButton == null || controller == null || !controller.isLocalControlled) return;
-        bool shouldShow = !isDashing && currentSp >= UltimateThreshold;
+        // 制圧を受けている間はどの入力も通らないので、押せるように見せない
+        bool suppressed = MultiplayerOwner != null && MultiplayerOwner.IsSuppressed(PlayerId);
+        bool shouldShow = !isDashing && !suppressed && currentSp >= UltimateThreshold;
         if (specialAttackButton.gameObject.activeSelf != shouldShow)
             specialAttackButton.gameObject.SetActive(shouldShow);
+        // ▼【新規追加】1vs3：ボタンは1つのまま、SPが満タンになったら掌握へ切り替わる。
+        // どちらが出るのか分かるよう、表示も切り替える
+        ApplySuppressButtonSkin(SuppressReady);
     }
+
+    // 掌握に切り替わっている間だけ、共有の必殺技ボタンの文字と色を差し替える。
+    // 元の値は最初に覚えておき、戻す時と試合終了時(OnDisable)に必ず復帰させる。
+    void ApplySuppressButtonSkin(bool suppressMode)
+    {
+        if (specialAttackButton == null || suppressMode == suppressSkinApplied) return;
+        if (!suppressSkinCaptured)
+        {
+            ultimateButtonLabel = specialAttackButton.GetComponentInChildren<TextMeshProUGUI>(true);
+            ultimateButtonImage = specialAttackButton.GetComponent<Image>();
+            if (ultimateButtonLabel != null) ultimateButtonLabelText = ultimateButtonLabel.text;
+            if (ultimateButtonImage != null) ultimateButtonColor = ultimateButtonImage.color;
+            suppressSkinCaptured = true;
+        }
+        suppressSkinApplied = suppressMode;
+        if (ultimateButtonLabel != null)
+            ultimateButtonLabel.text = suppressMode ? "掌握斬" : ultimateButtonLabelText;
+        if (ultimateButtonImage != null)
+            ultimateButtonImage.color = suppressMode ? new Color(.42f, .11f, .60f, ultimateButtonColor.a) : ultimateButtonColor;
+    }
+
+    // 試合が終わる・撃破される・剣が消される時に、共有ボタンの見た目を元へ戻す。
+    // このボタンはシーンに1つしか無く、次の試合へ持ち越されるため。
+    void OnDisable() { ApplySuppressButtonSkin(false); }
 
     // ▼【新規追加】残機モード：HPパネル内の「あと何本あるか」アイコン列を、渡された残りの剣の
     // 画像で更新する。今戦っている剣は含まない配列を渡す想定。本数が足りない枠は非表示にする
@@ -1097,7 +1242,14 @@ public static bool matchEnded = false;
         // ボタンを1回押すと全員分のTryUltimate()が呼ばれてしまう。
         // 自分が操作しているキャラでなければ即座に何もしないようにして、他人の必殺技が暴発しないようにする
         if (controller == null || !controller.isLocalControlled) return;
-        if (MultiplayerOwner != null) { MultiplayerOwner.SubmitLocalUltimate(); return; }
+        // ▼【修正】1vs3：ボタンは1つのまま、SP量で撃つものが変わる。満タン(=maxSp)なら掌握、
+        // そこに届いていなければ通常必殺技。実際に撃てるかどうかはHost側が改めて判定する
+        if (MultiplayerOwner != null)
+        {
+            if (SuppressReady) MultiplayerOwner.SubmitLocalSuppress();
+            else MultiplayerOwner.SubmitLocalUltimate();
+            return;
+        }
         if (isDead || matchEnded || isDashing || !isRoundStarted) return;
         if (currentSp < UltimateThreshold) return;
 

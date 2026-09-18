@@ -333,3 +333,119 @@ test('heartbeat traffic cannot hold an uncompleted handshake seat forever', () =
   assert.equal(a.open, false);
   assert.equal(s.host.host.reserve('replacement'), true);
 });
+
+// ===== 1vs3（ボス vs 三人組） =====
+
+function soloConfig(s) {
+  return s.commands[0].find(c => c.method === 'InitializeMultiplayer').data;
+}
+
+// 1vs3 はホストがボスを指名しないと開始できない
+function startSolo(s, bossId = 'p0') {
+  s.host.setBossPlayer(bossId); s.net.flush();
+  return start(s);
+}
+
+test('the named boss is handed to every client as the same roster', () => {
+  const s = setup({ soloMode: true });
+  startSolo(s, 'p2');
+  const config = soloConfig(s);
+  assert.equal(config.soloMode, true);
+  assert.equal(config.players.find(p => p.team === 0).playerId, 'p2');
+  assert.equal(config.players.filter(p => p.team === 0).length, 1);
+  assert.equal(config.players.filter(p => p.team === 1).length, 3);
+  // ゲストは自分で抽選せず、配られた結果をそのまま使う
+  for (const guest of s.guests) {
+    const mine = guest.view().room;
+    assert.equal(mine.soloMode, true);
+  }
+  for (let i = 1; i <= 3; i++) {
+    const guestConfig = s.commands[i].find(c => c.method === 'InitializeMultiplayer').data;
+    assert.deepEqual(guestConfig.players.map(p => [p.playerId, p.team, p.spawnIndex]),
+      config.players.map(p => [p.playerId, p.team, p.spawnIndex]));
+  }
+});
+
+test('any seat may be named boss, including the host', () => {
+  for (const expected of ['p0', 'p1', 'p2', 'p3']) {
+    const s = setup({ soloMode: true });
+    startSolo(s, expected);
+    const boss = soloConfig(s).players.find(p => p.team === 0);
+    assert.equal(boss.playerId, expected);
+    assert.equal(soloConfig(s).players.filter(p => p.team === 1).length, 3);
+  }
+});
+
+test('a match cannot be prepared before a boss is named', () => {
+  const s = setup({ soloMode: true });
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  assert.equal(s.host.view().canStart, false);
+  assert.throws(() => s.host.prepare());
+});
+
+test('the boss spawns apart from the trio and every seat is used once', () => {
+  const s = setup({ soloMode: true });
+  startSolo(s, 'p2');
+  const config = soloConfig(s);
+  assert.equal(config.players.find(p => p.team === 0).spawnIndex, 0);
+  assert.deepEqual(config.players.filter(p => p.team === 1).map(p => p.spawnIndex).sort(), [1, 2, 3]);
+  assert.deepEqual(config.players.map(p => p.spawnIndex).sort(), [0, 1, 2, 3]);
+});
+
+test('the boss buff rides along with the solo roster and is absent otherwise', () => {
+  const solo = setup({ soloMode: true });
+  startSolo(solo);
+  const buff = soloConfig(solo).soloBuff;
+  assert.equal(buff.maxSp, 200);
+  assert.ok(buff.hpMultiplier > 1 && buff.suppressRadius > 0 && buff.suppressDuration > 0);
+
+  const normal = setup();
+  start(normal);
+  const plain = soloConfig(normal);
+  assert.equal(plain.soloMode, false);
+  assert.equal(plain.soloBuff, null);
+  assert.ok(plain.players.every(p => p.team === 0), '個人戦では陣営を分けない');
+});
+
+test('a rematch keeps the named boss unless the host changes it', () => {
+  const s = setup({ soloMode: true });
+  const matchId = startSolo(s, 'p1');
+  assert.equal(soloConfig(s).players.find(p => p.team === 0).playerId, 'p1');
+  s.host.unityEvent('RESULT', { matchId, winnerId: 'p1', draw: false, standings: [] }); s.net.flush();
+  s.host.returnToLobby(); s.guests.forEach(g => g.returnToLobby()); s.net.flush();
+  start(s);
+  const configs = s.commands[0].filter(c => c.method === 'InitializeMultiplayer');
+  assert.equal(configs.at(-1).data.players.find(p => p.team === 0).playerId, 'p1', '指名は再戦でも保たれる');
+});
+
+test('a suppress input reaches the host as its own action', () => {
+  const s = setup({ soloMode: true });
+  const matchId = startSolo(s);
+  s.commands[0].length = 0;
+  s.guests[0].unityEvent('INPUT', { matchId, action: 'SUPPRESS' }); s.net.flush();
+  const relayed = s.commands[0].filter(c => c.method === 'ReceiveMultiplayerInput').map(c => c.data);
+  assert.equal(relayed.length, 1);
+  assert.equal(relayed[0].action, 'SUPPRESS');
+  assert.equal(relayed[0].playerId, 'p1');
+  assert.equal(relayed[0].direction, undefined);
+});
+
+test('the host applies its own suppress input without a round trip', () => {
+  const s = setup({ soloMode: true });
+  const matchId = startSolo(s);
+  s.commands[0].length = 0;
+  s.host.unityEvent('INPUT', { matchId, action: 'SUPPRESS' }); s.net.flush();
+  const applied = s.commands[0].filter(c => c.method === 'ReceiveMultiplayerInput').map(c => c.data);
+  assert.equal(applied.length, 1);
+  assert.equal(applied[0].action, 'SUPPRESS');
+  assert.equal(applied[0].playerId, 'p0');
+});
+
+test('unknown input actions are still discarded after adding suppress', () => {
+  const s = setup({ soloMode: true });
+  const matchId = startSolo(s);
+  s.commands[0].length = 0;
+  s.guests[0].unityEvent('INPUT', { matchId, action: 'STUN' }); s.net.flush();
+  s.guests[0].unityEvent('INPUT', { matchId, action: 'PRIMARY', direction: 'UP' }); s.net.flush();
+  assert.equal(s.commands[0].filter(c => c.method === 'ReceiveMultiplayerInput').length, 0);
+});
