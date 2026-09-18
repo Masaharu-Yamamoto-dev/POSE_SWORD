@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Runtime.InteropServices;
@@ -133,7 +134,16 @@ public class NetworkManager : MonoBehaviour
         #if UNITY_WEBGL && !UNITY_EDITOR
             SendToReact(type, jsonString);
         #endif
+        // ▼【新規追加】本番(WebGL)ではReact/サーバー側がこのメッセージを受け取って処理するが、
+        // エディタ内ではそもそも送信すらされない。MultiplayerLocalTestHarness等のデバッグ用
+        // ループバックがここを購読して、送信されるはずだったメッセージを横取りできるようにする
+        #if UNITY_EDITOR
+            EditorSendDataHook?.Invoke(type, jsonString);
+        #endif
     }
+    #if UNITY_EDITOR
+    public static event Action<string, string> EditorSendDataHook;
+    #endif
 
     // HOST：タイマーで正確に30fpsに間引いて送信(全プレイヤー分)
     void FixedUpdate()
@@ -324,7 +334,13 @@ public class NetworkManager : MonoBehaviour
             GameObject obj = playerSwords[i];
             if (obj == null) continue;
             var controller = obj.GetComponent<SwordController>();
-            if (controller != null) controller.ApplyPhysicsMode();
+            if (controller != null)
+            {
+                // ▼ Inspectorの配線ミスで柄(Handle-A)参照が別プレイヤーの剣を指していることがあるため、
+                // モード切り替えで柄の表示/非表示を変える直前に必ず自分自身の柄を参照し直す
+                controller.ResolveOwnHandle();
+                controller.ApplyPhysicsMode();
+            }
         }
 
         if (swordStage != null) swordStage.SetActive(!SwordController.isKomaMode);

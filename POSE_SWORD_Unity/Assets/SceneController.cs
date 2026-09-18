@@ -95,21 +95,15 @@ public class SceneController : MonoBehaviour
 
     void Start()
     {
-        // ▼ 起動時の自動テストはEditor専用。ビルドで走らせると、マルチプレイの初期化と
-        // 実行順を争って「デモ用の剣」がそのまま残る（READY送信と本Start()の順序は保証されない）。
-#if UNITY_EDITOR
         if (autoTestOnStart && debugBattleJsonFile != null && !string.IsNullOrEmpty(debugBattleJsonFile.text))
         {
             if (NetworkManager.Instance != null) NetworkManager.Instance.SetPlayerInfoDirect(0, 2, true);
             StartBattle(debugBattleJsonFile.text);
         }
-#endif
     }
 
     void Update()
     {
-        // ▼ こちらもEditor専用。対戦中に誰かがTキーを押すとテスト対戦が割り込んでしまう。
-#if UNITY_EDITOR
         // 起動後も「T」キーを押せば、インスペクタの数値を反映して何度でもカウントダウンからやり直せます
         if (Input.GetKeyDown(KeyCode.T))
         {
@@ -119,19 +113,6 @@ public class SceneController : MonoBehaviour
                 StartBattle(debugBattleJsonFile.text);
             }
         }
-#endif
-    }
-
-    // ▼ 動的生成した3・4人目の剣とHPバーを片付ける。
-    // 起動時の自動テスト(autoTestOnStart)で作られたものを、対戦開始前に消す用途でも使う。
-    public void ClearDynamicSpawns()
-    {
-        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
-        dynamicSwords.Clear();
-        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
-        dynamicHudPieces.Clear();
-        SetHudTemplateVisible(p3HudTemplate, false);
-        SetHudTemplateVisible(p4HudTemplate, false);
     }
 
     public void StartBattle(string jsonString)
@@ -146,7 +127,10 @@ public class SceneController : MonoBehaviour
         Vector3[] positions = GetSpawnPositions(playerCount);
 
         // ▼ 前回のStartBattle()で3・4人目用に動的生成したもの(剣・HPバー)を破棄してから作り直す
-        ClearDynamicSpawns();
+        foreach (var obj in dynamicSwords) if (obj != null) Destroy(obj);
+        dynamicSwords.Clear();
+        foreach (var obj in dynamicHudPieces) if (obj != null) Destroy(obj);
+        dynamicHudPieces.Clear();
 
         if (NetworkManager.Instance != null)
         {
@@ -238,6 +222,13 @@ public class SceneController : MonoBehaviour
         // ▼ P1(複製元)の値をそのまま引き継いでしまわないよう、スロット順のプレイヤー番号を明示的に上書きする
         if (battle != null) battle.playerNumber = slotIndex + 1;
 
+        // ▼ 柄(Handle-A)はテンプレート側のSwordController.handleObjectが誤って別の剣の柄を参照して
+        // いることがある(MultiplayerManager.CreateSwordと同じ問題)。参照先がテンプレートの階層の外に
+        // あると、Unityは複製(Instantiate)時にこの参照を複製先へ付け替えないため、そのままコピーすると
+        // 3・4人目の剣が自分の柄ではなく他プレイヤーの柄を操作してしまう。ResolveOwnHandle()で複製した
+        // 自分自身の子から探し直してから使う
+        if (controller != null) controller.ResolveOwnHandle();
+
         var generator = clone.GetComponent<SwordGenerator>();
         if (generator == null) generator = clone.AddComponent<SwordGenerator>();
         generator.generateOnStart = false;
@@ -320,7 +311,8 @@ public class SceneController : MonoBehaviour
     }
 
     // ▼【N人対応】人数・モードに応じたスポーン座標を返す(2人時は従来のleft/rightをそのまま使用)
-    Vector3[] GetSpawnPositions(int playerCount)
+    // MultiplayerManagerからも同じ校正済みの座標を使うため公開している
+    public Vector3[] GetSpawnPositions(int playerCount)
     {
         bool koma = SwordController.isKomaMode;
         switch (playerCount)
@@ -339,6 +331,7 @@ public class SceneController : MonoBehaviour
 
     // ▼ p3HudTemplate/p4HudTemplate(PL3Bar/PL4Barなど、Editorで配置した実物のHPバー一式)の表示/非表示を切り替える。
     // 2人プレイなど、その人数の試合で使わない時は非表示にし、実際にその枠が参加する試合の時だけ表示する。
+    // ▼【修正】MultiplayerManager側でも(autoTestOnStartの名残を消すために)呼べるようpublicにした
     public static void SetHudTemplateVisible(HudTemplate template, bool visible)
     {
         if (template == null) return;

@@ -26,6 +26,16 @@ public class SwordController : MonoBehaviour
     [Header("柄のオブジェクト（独楽モード時は消す）")]
     public GameObject handleObject;
 
+    // ▼【新規追加】柄(つか)の見た目：hiltTypeごとの画像。マルチプレイ複製元のこのコンポーネントに
+    // 設定しておくと、MultiplayerManager.CreateSwordが実行時に生成するSwordGeneratorへコピーする
+    // (SwordGeneratorはテンプレートに常設されておらず、複製時にAddComponentされるためInspectorで
+    // 直接設定した値を持てない。SwordControllerは常設なので、こちらに置いてコピーする方式にした)
+    [Header("柄（つか）の見た目：hiltTypeごとの画像(React側の武器庫の柄と対応)")]
+    public Sprite handleSprite0; // "0"(未指定/不明な値含む) = 普通の柄
+    public Sprite handleSprite1; // "1" = 武骨な柄
+    public Sprite handleSprite2; // "2" = 悪魔の柄
+    public Sprite handleSprite3; // "3" = 大翼の柄
+
     [Header("独楽モード用の力")]
     public float komaSpinTorque = -3000f; // 独楽の回転力
     public float komaHomingForce = 20f;   // 敵に向かっていく力
@@ -89,7 +99,10 @@ public class SwordController : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (multiplayer != null && (!multiplayer.IsHost || !multiplayer.IsPlaying)) return;
+        // ▼【修正】ローカルは配置直後から独楽が回り続けるため、マルチプレイのカウントダウン中も
+        // (IsPlayingではなくIsSimulatingで)同じように回転させる。相手への追尾力はSwordBattle.isRoundStarted
+        // 側のガードでこれまで通りGO!が出るまで働かない
+        if (multiplayer != null && (!multiplayer.IsHost || !multiplayer.IsSimulating)) return;
         // 独楽モードで、自分に操作権限がある時だけ自動で動かす
         if (isKomaMode && swordRigidbody != null && swordRigidbody.bodyType == RigidbodyType2D.Dynamic)
         {
@@ -136,6 +149,17 @@ public class SwordController : MonoBehaviour
     public void NetworkJump(bool jumpRight)
     {
         JumpAndSpin(jumpRight);
+    }
+
+    // ▼【新規追加】柄(Handle-A)はInstantiate複製時、参照先が自分の階層外にあると複製先へ
+    // 付け替わらない(Unityの仕様)ため、Editorの配線ミスや複製のタイミング次第で「他人の柄」を
+    // 参照したままになることがあった(実機でクライアント側の柄だけ表示されない不具合の原因)。
+    // 呼び出し側(複製直後やモード切り替え前)でこれを呼ぶと、自分の子から名前で柄を探し直して
+    // 必ず自分自身の柄を参照するように補正できる。柄の見た目(スプライト)切り替えには一切関与しない。
+    public void ResolveOwnHandle()
+    {
+        Transform handle = transform.Find("Handle-A");
+        if (handle != null) handleObject = handle.gameObject;
     }
 
     public void ApplyPhysicsMode()

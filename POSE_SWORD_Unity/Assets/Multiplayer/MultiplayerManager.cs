@@ -14,7 +14,17 @@ public class MultiplayerManager : MonoBehaviour
 {
     public bool IsHost { get; private set; }
     public bool IsPlaying { get { return phase == "PLAYING"; } }
+    // ▼【修正】ローカル(シングルプレイ)は開始直後から物理演算が常に動いており、独楽はカウントダウン中も
+    // その場で回り続け、剣は重力で沈む。以前はIsPlayingになるまでPhysics2D.Simulate自体を呼んでおらず、
+    // マルチプレイだけカウントダウン中に完全静止していた。COUNTDOWN中もシミュレーションを進めるための判定
+    public bool IsSimulating { get { return phase == "COUNTDOWN" || IsPlaying; } }
     public bool Active { get { return config != null; } }
+    public string Phase => phase;
+    // ▼【新規追加】React側ではカウントダウンを表示しないため、Host自身はcountdownEndから直接計算し、
+    // Client側はHostからSYNCで届く値(receivedCountdownRemaining)をそのまま使う
+    public float CountdownRemaining => IsHost
+        ? (phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0f)
+        : receivedCountdownRemaining;
     private MultiplayerConfig config;
     private MatchRules rules;
     private readonly Dictionary<string, SwordBattle> swords = new Dictionary<string, SwordBattle>();
@@ -27,30 +37,54 @@ public class MultiplayerManager : MonoBehaviour
     private readonly List<Hit> hits = new List<Hit>();
     private readonly HashSet<string> forfeits = new HashSet<string>();
     private GameObject arena;
-    private bool stageVisible;   // 元のステージを出しているか（出すなら囲いの壁は描かない）
-    private SceneController sceneController;   // シーンに作り込まれたHUDを使うために保持する
-    private NetworkManager networkManager;
-    private bool useSceneHud;    // シーンのHUDを使えるか（使えないときだけ簡易HUDを生成する）
-    private Sprite wallSprite;
     // ▼【新規追加】分身突進・リーフシールドなど、本体以外の"付随体"をSYNCでクライアントへ配信するための登録簿（Host側で使用）
-    private readonly Dictionary<string, (GameObject obj, string ownerId, Color color)> activeClones = new Dictionary<string, (GameObject, string, Color)>();
+    private readonly Dictionary<string, (GameObject obj, string ownerId, Color color, int spriteIndex)> activeClones = new Dictionary<string, (GameObject, string, Color, int)>();
     private int cloneIdSeq;
     // ▼【新規追加】クライアント側で、SYNCで届いた分身の位置を再現するための見た目専用オブジェクト
     private readonly Dictionary<string, GameObject> cloneVisuals = new Dictionary<string, GameObject>();
-    // Unity側のゲーム画面にも(Reactの4パネルとは別に)簡易HPバーを重ねて表示するためのHUD
-    private GameObject hudRoot;
-    private TextMeshProUGUI hudStatusText;   // countdownText が無い場合の予備表示
-    private TextMeshProUGUI countdownLabel;  // シーン既存のカウントダウン表示（元の見た目）
-    private float syncedCountdown;           // ゲストがホストから受け取る残り秒数
-    private float goUntil;                   // 「GO!」を出しておく時刻
-    private readonly Dictionary<string, Slider> hudHpBars = new Dictionary<string, Slider>();
-    private readonly Dictionary<string, TextMeshProUGUI> hudHpTexts = new Dictionary<string, TextMeshProUGUI>();
+    // ▼【新規追加】剣本体(syncTargets)と同様に、分身・シールドの見た目も毎フレーム補間で追従させるための目標値
+    private readonly Dictionary<string, MultiplayerCloneState> cloneSyncTargets = new Dictionary<string, MultiplayerCloneState>();
+    // ▼【新規追加】BattleCameraはマルチプレイ中は無効化しているため、代わりにこのマネージャー自身の
+    // LateUpdate()でシェイク量を消費する（TriggerShakeはローカルのBattleCamera.TriggerShakeと同じ役割）
+    private float shakeDuration, shakeMagnitude;
+    private Vector3 lockedCameraPosition;
+    private bool hasLockedCameraPosition;
+    // ▼【新規追加】ダメージを伴わない柄迫り合い・壁バウンドの演出をSYNCでゲストにも伝えるための単調増加カウンタ
+    private readonly Dictionary<string, int> clashSeq = new Dictionary<string, int>();
+    // ▼【新規追加】QueueHitで受け取ったクリティカル/弱点情報を、同一tick内でApplyMultiplayerHealthへ渡すための一時置き場
+    private readonly Dictionary<string, bool> criticalHitThisTick = new Dictionary<string, bool>();
+    // ▼【新規追加】↑と同じクリティカル情報を、clashSeqと同じ単調増加カウンタ方式でSYNC経由でもゲストへ伝える
+    private readonly Dictionary<string, int> critSeq = new Dictionary<string, int>();
+    // ▼【修正】シーンに元々ある PL1Bar〜PL4Bar（HP赤/緑二重ゲージ・名前・SPバー）とカットイン・必殺技ボタンが
+    // 乗っているCanvas。以前は多人数対応時に全Canvasを無効化していたため、これらが丸ごと表示されなくなっていた。
+    // このCanvasだけは無効化対象から除外し、各プレイヤーのUI要素をここへ配線して使う
+    private Canvas hudCanvas;
+    // ▼【新規追加】Reactなど外部UI側ではカウントダウンを表示しないため、SceneController側の
+    // countdownText（ローカルデモと共用のTMP）をマルチプレイ中もそのまま使って表示する
+    private TMPro.TextMeshProUGUI countdownText;
+    private string countdownUiPhase = "IDLE"; // countdownText自体の表示状態(前フレームのphase)の追跡用
+    private float countdownGoHideAt;
     private string phase = "IDLE";
     private int physicsTick, syncTick, receivedTick = -1;
     private float countdownEnd, nextSync, nextTargetUpdate;
+    private float receivedCountdownRemaining;
     private SimulationMode2D previousSimulationMode;
     private bool ownsSimulation;
     private BattleCamera battleCamera;
+    // ▼【新規追加】残機モード関連。livesModeActiveはconfig.livesModeのコピーで、脱落時に次の剣へ
+    // 持ち替えて延命する(=MatchRulesに複数本ぶんのHPを渡す)かどうかだけを左右する。
+    // ownedSwordsByPlayerは各playerの手持ちの剣(現在装備中の剣から並び順)そのもので、残機モードの
+    // ON/OFFに関わらず常に構築する(分身系必殺技の見た目バリエーションはモードを問わず使うため)。
+    // spawnPositionByPlayerは持ち替え時に復帰させるスポーン座標、lifeIndexByPlayerはHost/Client双方で
+    // 「今使っている剣が手持ちの何番目か」を覚えておくための追跡用(残機モードでなければ常に0のまま)
+    private bool livesModeActive;
+    public bool LivesModeActive => livesModeActive;
+    private Dictionary<string, List<SwordSlotData>> ownedSwordsByPlayer;
+    private Dictionary<string, Vector3> spawnPositionByPlayer;
+    private readonly Dictionary<string, int> lifeIndexByPlayer = new Dictionary<string, int>();
+    // ▼【新規追加】分身系必殺技(オレ達アタック/オレ達シールド)が「装備していない手持ちの剣」の
+    // 見た目を使えるよう、各playerの手持ちの剣の画像から一度だけ生成したSpriteをキャッシュしておく
+    private readonly Dictionary<string, Sprite[]> lifeSpriteCache = new Dictionary<string, Sprite[]>();
 
     void Start() { Emit("READY", new MultiplayerCommand()); }
 
@@ -71,48 +105,56 @@ public class MultiplayerManager : MonoBehaviour
             var network = GetComponent<NetworkManager>();
             if (scene == null || network == null || network.playerSwords.Length < 2 || network.playerSwords[0] == null || scene.hostGenerator == null)
                 throw new InvalidOperationException("Missing sword template in scene.");
+            // ▼【修正】autoTestOnStart(ローカルデモ)が先に走っていた場合、CountdownCameraRoutineを
+            // 道連れで止めるとcountdownTextが"3"のまま誰にも更新されず残ってしまっていた。
+            // マルチプレイ自身のCOUNTDOWNフェーズでこのテキストを引き継いで表示するので、ここでは
+            // 古いローカルデモの進行だけを止める（テキスト自体はUpdate()側で生きたまま更新する）
             scene.StopAllCoroutines();
             scene.autoTestOnStart = false;
+            countdownText = scene.countdownText;
+            countdownUiPhase = "IDLE";
+            if (countdownText != null) countdownText.gameObject.SetActive(false);
             network.enabled = false;
             network.isHost = IsHost;
             scene.hostGenerator.generateOnStart = false;
             scene.clientGenerator.generateOnStart = false;
-            // 起動時の自動テスト(autoTestOnStart)が3・4人目の剣を作っていることがあるので消す。
-            // これを残すと2人対戦でも剣が4本出て、描画も物理も無駄に重くなる。
-            scene.ClearDynamicSpawns();
-            foreach (var sword in network.playerSwords) if (sword != null) sword.SetActive(false);
-            // 元のステージをモードに合わせて出す（NetworkManager と同じ規則）
-            bool koma = config.gameMode == "1";
-            if (network.swordStage != null) network.swordStage.SetActive(!koma);
-            if (network.komaStage != null) network.komaStage.SetActive(koma);
-            stageVisible = (network.swordStage != null && !koma) || (network.komaStage != null && koma);
-            foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsSortMode.None)) canvas.enabled = false;
+            // ▼【修正】PL1〜PL4Bar・必殺技ボタン・カットインが乗っているCanvasだけは無効化しない。
+            // 以前は無条件に全Canvasを無効化しており、これらが丸ごと表示されなくなっていた
+            var templateBattle = network.playerSwords[0].GetComponent<SwordBattle>();
+            hudCanvas = templateBattle != null && templateBattle.specialAttackButton != null
+                ? templateBattle.specialAttackButton.GetComponentInParent<Canvas>() : null;
+            // ▼【重要】playerSwords[0]/[1]（旧1v1用テンプレート）自身も、シーンロード時に自分のTryUltimateを
+            // この共有ボタンへリスナー登録済み。Canvasを無効化しなくなった今、isLocalControlledをfalseにして
+            // TryUltimate側の既存ガード（自分の操作キャラでなければ即return）で無害化しておく
+            // ▼【修正】0/1だけでなく2/3も同様に処理する。SceneController.autoTestOnStartが有効なまま
+            // 4人用のdebugBattleJsonFileでベースのオートテストが一瞬先に走ると、3・4人目用に動的生成された
+            // 剣(playerSwords[2]/[3])が非表示にされず残り、MultiplayerManagerが新しく生成する3・4人目の剣と
+            // 同じスポーン座標に重なって表示されてしまっていた
+            for (int i = 0; i < network.playerSwords.Length; i++)
+            {
+                var templateSword = network.playerSwords[i];
+                if (templateSword == null) continue;
+                var templateController = templateSword.GetComponent<SwordController>();
+                if (templateController != null) templateController.isLocalControlled = false;
+                templateSword.SetActive(false);
+            }
+            SwordController.isKomaMode = config.gameMode == "1";
+            // ▼【修正】以前は両方とも非表示にして、コードで生成した簡易な壁4枚だけのアリーナに差し替えていたが、
+            // それだと背景美術も、SceneController側で校正済みの3〜4人用スポーン座標の前提となる床の高さ等も失われていた。
+            // ゲームモードに応じた本来のステージ（床・壁のコライダー込み）をそのまま使う
+            if (network.swordStage != null) network.swordStage.SetActive(!SwordController.isKomaMode);
+            if (network.komaStage != null) network.komaStage.SetActive(SwordController.isKomaMode);
+            foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
+                if (canvas != hudCanvas) canvas.enabled = false;
+            // ▼【新規追加】autoTestOnStart(ローカルデモ)や前回の対戦でPL3Bar/PL4Barが表示状態のまま
+            // 残っていることがあるため、SceneController.StartBattle()と同じく今回の対戦人数に合わせて
+            // 明示的に表示/非表示を揃える(これが無いと2〜3人戦でも4人分のHPバーが残って見えてしまう)
+            SceneController.SetHudTemplateVisible(scene.p3HudTemplate, config.players.Length >= 3);
+            SceneController.SetHudTemplateVisible(scene.p4HudTemplate, config.players.Length >= 4);
             foreach (var tutorial in FindObjectsByType<TutorialManager>(FindObjectsSortMode.None)) tutorial.enabled = false;
             if (BackgroundManager.Instance != null) BackgroundManager.Instance.enabled = false;
-            // 元からあるカウントダウン表示をそのまま使う（進行の管理はこちらで持つ）。
-            sceneController = scene;
-            networkManager = network;
-            // シーンに作り込まれたHPバーがあればそれを使う。無いときだけ簡易HUDを生成する。
-            var firstHud = network.playerSwords[0] != null ? network.playerSwords[0].GetComponent<SwordBattle>() : null;
-            useSceneHud = firstHud != null && firstHud.hpBar != null;
-
-            countdownLabel = scene.countdownText;
-            if (countdownLabel != null)
-            {
-                countdownLabel.gameObject.SetActive(true);
-                ShowCanvasOf(countdownLabel);
-            }
-
-            // カットインは出す。ただし時間は止めない（ホストが FixedUpdate で物理を進めているため）。
-            CutinManager.scaleTimeDuringCutin = false;
-            if (CutinManager.Instance != null)
-            {
-                CutinManager.Instance.StopAllCoroutines();
-                CutinManager.Instance.enabled = true;
-                ShowCanvasOf(CutinManager.Instance.cutinCanvasGroup);
-            }
+            if (CutinManager.Instance != null) CutinManager.Instance.StopAllCoroutines();
             Time.timeScale = 1;
-            SwordController.isKomaMode = config.gameMode == "1";
             SwordBattle.isRoundStarted = false;
             SwordBattle.matchEnded = false;
             battleCamera = Camera.main == null ? null : Camera.main.GetComponent<BattleCamera>();
@@ -122,11 +164,25 @@ public class MultiplayerManager : MonoBehaviour
             Physics2D.simulationMode = SimulationMode2D.Script;
             ownsSimulation = true;
             arena = new GameObject("MultiplayerArena");
-            BuildArena();
-            rules = new MatchRules(config.players.Select(p => p.playerId).ToArray(), config.players.Select(p => p.swordData.hp).ToArray());
-            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], scene.hostGenerator);
-            HideUnusedHud(config.players.Length);
-            if (!useSceneHud) BuildHud();
+            // ▼【新規追加】各playerの手持ちの剣(現在装備中の剣→残りの順)を先に確定させる。これは分身系
+            // 必殺技の見た目バリエーションに使うため残機モードのON/OFFに関わらず常に構築する。
+            // MatchRulesへ渡すHPの並びだけは残機モードの時だけ複数本ぶん、そうでなければ従来通り1本分のみ
+            livesModeActive = config.livesMode;
+            ownedSwordsByPlayer = config.players.ToDictionary(p => p.playerId, p => BuildOwnedSwords(p.swordData));
+            lifeIndexByPlayer.Clear();
+            foreach (var p in config.players) lifeIndexByPlayer[p.playerId] = 0;
+            rules = new MatchRules(config.players.Select(p => p.playerId).ToArray(),
+                config.players.Select(p => livesModeActive
+                    ? ownedSwordsByPlayer[p.playerId].Select(l => l.hp).ToArray()
+                    : new[] { p.swordData.hp }).ToArray());
+            // ▼ 壁も含めて自作していた即席アリーナをやめ、SceneController側の校正済み座標(GetSpawnPositions)を使う
+            Vector3[] spawnPositions = scene.GetSpawnPositions(config.players.Length);
+            spawnPositionByPlayer = config.players.ToDictionary(p => p.playerId, p => spawnPositions[p.spawnIndex]);
+            // ▼【修正】刀身の太さは、ローカル(3・4人目の動的生成)と同じくSceneController.generators[0]の値を基準にする。
+            // 以前はhostGeneratorという別枠の値を使っており、Inspector設定次第でローカルとサイズがズレていた
+            float bladeWidth = scene.generators != null && scene.generators.Length > 0 && scene.generators[0] != null
+                ? scene.generators[0].targetBladeWidth : scene.hostGenerator.targetBladeWidth;
+            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], bladeWidth, spawnPositions[player.spawnIndex]);
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
             StartCoroutine(CompleteInitialization());
         }
@@ -151,14 +207,19 @@ public class MultiplayerManager : MonoBehaviour
         config.players = config.players.OrderBy(p => p.slotIndex).ToArray();
     }
 
-    void CreateSword(MultiplayerPlayerConfig player, GameObject template, SwordGenerator sourceGenerator)
+    void CreateSword(MultiplayerPlayerConfig player, GameObject template, float bladeWidth, Vector3 spawnPosition)
     {
         var obj = Instantiate(template, arena.transform);
         obj.name = "Sword_" + player.playerId;
-        obj.transform.position = SpawnPosition(player.spawnIndex);
+        obj.transform.position = spawnPosition;
         obj.transform.rotation = Quaternion.identity;
         var battle = obj.GetComponent<SwordBattle>();
-        AssignHud(battle, player.slotIndex);
+        battle.frameImage = null; // PL{n}Bar側に対応する枠要素が無いため配線しない
+        WireHudBar(battle, player.slotIndex);
+        // ▼ 必殺技ボタンはPL1用の1つだけを全プレイヤーで共有する。実際に見える/押せるのは
+        // isLocalControlledなインスタンスだけなので（TryUltimate側でガード済み）、これで問題ない
+        battle.specialAttackButton = hudCanvas != null
+            ? hudCanvas.transform.Find("SpecialAttackButtonPL1")?.GetComponent<Button>() : null;
         battle.playerNumber = player.slotIndex + 1;
         battle.ConfigureMultiplayer(this, player.playerId);
         var controller = obj.GetComponent<SwordController>();
@@ -168,103 +229,105 @@ public class MultiplayerManager : MonoBehaviour
         rb.simulated = false;
         rb.bodyType = IsHost ? RigidbodyType2D.Dynamic : RigidbodyType2D.Kinematic;
         var blade = obj.transform.Find("Blade");
-        var generator = obj.AddComponent<SwordGenerator>();
+        // ▼ 柄(Handle-A)はテンプレート側のSwordController.handleObjectが誤って別の剣の柄を参照して
+        // いることがある。参照先がテンプレートの階層の外にあると、Unityは複製(Instantiate)時にこの
+        // 参照を複製先へ付け替えないため、そのままだと全プレイヤーが同じ1つの(誤った)柄オブジェクトを
+        // 共有してしまう。ResolveOwnHandle()が複製した自分自身の子から名前で探し直すことで、
+        // Inspectorの配線ミスに関わらず必ず「自分の」柄を使うようにする
+        controller.ResolveOwnHandle();
+        // ▼【修正】SceneController側の3・4人目動的生成(CreateDynamicPlayerSword)と同じく、
+        // テンプレートに既にSwordGeneratorが付いていればそれを再利用する（無条件AddComponentは二重生成の恐れがあった）
+        var generator = obj.GetComponent<SwordGenerator>();
+        if (generator == null) generator = obj.AddComponent<SwordGenerator>();
         generator.generateOnStart = false;
-        generator.targetBladeWidth = sourceGenerator.targetBladeWidth;
+        generator.targetBladeWidth = bladeWidth;
         generator.targetSpriteRenderer = blade.GetComponent<SpriteRenderer>();
         generator.bladeCollider = blade.GetComponent<PolygonCollider2D>();
         generator.swordRigidbody = rb;
         generator.swordBattle = battle;
         generator.handleObject = controller.handleObject;
+        // ▼【新規追加】SwordGeneratorは複製元に常設されておらずAddComponentされる(=Inspectorの値を
+        // 持てない)ため、常設されているSwordController側に設定した柄の画像をここでコピーする
+        generator.handleSprite0 = controller.handleSprite0;
+        generator.handleSprite1 = controller.handleSprite1;
+        generator.handleSprite2 = controller.handleSprite2;
+        generator.handleSprite3 = controller.handleSprite3;
         generator.GenerateSwordFromJson(JsonUtility.ToJson(player.swordData));
         if (!generator.LastGenerationSucceeded) throw new InvalidOperationException("Could not generate player sword.");
-        // Keep extreme photo aspect ratios inside the arena and clear of spawn neighbours.
-        var renderer = generator.targetSpriteRenderer;
-        float height = renderer.bounds.size.y;
-        if (height > 8f) blade.localScale *= 8f / height;
         controller.ApplyPhysicsMode();
         swords.Add(player.playerId, battle); bodies.Add(player.playerId, rb);
         sequences[player.playerId] = 0; inputTimes[player.playerId] = -100;
         targets[player.playerId] = null;
-        var marker = new GameObject("PlayerNumber").AddComponent<TextMeshPro>();
-        marker.transform.SetParent(obj.transform, false);
-        marker.transform.localPosition = new Vector3(0, -0.8f, -0.2f);
-        marker.text = "P" + (player.slotIndex + 1);
-        marker.fontSize = 6; marker.alignment = TextAlignmentOptions.Center;
-        if (sourceGenerator.swordBattle.nameText != null) marker.font = sourceGenerator.swordBattle.nameText.font;
-        marker.color = battle.PlayerMainColor;
+        // ▼【新規追加】残機モードなら、開始時点で「まだ使っていない残りの剣」をHPパネルに表示する
+        if (livesModeActive) battle.UpdateReserveSwordIcons(GetReserveSprites(player.playerId));
         obj.SetActive(true);
     }
 
-    // ReactのHUDとは別に、Unityのゲーム画面自体にも人数分(2〜4枚)のHPバーパネルを重ねて表示する
-    // シーンに作り込まれたHPバーへスロットごとに配線する。SceneController の単体プレイ時と同じ規則。
-    // 0・1番は1対1用のUI、2・3番は Editor で配置した HudTemplate を使う。
-    void AssignHud(SwordBattle battle, int slot)
+    // ▼【新規追加】あるプレイヤーの手持ちの剣を「現在装備中の剣から始めて、配列の並び順で一巡する」順序に
+    // 並べ、空きスロット(isEmpty)を除いたリストを返す。1本・2本しか持っていない場合はその本数分だけになる
+    // (呼び出し側は必ずCount>=1として扱ってよい)。swords[]が送られてこなかった場合は、SwordDataの
+    // 単一ステータスだけを1本分のリストとして返す
+    static List<SwordSlotData> BuildOwnedSwords(SwordData swordData)
     {
-        battle.hpBar = null; battle.delayHpBar = null; battle.nameText = null; battle.hpText = null;
-        battle.spGaugeBar = null; battle.spText = null; battle.frameImage = null;
-        if (!useSceneHud) return;
-
-        if (slot <= 1)
+        var owned = new List<SwordSlotData>();
+        if (swordData.swords != null && swordData.swords.Length > 0)
         {
-            var swords = networkManager != null ? networkManager.playerSwords : null;
-            var source = swords != null && slot < swords.Length && swords[slot] != null
-                ? swords[slot].GetComponent<SwordBattle>() : null;
-            if (source == null) return;
-            battle.hpBar = source.hpBar; battle.delayHpBar = source.delayHpBar;
-            battle.nameText = source.nameText; battle.hpText = source.hpText;
-            battle.spGaugeBar = source.spGaugeBar; battle.spText = source.spText;
-            battle.frameImage = source.frameImage;
-        }
-        else
-        {
-            var template = HudTemplateFor(slot);
-            if (template == null || template.hpBar == null) return;
-            battle.hpBar = template.hpBar; battle.delayHpBar = template.delayHpBar;
-            battle.nameText = template.nameText; battle.hpText = template.hpText;
-            battle.spGaugeBar = template.spGaugeBar; battle.spText = template.spText;
-            SceneController.SetHudTemplateVisible(template, true);
-        }
-
-        ShowCanvasOf(battle.hpBar);
-        ShowCanvasOf(battle.spGaugeBar);
-    }
-
-    HudTemplate HudTemplateFor(int slot)
-    {
-        if (sceneController == null) return null;
-        return slot == 2 ? sceneController.p3HudTemplate : slot == 3 ? sceneController.p4HudTemplate : null;
-    }
-
-    // 参加していないスロットのHPバーは消す（古い数値が残って見えるため）。
-    void HideUnusedHud(int playerCount)
-    {
-        if (!useSceneHud) return;
-        for (int slot = playerCount; slot < 4; slot++)
-        {
-            if (slot <= 1)
+            var slots = swordData.swords;
+            int n = slots.Length;
+            int start = Mathf.Clamp(swordData.equippedIndex, 0, n - 1);
+            for (int i = 0; i < n; i++)
             {
-                var swords = networkManager != null ? networkManager.playerSwords : null;
-                var source = swords != null && slot < swords.Length && swords[slot] != null
-                    ? swords[slot].GetComponent<SwordBattle>() : null;
-                if (source == null) continue;
-                if (source.hpBar != null) source.hpBar.gameObject.SetActive(false);
-                if (source.delayHpBar != null) source.delayHpBar.gameObject.SetActive(false);
-                if (source.spGaugeBar != null) source.spGaugeBar.gameObject.SetActive(false);
+                var slot = slots[(start + i) % n];
+                if (slot != null && !slot.isEmpty) owned.Add(slot);
             }
-            else SceneController.SetHudTemplateVisible(HudTemplateFor(slot), false);
         }
+        if (owned.Count == 0)
+        {
+            owned.Add(new SwordSlotData { name = swordData.name, attack = swordData.attack, weight = swordData.weight,
+                hp = swordData.hp, imageStr = swordData.imageStr, hiltType = swordData.hiltType, isEmpty = false });
+        }
+        return owned;
     }
 
-    // 一度全部消したCanvasのうち、対戦中も使うものだけ表示に戻す。
-    void ShowCanvasOf(Component element)
+    // ▼【新規追加】残機モード：現在の剣が破壊されて次の剣に持ち替わった時に、見た目(刀身の再生成)・
+    // 位置(スポーン地点へ復帰)・操作可否を復元する。Host/Client双方から同じ手順で呼べる
+    // (ネットワーク送信は行わないため、Hostが自分のFixedUpdateから、Clientが自分のSyncMultiplayerから
+    // それぞれ独立に呼んでも結果が一致する)
+    void ReviveForNextLife(string playerId, int lifeIndex)
     {
-        if (element == null) return;
-        var canvas = element.GetComponentInParent<Canvas>(true);
-        if (canvas != null) canvas.enabled = true;
+        if (!swords.TryGetValue(playerId, out var battle) || battle == null ||
+            !ownedSwordsByPlayer.TryGetValue(playerId, out var lives) || lifeIndex < 0 || lifeIndex >= lives.Count) return;
+        var slot = lives[lifeIndex];
+        battle.ReviveFromDefeat();
+        if (spawnPositionByPlayer.TryGetValue(playerId, out var spawn))
+        {
+            battle.transform.position = spawn;
+            battle.transform.rotation = Quaternion.identity;
+        }
+        if (bodies.TryGetValue(playerId, out var rb)) { rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0; }
+        var controllerComp = battle.GetComponent<SwordController>();
+        if (controllerComp != null)
+        {
+            controllerComp.isLocalControlled = config != null && playerId == config.localPlayerId;
+            controllerComp.ApplyPhysicsMode();
+        }
+        var generator = battle.GetComponent<SwordGenerator>();
+        if (generator != null)
+        {
+            var nextSword = new SwordData { name = slot.name, attack = slot.attack, weight = slot.weight,
+                hp = slot.hp, imageStr = slot.imageStr, hiltType = slot.hiltType };
+            generator.GenerateSwordFromJson(JsonUtility.ToJson(nextSword));
+        }
+        // ▼【新規追加】持ち替え後、HPパネルの「あと何本あるか」アイコンも更新する
+        battle.UpdateReserveSwordIcons(GetReserveSprites(playerId));
+        TriggerShake(0.3f, 0.4f);
     }
 
-    void BuildHud()
+    // ▼【新規追加】シーンに元々あるPL{n}Bar（HP赤/緑二重ゲージ・名前・SPバー）の実要素を、
+    // slotIndexに対応するプレイヤーのSwordBattleへ配線する。BuildHud()で簡易HUDを作り直す必要が無くなり、
+    // SwordBattle.Update()/UpdateUI()が既に持っているダメージプレビュー(赤/緑ゲージ)等の作り込みがそのまま使える。
+    // 「Player2」系の子オブジェクト名だけ"Playe2"という表記揺れがあるため、接尾辞一致で探す
+    void WireHudBar(SwordBattle battle, int slotIndex)
     {
         battle.hpBar = null; battle.delayHpBar = null; battle.nameText = null; battle.hpText = null;
         battle.spGaugeBar = null; battle.spText = null;
@@ -286,47 +349,9 @@ public class MultiplayerManager : MonoBehaviour
             battle.spGaugeBar = sp.GetComponent<Slider>();
             battle.spText = sp.Find("SPText (TMP)")?.GetComponent<TextMeshProUGUI>();
         }
-
-        // 中央の状況表示。シーンに既存のカウントダウン表示があればそちらを使うので作らない。
-        if (countdownLabel != null) return;
-        var statusObj = new GameObject("StatusText", typeof(RectTransform));
-        statusObj.transform.SetParent(canvasObj.transform, false);
-        var statusRt = statusObj.GetComponent<RectTransform>();
-        statusRt.anchorMin = new Vector2(0.1f, 0.4f);
-        statusRt.anchorMax = new Vector2(0.9f, 0.6f);
-        statusRt.offsetMin = Vector2.zero; statusRt.offsetMax = Vector2.zero;
-        hudStatusText = statusObj.AddComponent<TextMeshProUGUI>();
-        hudStatusText.alignment = TextAlignmentOptions.Center;
-        hudStatusText.enableAutoSizing = true;
-        hudStatusText.fontSizeMin = 20; hudStatusText.fontSizeMax = 160;
-        hudStatusText.color = Color.white;
-        hudStatusText.text = string.Empty;
-    }
-
-    // 開始前の待機とカウントダウン。元からある表示があればそれを使い、無ければ生成した予備に出す。
-    void UpdateStatusText()
-    {
-        var label = countdownLabel != null ? countdownLabel : hudStatusText;
-        if (label == null) return;
-        if (phase == "LOADING")
-        {
-            label.text = "他のプレイヤーを待っています…";
-            goUntil = 0f;
-        }
-        else if (phase == "COUNTDOWN")
-        {
-            float remaining = IsHost ? countdownEnd - Time.unscaledTime : syncedCountdown;
-            label.text = Mathf.Max(1, Mathf.CeilToInt(remaining)).ToString();
-            goUntil = Time.unscaledTime + 0.8f;   // 開始直後に「GO!」を出すための猶予
-        }
-        else if (IsPlaying && Time.unscaledTime < goUntil)
-        {
-            label.text = "GO!";
-        }
-        else
-        {
-            label.text = string.Empty;
-        }
+        // ▼【新規追加】残機モード：HPパネルの右下に「あと何本あるか」の小さいアイコンを並べる枠を
+        // 実行時に生成する(シーン側の手動配置は不要)
+        battle.reserveSwordIcons = CreateReserveSwordIcons(bar);
     }
 
     static Transform FindChildEndingWith(Transform parent, string suffix)
@@ -336,36 +361,58 @@ public class MultiplayerManager : MonoBehaviour
         return null;
     }
 
-    // Two to four players share one arena: spread them evenly instead of assuming four seats.
-    Vector3 SpawnPosition(int slot)
+    // ▼【新規追加】残機モードで手持ちの剣の枚数分だけ、PL{n}Barの右下隅に小さいアイコンを並べる。
+    // 本数が3を超えることは無い(=残りは最大2)想定だが、余分に確保しても表示側で自動的に隠れる。
+    // PL{n}Bar自体は対戦をまたいで常設されたUIなので、再戦時に重複生成しないよう名前で既存のものを再利用する
+    const int MaxReserveIcons = 2;
+    static Image[] CreateReserveSwordIcons(Transform bar)
     {
-        int count = config.players.Length;
-        if (count == 2) return new Vector3(slot == 0 ? -8 : 8, 0, 0);
-        if (config.gameMode == "0") return new Vector3(-15 + slot * (30f / (count - 1)), 0, 0);
-        if (count == 3) return new Vector3(slot == 0 ? 0 : slot == 1 ? -9 : 9, slot == 0 ? 7 : -5, 0);
-        return new Vector3(slot % 2 == 0 ? -8 : 8, slot < 2 ? -6 : 6, 0);
+        var icons = new Image[MaxReserveIcons];
+        for (int i = 0; i < MaxReserveIcons; i++)
+        {
+            string name = "ReserveSwordIcon" + i;
+            var existing = bar.Find(name);
+            GameObject iconObj;
+            if (existing != null)
+            {
+                iconObj = existing.gameObject;
+            }
+            else
+            {
+                iconObj = new GameObject(name, typeof(RectTransform), typeof(Image));
+                iconObj.transform.SetParent(bar, false);
+                var rt = iconObj.GetComponent<RectTransform>();
+                rt.anchorMin = new Vector2(1, 0);
+                rt.anchorMax = new Vector2(1, 0);
+                rt.pivot = new Vector2(1, 0);
+                rt.sizeDelta = new Vector2(22, 22);
+                // 右下隅を基準に、0番目(次に使う剣)を一番右、以降は左に並べる
+                rt.anchoredPosition = new Vector2(-4 - i * 26, 4);
+            }
+            var img = iconObj.GetComponent<Image>();
+            if (img == null) img = iconObj.AddComponent<Image>();
+            img.preserveAspect = true;
+            iconObj.SetActive(false);
+            icons[i] = img;
+        }
+        return icons;
     }
 
-    void BuildArena()
+    // ▼【新規追加】残機モード：あるプレイヤーの「今使っている剣を除いた、まだ使っていない手持ちの剣」の
+    // 画像をSpriteの配列で返す(順番=次に使う順)。HPパネルのアイコン表示に使う
+    Sprite[] GetReserveSprites(string playerId)
     {
-        wallSprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0, 0, Texture2D.whiteTexture.width, Texture2D.whiteTexture.height), new Vector2(.5f, .5f), Texture2D.whiteTexture.width);
-        float bottom = config.gameMode == "0" ? -4 : -14;
-        float top = 24;
-        Wall(new Vector2(0, bottom), new Vector2(50, 1));
-        Wall(new Vector2(0, top), new Vector2(50, 1));
-        Wall(new Vector2(-24, (bottom + top) / 2), new Vector2(1, top - bottom));
-        Wall(new Vector2(24, (bottom + top) / 2), new Vector2(1, top - bottom));
+        if (!ownedSwordsByPlayer.TryGetValue(playerId, out var lives)) return Array.Empty<Sprite>();
+        int current = GetCurrentLifeIndex(playerId);
+        var result = new List<Sprite>();
+        for (int i = current + 1; i < lives.Count; i++)
+        {
+            var sprite = GetLifeSprite(playerId, i);
+            if (sprite != null) result.Add(sprite);
+        }
+        return result.ToArray();
     }
-    // 壁は場外へ飛び出さないための当たり判定。元のステージを出しているときは、
-    // 見た目がぶつかるので描画しない（判定だけ残す）。
-    void Wall(Vector2 position, Vector2 size)
-    {
-        var wall = new GameObject("ArenaWall"); wall.transform.SetParent(arena.transform);
-        wall.transform.position = position; wall.transform.localScale = size;
-        wall.AddComponent<BoxCollider2D>();
-        if (stageVisible) return;
-        var renderer = wall.AddComponent<SpriteRenderer>(); renderer.sprite = wallSprite; renderer.color = new Color(.2f, .22f, .27f);
-    }
+
 
     IEnumerator CompleteInitialization()
     {
@@ -383,16 +430,19 @@ public class MultiplayerManager : MonoBehaviour
         var msg = JsonUtility.FromJson<MultiplayerCommand>(json);
         if (!Matches(msg) || !IsHost || phase != "LOADING") return;
         phase = "COUNTDOWN"; countdownEnd = Time.unscaledTime + 3;
+        // ▼【修正】ローカルは剣・独楽ともに配置直後から物理演算が動いており、独楽はカウントダウン中も
+        // その場で回り続け、剣は重力で沈む。以前はPLAYINGになるまで物理を凍結しており、
+        // マルチプレイだけカウントダウン中は完全に静止して見えていた
+        foreach (var rb in bodies.Values) rb.simulated = true;
     }
 
     void Update()
     {
         if (config == null) return;
-        UpdateStatusText();
+        UpdateCountdownUi();
         if (IsHost && phase == "COUNTDOWN" && Time.unscaledTime >= countdownEnd)
         {
             phase = "PLAYING"; SwordBattle.isRoundStarted = true;
-            foreach (var rb in bodies.Values) rb.simulated = true;
             Emit("PLAYING", new MultiplayerCommand { matchId = config.matchId });
         }
         if (IsHost && (phase == "COUNTDOWN" || IsPlaying) && Time.unscaledTime >= nextSync)
@@ -425,17 +475,63 @@ public class MultiplayerManager : MonoBehaviour
         }
     }
 
+    // ▼【新規追加】React側ではカウントダウンを表示しないため、SceneController.countdownText
+    // （ローカルデモと共用のTMP）をマルチプレイ中もそのまま使って「3・2・1・GO!」を表示する。
+    // Host/Client問わず、毎フレームCountdownRemainingを反映するだけ
+    void UpdateCountdownUi()
+    {
+        if (countdownText == null) return;
+        if (phase == "COUNTDOWN")
+        {
+            if (countdownUiPhase != "COUNTDOWN") countdownText.gameObject.SetActive(true);
+            countdownText.text = Mathf.CeilToInt(CountdownRemaining).ToString();
+        }
+        else if (countdownUiPhase == "COUNTDOWN")
+        {
+            // ちょうどCOUNTDOWNを抜けた瞬間：GO!を一瞬見せてから消す
+            countdownText.text = "GO!";
+            countdownGoHideAt = Time.unscaledTime + 1f;
+        }
+        else if (countdownText.gameObject.activeSelf && Time.unscaledTime >= countdownGoHideAt)
+        {
+            countdownText.gameObject.SetActive(false);
+        }
+        countdownUiPhase = phase;
+    }
+
     void FixedUpdate()
     {
-        if (!IsHost || !IsPlaying) return;
+        // ▼【修正】カウントダウン中も(PLAYING同様に)物理演算だけは進める。ダメージ判定・勝敗判定は
+        // 引き続きIsPlayingになってからのみ行う（QueueHit側もIsPlayingガード済みなので二重に安全）
+        if (!IsHost || !IsSimulating) return;
         UpdateTargets(false);
-        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing;
+        // ▼【修正】オレ達シールド展開中も本体は無敵にする(SwordBattle.TakeDamage側の無敵判定と同じ条件)。
+        // これが無いと、Client側は正しいHPを受け取れても、Host自身のOnCollisionEnter2D→QueueHitでは
+        // シールドの反射に加えて本体にも通常ダメージが通ってしまっていた
+        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing || p.Value.HasActiveLeafShield;
         Physics2D.Simulate(Time.fixedDeltaTime);
+        if (!IsPlaying) return;
         rules.ResolveStep(++physicsTick, hits, forfeits);
         hits.Clear(); forfeits.Clear();
-        foreach (var score in rules.Players) swords[score.PlayerId].ApplyMultiplayerHealth(score.Hp);
+        foreach (var score in rules.Players)
+        {
+            // ▼【新規追加】残機モード：このtickで次の剣に持ち替わったプレイヤーを検知し、見た目を復活させる。
+            // 直後のApplyMultiplayerHealth(score.Hp, ...)が新しい剣のmaxHpを基準にHPを反映する
+            if (livesModeActive && lifeIndexByPlayer.TryGetValue(score.PlayerId, out var knownLifeIndex) && knownLifeIndex != score.CurrentLifeIndex)
+            {
+                lifeIndexByPlayer[score.PlayerId] = score.CurrentLifeIndex;
+                ReviveForNextLife(score.PlayerId, score.CurrentLifeIndex);
+            }
+            bool wasCrit = criticalHitThisTick.Remove(score.PlayerId);
+            if (wasCrit) critSeq[score.PlayerId] = critSeq.TryGetValue(score.PlayerId, out var seq) ? seq + 1 : 1;
+            swords[score.PlayerId].ApplyMultiplayerHealth(score.Hp, wasCrit);
+        }
+        criticalHitThisTick.Clear();
         if (rules.Ended)
         {
+            // ▼ ちょうど今決着したプレイヤーのApplyMultiplayerHealthで加えた吹っ飛ばしの力を、
+            // 完全停止する前に一度だけ反映させる(ローカルのDefeatRoutineも力を加えた直後にまだ動ける)
+            Physics2D.Simulate(Time.fixedDeltaTime);
             // Deliver final HP/death state before the separately acknowledged result.
             Emit("SYNC", Snapshot());
             var result = new MultiplayerResult { matchId = config.matchId, winnerId = rules.WinnerId, draw = rules.Draw,
@@ -447,21 +543,71 @@ public class MultiplayerManager : MonoBehaviour
         }
     }
 
-    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage)
+    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage, bool isCrit = false)
     {
         if (!IsHost || !IsPlaying || target.MultiplayerOwner != this || !rules.Get(target.PlayerId).Alive) return;
         // Two dashes clashing in koma mode break each other's guard.
         bool blocked = invulnerable.ContainsKey(target.PlayerId) && invulnerable[target.PlayerId];
         bool clash = SwordController.isKomaMode && invulnerable.ContainsKey(attacker.PlayerId) && invulnerable[attacker.PlayerId];
-        if (!blocked || clash) hits.Add(new Hit(attacker.PlayerId, target.PlayerId, damage));
+        if (!blocked || clash)
+        {
+            hits.Add(new Hit(attacker.PlayerId, target.PlayerId, damage));
+            // ▼【新規追加】クリティカル/弱点情報はMatchRulesのHitには乗らない(複数攻撃者の同時ヒットで
+            // 合算されるため)ので、ここで別途覚えておいてこのtickのApplyMultiplayerHealthに渡す
+            if (isCrit) criticalHitThisTick[target.PlayerId] = true;
+        }
     }
 
-    // ▼【新規追加】分身突進・リーフシールドなどの付随体1体をSYNC配信対象として登録し、識別用IDを返す
-    public string RegisterClone(GameObject clone, string ownerId, Color color)
+    // ▼【新規追加】ローカルのBattleCamera.TriggerShakeと同じ役割。BattleCameraはマルチプレイ中は
+    // 無効化されているため、代わりにこのマネージャーが自分のLateUpdate()でシェイクを消費する
+    public void TriggerShake(float duration, float magnitude)
+    {
+        shakeDuration = duration; shakeMagnitude = magnitude;
+    }
+
+    // ▼【新規追加】柄迫り合い・壁バウンドなどダメージを伴わない衝突演出は、Host側のOnCollisionEnter2Dでしか
+    // 起きないためゲスト側の画面には何も表示されない。SYNCで単調増加カウンタとして配信し、
+    // ゲスト側は値が増えたことを検知して同じ演出(PlayClashEffect)を一度だけ再生する
+    public void NotifyClash(string playerId)
+    {
+        if (playerId == null) return;
+        clashSeq[playerId] = clashSeq.TryGetValue(playerId, out var seq) ? seq + 1 : 1;
+    }
+
+    // ▼【新規追加】分身突進・リーフシールドなどの付随体1体をSYNC配信対象として登録し、識別用IDを返す。
+    // spriteIndexは「持ち主の手持ちの剣の何番目の形をしているか」(0=現在装備中)。残機モードのON/OFFに
+    // 関わらず使う。特定の剣に紐付かない場合は-1のままでよい
+    public string RegisterClone(GameObject clone, string ownerId, Color color, int spriteIndex = -1)
     {
         string id = "clone" + (++cloneIdSeq);
-        activeClones[id] = (clone, ownerId, color);
+        activeClones[id] = (clone, ownerId, color, spriteIndex);
         return id;
+    }
+
+    // ▼【新規追加】あるプレイヤーが「今まさに使っている」剣が手持ちの何番目かを返す
+    // (lifeIndexByPlayerはHost/Client双方でReviveForNextLife検知のために常に最新へ更新されており、
+    // 残機モードでなければ常に0のまま＝装備中の剣)。分身系必殺技が「現在の自分＋まだ使っていない
+    // 残りの剣」を並べる基準として、残機モードのON/OFFに関わらず使う
+    public int GetCurrentLifeIndex(string playerId)
+    {
+        return lifeIndexByPlayer.TryGetValue(playerId, out var idx) ? idx : 0;
+    }
+
+    // ▼【新規追加】あるプレイヤーの手持ちの剣のうちlifeIndex番目の見た目をSpriteとして返す(base64から
+    // 遅延生成してキャッシュ)。分身系必殺技が、装備中でない手持ちの剣の形を借りるために使う。
+    // 残機モードのON/OFFに関わらず動作し、手持ちが1本・2本しかなくても(lives.Count>=1が保証されているため)
+    // 範囲外エラーにはならない
+    public Sprite GetLifeSprite(string playerId, int lifeIndex)
+    {
+        if (ownedSwordsByPlayer == null || !ownedSwordsByPlayer.TryGetValue(playerId, out var lives) || lives.Count == 0) return null;
+        int idx = ((lifeIndex % lives.Count) + lives.Count) % lives.Count;
+        if (!lifeSpriteCache.TryGetValue(playerId, out var cache) || cache.Length != lives.Count)
+        {
+            cache = new Sprite[lives.Count];
+            lifeSpriteCache[playerId] = cache;
+        }
+        if (cache[idx] == null) cache[idx] = SwordGenerator.CreateSpriteFromBase64(lives[idx].imageStr);
+        return cache[idx];
     }
 
     // ▼【新規追加】分身が消えた（命中・壁ヒット・寿命切れ）ときに登録を解除する。これでSYNCから外れ、
@@ -534,13 +680,17 @@ public class MultiplayerManager : MonoBehaviour
                     hp = sword.hp, sp = sword.currentSp, isDashing = sword.isDashing, dashType = sword.currentDashType,
                     // ▼ 巨大化一回転(hiltType:"1")の拡大がクライアント側にも見えるよう、剣本体のスケールも同期する
                     scale = sword.transform.localScale.x,
-                    targetPlayerId = targets[p.playerId] };
+                    targetPlayerId = targets[p.playerId],
+                    clashSeq = clashSeq.TryGetValue(p.playerId, out var cseq) ? cseq : 0,
+                    critSeq = critSeq.TryGetValue(p.playerId, out var crseq) ? crseq : 0,
+                    lifeIndex = rules.Get(p.playerId).CurrentLifeIndex,
+                    livesRemaining = rules.Get(p.playerId).LivesRemaining };
             }).ToArray(),
             // ▼【新規追加】分身突進・リーフシールドなどの付随体の位置をクライアントへ配信する
             clones = activeClones.Where(kv => kv.Value.obj != null).Select(kv => new MultiplayerCloneState {
                 id = kv.Key, ownerId = kv.Value.ownerId,
                 x = kv.Value.obj.transform.position.x, y = kv.Value.obj.transform.position.y,
-                rotation = kv.Value.obj.transform.eulerAngles.z, color = kv.Value.color
+                rotation = kv.Value.obj.transform.eulerAngles.z, color = kv.Value.color, spriteIndex = kv.Value.spriteIndex
             }).ToArray() };
     }
 
@@ -553,14 +703,27 @@ public class MultiplayerManager : MonoBehaviour
             sync.players.Any(p => p == null || p.playerId == null || !swords.ContainsKey(p.playerId)) ||
             sync.players.Select(p => p.playerId).Distinct().Count() != config.players.Length) return;
         phase = sync.phase; SwordBattle.isRoundStarted = IsPlaying;
-        syncedCountdown = sync.countdownRemaining;
+        receivedCountdownRemaining = sync.countdownRemaining;
         foreach (var data in sync.players)
         {
             var sword = swords[data.playerId];
             if (receivedTick < 0) { sword.transform.position = new Vector3(data.x, data.y, 0); sword.transform.rotation = Quaternion.Euler(0, 0, data.rotation); }
+            // ▼【新規追加】クリティカル演出・柄迫り合い等の演出は増分(カウンタが増えたか)でしか検知できないため、
+            // 上書きする前の直近の値と比較する。初回同期時は前回値が無い(比較対象なし)ので発火しない
+            syncTargets.TryGetValue(data.playerId, out var previous);
+            bool wasCrit = previous != null && data.critSeq > previous.critSeq;
+            bool clashed = previous != null && data.clashSeq > previous.clashSeq;
             syncTargets[data.playerId] = data;
             sword.currentCenterPosition = new Vector3(data.centerX, data.centerY, 0);
-            sword.ApplyMultiplayerHealth(data.hp);
+            // ▼【新規追加】残機モード：Hostから届いたlifeIndexがこれまで認識していた値より増えていれば、
+            // Hostのfixedupdateと同じ手順(ReviveForNextLife)でこちらの見た目も持ち替えさせる
+            if (livesModeActive && lifeIndexByPlayer.TryGetValue(data.playerId, out var knownLifeIndex) && data.lifeIndex != knownLifeIndex)
+            {
+                lifeIndexByPlayer[data.playerId] = data.lifeIndex;
+                ReviveForNextLife(data.playerId, data.lifeIndex);
+            }
+            sword.ApplyMultiplayerHealth(data.hp, wasCrit);
+            if (clashed) sword.PlayClashEffect();
             sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale);
             targets[data.playerId] = data.targetPlayerId;
         }
@@ -582,7 +745,7 @@ public class MultiplayerManager : MonoBehaviour
                 incomingIds.Add(c.id);
                 if (!cloneVisuals.TryGetValue(c.id, out var obj) || obj == null)
                 {
-                    obj = CreateCloneVisual(c.ownerId, c.color);
+                    obj = CreateCloneVisual(c.ownerId, c.color, c.spriteIndex);
                     if (obj == null) continue;
                     cloneVisuals[c.id] = obj;
                     obj.transform.position = new Vector3(c.x, c.y, 0);
@@ -599,39 +762,80 @@ public class MultiplayerManager : MonoBehaviour
         }
     }
 
-    // ▼ 付随体の見た目は、持ち主(ownerId)のBladeスプライトをそのまま複製して作る（imageStrは全員が同じmatch設定から
-    // ローカルで生成済みなので、スプライト自体をネットワーク越しに送る必要はない）。色は技ごとに異なるためSYNCで受け取る
-    GameObject CreateCloneVisual(string ownerId, Color color)
+    // ▼ 付随体の見た目は、基本的に持ち主(ownerId)のBladeスプライトをそのまま複製して作る（imageStrは
+    // 全員が同じmatch設定からローカルで生成済みなので、スプライト自体をネットワーク越しに送る必要はない）。
+    // 色は技ごとに異なるためSYNCで受け取る。
+    // ▼【新規追加】残機モードでspriteIndexが有効な値(0以上)なら、代わりにその番号の残機の剣の形を使う
+    // (装備中でない剣でも、imageStrさえ手元にあればここでSpriteを生成できる)
+    GameObject CreateCloneVisual(string ownerId, Color color, int spriteIndex = -1)
     {
         if (ownerId == null || !swords.TryGetValue(ownerId, out var ownerBattle) || ownerBattle == null) return null;
         var ownerBlade = ownerBattle.transform.Find("Blade");
         var ownerSr = ownerBlade != null ? ownerBlade.GetComponent<SpriteRenderer>() : null;
         if (ownerSr == null || ownerSr.sprite == null) return null;
+        Sprite sprite = (spriteIndex >= 0 ? GetLifeSprite(ownerId, spriteIndex) : null) ?? ownerSr.sprite;
 
         var obj = new GameObject("SwordCloneVisual");
         var sr = obj.AddComponent<SpriteRenderer>();
-        sr.sprite = ownerSr.sprite;
+        sr.sprite = sprite;
         sr.color = color;
         sr.sortingLayerID = ownerSr.sortingLayerID;
         sr.sortingOrder = ownerSr.sortingOrder;
+        // ▼【新規追加】Host側(SwordBattle.CloneRushRoutine/LeafShieldRoutine)と同じ正規化。手持ちの剣は
+        // 元画像のピクセルサイズがバラバラなため、装備中の刀身と見た目の横幅が揃うようスケールを合わせる
+        float refWidth = ownerSr.sprite.bounds.size.x;
+        float width = sprite.bounds.size.x;
+        if (refWidth > 0f && width > 0f) obj.transform.localScale = Vector3.one * (refWidth / width);
         return obj;
     }
 
     void LateUpdate()
     {
-        if (config == null || Camera.main == null || phase == "RESULT") return;
-        var alive = swords.Values.Where(s => s.IsAlive).ToArray();
-        if (alive.Length == 0) return;
-        Bounds bounds = new Bounds(alive[0].transform.position, Vector3.zero);
-        foreach (var sword in alive)
-            foreach (var renderer in sword.GetComponentsInChildren<SpriteRenderer>()) bounds.Encapsulate(renderer.bounds);
+        if (config == null || Camera.main == null) return;
         var camera = Camera.main;
-        float size = Mathf.Max(8, bounds.extents.y + 4, (bounds.extents.x + 4) / camera.aspect);
-        // Reserve the upper part of the viewport for React's four health panels.
-        var position = new Vector3(bounds.center.x, bounds.center.y + size * .16f, -10);
-        float t = 1 - Mathf.Exp(-5 * Time.unscaledDeltaTime);
-        camera.transform.position = Vector3.Lerp(camera.transform.position, position, t);
-        camera.orthographicSize = Mathf.Lerp(camera.orthographicSize, size * 1.2f, t);
+        Vector3 basePosition;
+        if (phase == "RESULT")
+        {
+            // ▼【修正】ローカルのBattleCamera.StopTracking()と同じく、決着した瞬間の位置で固定する
+            // (以前はここで即returnしていたため、シェイクも一切乗らなかった)
+            if (!hasLockedCameraPosition) { lockedCameraPosition = camera.transform.position; hasLockedCameraPosition = true; }
+            basePosition = lockedCameraPosition;
+            camera.transform.position = basePosition;
+        }
+        else
+        {
+            hasLockedCameraPosition = false;
+            var alive = swords.Values.Where(s => s.IsAlive).ToArray();
+            if (alive.Length == 0) return;
+            // ▼【修正】SpriteRenderer.boundsは見た目のAABBなので、キャラが回転すると
+            // (独楽モードのスピンなど)対角線の分だけ見かけ上のサイズが膨らんで、
+            // カメラの位置・ズームが毎フレーム細かくぐらついてしまう。BattleCamera.GetSafePositionと
+            // 同じく、回転に左右されない重心(currentCenterPosition)だけで画角を決める
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+            foreach (var sword in alive)
+            {
+                Vector3 pos = sword.currentCenterPosition;
+                minX = Mathf.Min(minX, pos.x); maxX = Mathf.Max(maxX, pos.x);
+                minY = Mathf.Min(minY, pos.y); maxY = Mathf.Max(maxY, pos.y);
+            }
+            Bounds bounds = new Bounds(new Vector3((minX + maxX) / 2f, (minY + maxY) / 2f, 0f), Vector3.zero);
+            bounds.Encapsulate(new Vector3(minX - 4f, minY - 4f, 0f));
+            bounds.Encapsulate(new Vector3(maxX + 4f, maxY + 4f, 0f));
+            float size = Mathf.Max(8, bounds.extents.y, bounds.extents.x / camera.aspect);
+            // Reserve the upper part of the viewport for React's four health panels.
+            var position = new Vector3(bounds.center.x, bounds.center.y + size * .16f, -10);
+            float t = 1 - Mathf.Exp(-5 * Time.unscaledDeltaTime);
+            camera.transform.position = Vector3.Lerp(camera.transform.position, position, t);
+            camera.orthographicSize = Mathf.Lerp(camera.orthographicSize, size * 1.2f, t);
+            basePosition = camera.transform.position;
+        }
+        // ▼【新規追加】ローカルのBattleCamera.LateUpdate()末尾と同じシェイク処理。BattleCameraはマルチプレイ中
+        // 無効化されているため、代わりにこのマネージャー自身でTriggerShakeの値を消費する
+        if (shakeDuration > 0)
+        {
+            camera.transform.position = basePosition + (Vector3)UnityEngine.Random.insideUnitCircle * shakeMagnitude;
+            shakeDuration -= Time.unscaledDeltaTime;
+        }
     }
 
     [UnityEngine.Scripting.Preserve]
@@ -641,7 +845,25 @@ public class MultiplayerManager : MonoBehaviour
         if (config == null || result == null || result.matchId != config.matchId || phase == "RESULT") return;
         phase = "RESULT"; SwordBattle.matchEnded = true; SwordBattle.isRoundStarted = false;
         foreach (var sword in swords.Values) { sword.StopAllCoroutines(); bodies[sword.PlayerId].simulated = false; }
-        Time.timeScale = 1;
+        // ▼【修正】ローカルのDefeatRoutine後半(カメラロック・シェイク・スローモーション・完全停止)と同じ決着演出。
+        // カメラロック自体はLateUpdate()がphase=="RESULT"を見て自動的に行う
+        TriggerShake(1.5f, 1.2f);
+        StartCoroutine(MatchEndCinematic());
+    }
+
+    IEnumerator MatchEndCinematic()
+    {
+        // ▼【修正】ローカルのDefeatRoutineと同じく、値を一度セットするだけだと他の剣の
+        // HitStopRoutineなどがこの直後にTime.timeScaleを上書きした場合、中途半端な速度で
+        // 固まる恐れがある。2.5秒間、毎フレーム押し戻すことで確実にこの値を保つ
+        float holdTimer = 0f;
+        while (holdTimer < 2.5f)
+        {
+            Time.timeScale = 0.15f;
+            holdTimer += Time.unscaledDeltaTime;
+            yield return null;
+        }
+        Time.timeScale = 0f;
     }
     [UnityEngine.Scripting.Preserve]
     public void StopMultiplayer(string json)
@@ -656,12 +878,6 @@ public class MultiplayerManager : MonoBehaviour
         StopAllCoroutines();
         foreach (var sword in swords.Values) if (sword != null) { sword.StopAllCoroutines(); sword.gameObject.SetActive(false); }
         if (arena != null) { arena.SetActive(false); Destroy(arena); }
-        if (wallSprite != null) Destroy(wallSprite);
-        CutinManager.scaleTimeDuringCutin = true;
-        stageVisible = false; useSceneHud = false; sceneController = null; networkManager = null;
-        if (countdownLabel != null) countdownLabel.text = string.Empty;
-        hudStatusText = null; countdownLabel = null; syncedCountdown = 0; goUntil = 0;
-        if (hudRoot != null) { hudRoot.SetActive(false); Destroy(hudRoot); }
         if (ownsSimulation) { Physics2D.simulationMode = previousSimulationMode; ownsSimulation = false; }
         swords.Clear(); bodies.Clear(); targets.Clear(); sequences.Clear(); inputTimes.Clear();
         hits.Clear(); forfeits.Clear(); invulnerable.Clear(); syncTargets.Clear();
@@ -669,8 +885,21 @@ public class MultiplayerManager : MonoBehaviour
         activeClones.Clear();
         foreach (var visual in cloneVisuals.Values) if (visual != null) Destroy(visual);
         cloneVisuals.Clear();
+        clashSeq.Clear(); criticalHitThisTick.Clear(); critSeq.Clear();
+        shakeDuration = 0f; hasLockedCameraPosition = false;
+        livesModeActive = false; ownedSwordsByPlayer = null; spawnPositionByPlayer = null; lifeIndexByPlayer.Clear();
+        foreach (var cache in lifeSpriteCache.Values)
+            foreach (var sprite in cache)
+            {
+                if (sprite == null) continue;
+                if (sprite.texture != null) Destroy(sprite.texture);
+                Destroy(sprite);
+            }
+        lifeSpriteCache.Clear();
         config = null; rules = null; phase = "IDLE";
         Time.timeScale = 1; SwordBattle.isRoundStarted = false; SwordBattle.matchEnded = false;
+        if (countdownText != null) countdownText.gameObject.SetActive(false);
+        countdownText = null; countdownUiPhase = "IDLE";
         if (AudioManager.Instance != null) AudioManager.Instance.ResetSoundEffects();
     }
     void OnDestroy() { if (Active) StopCurrent(); }

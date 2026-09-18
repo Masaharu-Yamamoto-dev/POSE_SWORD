@@ -20,6 +20,7 @@ namespace PoseSword.Multiplayer
 
     public sealed class PlayerScore
     {
+        private readonly int[] lives;
         public string PlayerId { get; private set; }
         public int SlotIndex { get; private set; }
         public int Hp { get; internal set; }
@@ -30,13 +31,33 @@ namespace PoseSword.Multiplayer
         public int Kills { get; internal set; }
         public int EliminationTick { get; internal set; }
         public string EliminationReason { get; internal set; }
+        // 残機モード：手持ちの剣の総数、残り本数(現在の剣を含む)、現在使用中の剣のインデックス。
+        // RespawnSeqは持ち替え(次の剣に切り替わった)たびに増える単調増加カウンタで、
+        // Unity側が「今tickで持ち替えが起きたか」を検知する目印として使う。
+        public int MaxLives { get; private set; }
+        public int LivesRemaining { get; internal set; }
+        public int CurrentLifeIndex { get; internal set; }
+        public int RespawnSeq { get; internal set; }
 
-        internal PlayerScore(string id, int slotIndex, int hp)
+        internal PlayerScore(string id, int slotIndex, int[] lives)
         {
             PlayerId = id;
             SlotIndex = slotIndex;
-            Hp = hp;
+            this.lives = lives;
+            MaxLives = lives.Length;
+            LivesRemaining = lives.Length;
+            CurrentLifeIndex = 0;
+            Hp = lives[0];
             EliminationTick = -1;
+        }
+
+        // 現在の剣のHPが0になった時に、まだ残機があれば次の剣のHPへ切り替える
+        internal int ConsumeNextLife()
+        {
+            LivesRemaining--;
+            CurrentLifeIndex++;
+            RespawnSeq++;
+            return lives[CurrentLifeIndex];
         }
     }
 
@@ -52,15 +73,22 @@ namespace PoseSword.Multiplayer
         public bool Draw { get; private set; }
         public string WinnerId { get; private set; }
 
+        // 通常(残機モードなし)：各プレイヤーHP1つだけの1本勝負
         public MatchRules(string[] playerIds, int[] hitPoints)
+            : this(playerIds, hitPoints == null ? null : hitPoints.Select(hp => new[] { hp }).ToArray())
         {
-            if (playerIds == null || hitPoints == null ||
-                playerIds.Length < 2 || playerIds.Length > 4 || playerIds.Length != hitPoints.Length ||
-                playerIds.Any(string.IsNullOrWhiteSpace) || playerIds.Distinct().Count() != playerIds.Length ||
-                hitPoints.Any(hp => hp < 1 || hp > 1000))
-                throw new ArgumentException("A match requires two to four distinct players with valid HP.");
+        }
 
-            var roster = playerIds.Select((id, slot) => new PlayerScore(id, slot, hitPoints[slot])).ToList();
+        // 残機モード：各プレイヤーが複数本の剣(lives[slot][0]が現在の剣、以降は持ち替え先)を持つ
+        public MatchRules(string[] playerIds, int[][] lives)
+        {
+            if (playerIds == null || lives == null ||
+                playerIds.Length < 2 || playerIds.Length > 4 || playerIds.Length != lives.Length ||
+                playerIds.Any(string.IsNullOrWhiteSpace) || playerIds.Distinct().Count() != playerIds.Length ||
+                lives.Any(l => l == null || l.Length < 1 || l.Any(hp => hp < 1 || hp > 1000)))
+                throw new ArgumentException("A match requires two to four distinct players with valid HP and lives.");
+
+            var roster = playerIds.Select((id, slot) => new PlayerScore(id, slot, lives[slot])).ToList();
             players = roster.AsReadOnly();
             byId = roster.ToDictionary(p => p.PlayerId);
             LastTick = -1;
@@ -104,14 +132,22 @@ namespace PoseSword.Multiplayer
                 target.DamageTaken += actual;
                 if (!target.Alive)
                 {
-                    target.EliminationReason = "KO";
                     shares.OrderByDescending(s => s.Amount).ThenBy(s => s.Player.SlotIndex).First().Player.Kills++;
+                    // 残機モード：まだ手持ちの剣が残っていれば、脱落させず次の剣のHPへ持ち替えて続行する
+                    if (target.LivesRemaining > 1) target.Hp = target.ConsumeNextLife();
+                    else
+                    {
+                        target.LivesRemaining = 0;
+                        target.EliminationReason = "KO";
+                    }
                 }
             }
 
             foreach (var id in disconnected)
             {
+                // 切断は残機の有無に関わらず即座に脱落させる
                 Get(id).Hp = 0;
+                Get(id).LivesRemaining = 0;
                 Get(id).EliminationReason = "DISCONNECTED";
             }
 

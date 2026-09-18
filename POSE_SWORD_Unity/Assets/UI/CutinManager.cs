@@ -18,10 +18,6 @@ public class CutinManager : MonoBehaviour
 
     [Header("演出設定")]
     public float timeScaleDuringCutin = 0.05f; 
-
-    // 対戦中は時間を止めない。ホストは FixedUpdate で物理を進めているため、
-    // timeScale を落とすと演出だけでなく試合そのものがスローになる。
-    public static bool scaleTimeDuringCutin = true;
     public float cutinDuration = 0.8f;         
 
     // ▼【新規追加】サウンド設定
@@ -65,7 +61,11 @@ public class CutinManager : MonoBehaviour
             backgroundBar.GetComponent<Image>().color = barColor;
         }
 
+        // ▼【修正】直前のカットインが演出の途中（Time.timeScaleを変更した状態）で強制中断されると、
+        // 後始末のコード（6.終了処理）が一切実行されずtimeScaleが遅いまま固まってしまう。
+        // 新しいカットインを始める前に、念のため等速へ戻しておく
         StopAllCoroutines();
+        if (Time.timeScale != 1f && !SwordBattle.matchEnded) Time.timeScale = 1f;
         StartCoroutine(PersonaStyleCutinRoutine(useSlowMotion));
     }
 
@@ -78,7 +78,10 @@ public class CutinManager : MonoBehaviour
         }
 
         // 1. スローモーション＆全体表示
-        if (scaleTimeDuringCutin) Time.timeScale = timeScaleDuringCutin;
+        // ▼【修正】ここが決着シーンの一撃でなくても、matchEndedが既にtrue（＝他の対戦で
+        // 試合がもう終わっている）ならスローを開始しない。開始してしまうと、このカットインの
+        // 終了処理（6.）はmatchEnded中はtimeScaleを戻さない仕様のため、そのままスローで固まってしまう
+        if (useSlowMotion && !SwordBattle.matchEnded) Time.timeScale = timeScaleDuringCutin;
         cutinCanvasGroup.alpha = 1f;
 
         backgroundBar.anchoredPosition = new Vector2(1500f, 500f); 

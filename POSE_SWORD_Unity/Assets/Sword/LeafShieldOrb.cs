@@ -26,6 +26,9 @@ public class LeafShieldOrb : MonoBehaviour
         this.orbitSpeedDeg = orbitSpeedDeg;
         this.hp = hp;
         this.reflectMultiplier = reflectMultiplier;
+        // ▼【新規追加】このシールドが生きている間、本体は通常ダメージを受けない(SwordBattle.HasActiveLeafShield)。
+        // このColliderはisTriggerで攻撃側の移動を止めないため、無敵状態にしないと反射した上に本体まで刺さっていた
+        owner.activeLeafShieldCount++;
         Destroy(gameObject, duration);
     }
 
@@ -38,6 +41,7 @@ public class LeafShieldOrb : MonoBehaviour
 
     void OnDestroy()
     {
+        if (owner != null) owner.activeLeafShieldCount = Mathf.Max(0, owner.activeLeafShieldCount - 1);
         if (multiplayerOwner != null && networkId != null) multiplayerOwner.UnregisterClone(networkId);
     }
 
