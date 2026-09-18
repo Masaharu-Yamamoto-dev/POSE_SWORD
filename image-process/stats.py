@@ -20,10 +20,14 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+<<<<<<< HEAD
+# MediaPipe Tasks用のポーズモデル(lite, 数MB)。初回に自動ダウンロードする。
+=======
 # MediaPipe Tasks 用のポーズモデル(lite, 数MB)。
 # コンテナではビルド時に焼き込み、POSE_MODEL_PATH で場所を渡す。
 # Cloud Run のファイルシステムは起動のたびに空になるため、実行時ダウンロードに頼ると
 # スケールゼロから起きるたびに外部から取り直すことになる。
+>>>>>>> origin
 POSE_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
     "pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"

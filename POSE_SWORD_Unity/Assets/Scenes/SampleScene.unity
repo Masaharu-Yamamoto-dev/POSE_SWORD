@@ -2503,7 +2503,7 @@ MonoBehaviour:
   spinTorque: -500
   isLocalControlled: 1
   multiplayer: {fileID: 0}
-  handleObject: {fileID: 473435595}
+  handleObject: {fileID: 1711303185}
   handleSprite0: {fileID: -8933226394695032513, guid: 7479a214f2e48dc48bdc45bba473d222, type: 3}
   handleSprite1: {fileID: 5578160622178687459, guid: f09a771d01337462c997ed91b882b870, type: 3}
   handleSprite2: {fileID: 8342928982462980293, guid: c74787d7b2b434ec4bb09005238a9bb1, type: 3}
@@ -3645,7 +3645,7 @@ MonoBehaviour:
   spinTorque: -500
   isLocalControlled: 1
   multiplayer: {fileID: 0}
-  handleObject: {fileID: 1711303185}
+  handleObject: {fileID: 473435595}
   handleSprite0: {fileID: -8933226394695032513, guid: 7479a214f2e48dc48bdc45bba473d222, type: 3}
   handleSprite1: {fileID: 5578160622178687459, guid: f09a771d01337462c997ed91b882b870, type: 3}
   handleSprite2: {fileID: 8342928982462980293, guid: c74787d7b2b434ec4bb09005238a9bb1, type: 3}

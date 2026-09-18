@@ -222,6 +222,13 @@ public class SceneController : MonoBehaviour
         // ▼ P1(複製元)の値をそのまま引き継いでしまわないよう、スロット順のプレイヤー番号を明示的に上書きする
         if (battle != null) battle.playerNumber = slotIndex + 1;
 
+        // ▼ 柄(Handle-A)はテンプレート側のSwordController.handleObjectが誤って別の剣の柄を参照して
+        // いることがある(MultiplayerManager.CreateSwordと同じ問題)。参照先がテンプレートの階層の外に
+        // あると、Unityは複製(Instantiate)時にこの参照を複製先へ付け替えないため、そのままコピーすると
+        // 3・4人目の剣が自分の柄ではなく他プレイヤーの柄を操作してしまう。ResolveOwnHandle()で複製した
+        // 自分自身の子から探し直してから使う
+        if (controller != null) controller.ResolveOwnHandle();
+
         var generator = clone.GetComponent<SwordGenerator>();
         if (generator == null) generator = clone.AddComponent<SwordGenerator>();
         generator.generateOnStart = false;

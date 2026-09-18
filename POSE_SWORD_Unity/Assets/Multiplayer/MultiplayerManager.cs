@@ -229,13 +229,12 @@ public class MultiplayerManager : MonoBehaviour
         rb.simulated = false;
         rb.bodyType = IsHost ? RigidbodyType2D.Dynamic : RigidbodyType2D.Kinematic;
         var blade = obj.transform.Find("Blade");
-        // ▼【新規追加】柄(Handle-A)はテンプレート側のSwordController.handleObjectが誤って別の剣の
-        // 柄を参照していることがある。参照先がテンプレートの階層の外にあると、Unityは複製(Instantiate)
-        // 時にこの参照を複製先へ付け替えないため、そのままだと全プレイヤーが同じ1つの(誤った)柄オブジェクトを
-        // 共有してしまう。Bladeと同じく、複製した自分自身の子から名前で探し直すことで、
+        // ▼ 柄(Handle-A)はテンプレート側のSwordController.handleObjectが誤って別の剣の柄を参照して
+        // いることがある。参照先がテンプレートの階層の外にあると、Unityは複製(Instantiate)時にこの
+        // 参照を複製先へ付け替えないため、そのままだと全プレイヤーが同じ1つの(誤った)柄オブジェクトを
+        // 共有してしまう。ResolveOwnHandle()が複製した自分自身の子から名前で探し直すことで、
         // Inspectorの配線ミスに関わらず必ず「自分の」柄を使うようにする
-        var handle = obj.transform.Find("Handle-A");
-        if (handle != null) controller.handleObject = handle.gameObject;
+        controller.ResolveOwnHandle();
         // ▼【修正】SceneController側の3・4人目動的生成(CreateDynamicPlayerSword)と同じく、
         // テンプレートに既にSwordGeneratorが付いていればそれを再利用する（無条件AddComponentは二重生成の恐れがあった）
         var generator = obj.GetComponent<SwordGenerator>();
