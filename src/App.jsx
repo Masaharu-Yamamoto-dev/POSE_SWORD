@@ -92,9 +92,8 @@ export default function PoseSwordWeb() {
           hp: stats.hp,
           attack: stats.attack,
           weight: stats.weight,
-          imageStr: sendStr, // 🌟 Unityが画像を生成する時に使うデータ
+          imageStr: sendStr, // 🌟 Unityが画像を生成する時に使うデータ（オレ達シリーズの必殺技もここを参照する）
           imageSrc: sendSrc, // 🌟 相手のReact画面で表示する時に使うデータ
-          imageStr: sword.imageStr,
           hiltType: typeof sword.hiltType === 'string' ? sword.hiltType : String(sword.hiltType || 0),
           isEmpty: false
         };

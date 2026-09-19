@@ -342,6 +342,11 @@ public class NetworkManager : MonoBehaviour
                 // ▼ Inspectorの配線ミスで柄(Handle-A)参照が別プレイヤーの剣を指していることがあるため、
                 // モード切り替えで柄の表示/非表示を変える直前に必ず自分自身の柄を参照し直す
                 controller.ResolveOwnHandle();
+                // ▼ SwordGenerator側の柄参照(hiltTypeに応じた見た目の切り替え先)がResolveOwnHandle()の
+                // 結果に追従していないと、表示/非表示は直っても柄の絵柄自体が古い/別の剣のままになるため、
+                // MultiplayerManager.CreateSword / SceneController.CreateDynamicPlayerSwordと同様に同期する
+                var generator = obj.GetComponent<SwordGenerator>();
+                if (generator != null) generator.handleObject = controller.handleObject;
                 controller.ApplyPhysicsMode();
             }
         }
