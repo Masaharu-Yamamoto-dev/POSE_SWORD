@@ -66,7 +66,7 @@ export default function PoseSwordWeb() {
           attack: stats.attack,
           weight: stats.weight,
           imageStr: sword.imageStr,
-          hiltType: Number(sword.hiltType || 0),
+          hiltType: typeof sword.hiltType === 'string' ? sword.hiltType : String(sword.hiltType || 0),
           isEmpty: false
         };
       } else {
@@ -76,7 +76,7 @@ export default function PoseSwordWeb() {
           attack: 1,
           weight: 1,
           imageStr: "",
-          hiltType: 0,
+          hiltType: "0",
           isEmpty: true
         };
       }
@@ -90,7 +90,7 @@ export default function PoseSwordWeb() {
       hp: equippedStats.hp,
       attack: equippedStats.attack,
       weight: equippedStats.weight,
-      hiltType: Number(equipped.hiltType || 0),
+      hiltType: typeof equipped.hiltType === 'string' ? equipped.hiltType : String(equipped.hiltType || 0),
       swords: swords,
       equippedIndex: equippedIndex
     };
