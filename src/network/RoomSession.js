@@ -62,17 +62,30 @@ export class RoomSession {
     this.loadDeadline = Infinity;
     this.lastHeartbeat = -Infinity;
     this.sequence = 0;
+    // 電波が弱いと必殺技ボタンの1回送信がホストに届かず、SPは満タン表示のままボタンが
+    // 反応しなくなって見える。ホスト側はseqで重複を弾くので、届くまで安全に再送できる。
+    this.pendingUltimate = null;
     this.autoStartAt = null;
     this.gatheredAt = null;
     this.fullAt = null;
     this.readyAt = null;
   }
 
+  // 全員の武器データ(画像込み)がReact側に届いたという事実(assetAck)だけでは、
+  // Unity(WebGL)側がまだそれを取り込み終えているとは限らない。オートスタート(ランダム
+  // マッチ)側は前々からこれを踏まえてASSETS_READY_DELAY分の余裕を入れており、手動の
+  // 部屋(ロビーでホストがStartを押す形)にはその余裕が無かったため、通信が遅いと
+  // 「SPが溜まっていないのに必殺技ボタンが出た状態」でPLAYINGへ突入することがあった。
+  // 手動・オートスタート問わず同じ基準で使えるよう、ここで一本化する。
+  assetsBaseReady() {
+    return !this.closed && !!this.host?.canStart() &&
+      [...this.links.values()].every(l => l.playerId && l.assetAck === this.assetVersion);
+  }
+
   view() {
     return { room: this.room, localPlayerId: this.localPlayerId, isHost: this.isHost,
       result: this.result, resultPlayers: this.resultPlayers, sync: this.sync, closed: this.closed, error: this.error,
-      canStart: !this.closed && !!this.host?.canStart() &&
-        [...this.links.values()].every(l => l.playerId && l.assetAck === this.assetVersion) };
+      canStart: this.assetsBaseReady() && this.readyAt != null && this.now() - this.readyAt >= ASSETS_READY_DELAY };
   }
   notify() { this.onChange(this.view()); }
   command(method, data) { this.onUnity({ method, data }); }
@@ -276,6 +289,7 @@ export class RoomSession {
   initialize(config) {
     this.initializing = config.matchId;
     this.result = null; this.resultPlayers = []; this.sync = null; this.sequence = 0; this.error = '';
+    this.pendingUltimate = null;
     this.command('InitializeMultiplayer', { ...config, localPlayerId: this.localPlayerId, isHost: this.isHost });
     this.notify();
   }
@@ -304,7 +318,13 @@ export class RoomSession {
         ? { matchId: data.matchId, seq: ++this.sequence, action: 'PRIMARY', direction: data.direction }
         : { matchId: data.matchId, seq: ++this.sequence, action: data.action };
       if (this.isHost) this.command('ReceiveMultiplayerInput', { ...input, playerId: 'p0' });
-      else this.sendToHost('INPUT', input);
+      else {
+        this.sendToHost('INPUT', input);
+        // 必殺技/制圧は発生頻度が低く見た目にも残り続けるため、電波が弱くこの1回が
+        // 届かないと「SPは満タンなのにボタンが反応しない」まま固まって見える。
+        // 届いていれば再送分はホスト側のseqチェックで無視されるだけなので安全。
+        if (isUltimate) this.pendingUltimate = { input, attemptsLeft: 6 };
+      }
     } else if (this.isHost && type === 'PLAYING') {
       if (this.host.beginPlaying(data.matchId)) this.publish();
     } else if (this.isHost && type === 'SYNC' && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) {
@@ -324,11 +344,10 @@ export class RoomSession {
     if (full) this.fullAt ??= now; else this.fullAt = null;
     const deadline = full ? this.fullAt + AUTO_START_DELAY : this.gatheredAt + FILL_TIMEOUT;
     if (deadline !== this.autoStartAt) { this.autoStartAt = deadline; this.publish(); }
-    // 武器データ(画像込み)が全員に届くまでは開始しない（view().canStart が受信完了を見ている）。
-    // 通信が遅いと受信完了がdeadlineより後になり得るので、その場合は受信完了からも
-    // ASSETS_READY_DELAY分だけ別途待つ（そうしないと猶予が実質ゼロになってしまう）
+    // 武器データ(画像込み)が全員に届いてUnity側の読み込みが終わるまでは開始しない。
+    // readyAtの管理はpump()側で手動の部屋(ホストがStartを押す形)と共通化してあり、
+    // view().canStartが「届いてからASSETS_READY_DELAY経過したか」までまとめて見ている。
     const ready = this.view().canStart;
-    if (ready) this.readyAt ??= now; else this.readyAt = null;
     // ▼【調査用】オートスタートが詰まる不具合の調査用ログ。
     // localStorage.setItem('POSE_SWORD_NET_DEBUG', '1') で有効化できる。
     try {
@@ -340,11 +359,12 @@ export class RoomSession {
           assetVersion: this.assetVersion });
       }
     } catch { /* ignore */ }
-    if (now >= deadline && ready && now >= this.readyAt + ASSETS_READY_DELAY) { this.cancelAutoStart(); this.prepare(); }
+    if (now >= deadline && ready) { this.cancelAutoStart(); this.prepare(); }
   }
 
   cancelAutoStart() {
-    this.gatheredAt = null; this.fullAt = null; this.readyAt = null;
+    // readyAtは手動の部屋とも共通のトラッカーなのでここでは触らない(pump()側で管理する)。
+    this.gatheredAt = null; this.fullAt = null;
     if (this.autoStartAt === null) return;
     this.autoStartAt = null;
     if (this.room.phase === 'LOBBY') this.publish();
@@ -384,6 +404,13 @@ export class RoomSession {
   pump() {
     if (this.closed) return;
     const now = this.now();
+    if (this.isHost) {
+      const ready = this.assetsBaseReady();
+      if (ready) this.readyAt ??= now; else this.readyAt = null;
+      // 手動の部屋はpublish()が呼ばれた瞬間にしかReact側のviewを更新しないため、これが
+      // ないとASSETS_READY_DELAY経過後もStartボタンが押せないままになってしまう。
+      if (this.room.phase === 'LOBBY') this.notify();
+    }
     if (this.isHost && this.room.phase === 'LOADING' && now >= this.loadDeadline) this.abort('読み込みが時間内に完了しませんでした。');
     for (const link of [...this.links.values()]) {
       if (now - link.lastSeen >= 10000 || (!link.playerId && now - link.attachedAt >= 10000)) {
@@ -399,6 +426,15 @@ export class RoomSession {
       if (now - this.lastHeartbeat >= 1000) this.send(link, 'PING');
     }
     if (now - this.lastHeartbeat >= 1000) this.lastHeartbeat = now;
+    if (!this.isHost && this.pendingUltimate && this.room?.phase === 'PLAYING') {
+      const link = this.links.values().next().value;
+      if (link?.conn.open) {
+        this.sendToHost('INPUT', this.pendingUltimate.input);
+        if (--this.pendingUltimate.attemptsLeft <= 0) this.pendingUltimate = null;
+      }
+    } else if (this.pendingUltimate && this.room?.phase !== 'PLAYING') {
+      this.pendingUltimate = null;
+    }
     this.autoStartTick(now);
   }
 

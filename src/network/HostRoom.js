@@ -1,5 +1,12 @@
 export const PROTOCOL_VERSION = 5;
 export const MAX_IMAGE_LENGTH = 4 * 1024 * 1024;
+// 剣本体のステータス上限(image-process/stats.pyでの生成上限: hp 100〜1000 / attack・weight 1〜100)に、
+// 柄(SwordListScreenのHILT_DATABASE)が乗せうる最大の補正値を足した、正規のプレイで届きうる本当の上限。
+// ここへ送られてくる値は柄補正を適用した後の最終値なので、剣本体だけの上限で弾くと
+// 満タン剣+ボーナス柄のような正規の組み合わせまで「武器データが不正」で弾いてしまう。
+export const MAX_HP = 1030;     // 1000(剣本体) + 30(大翼の柄)
+export const MAX_ATTACK = 130;  // 100(剣本体) + 30(武骨な柄)
+export const MAX_WEIGHT = 120;  // 100(剣本体) + 20(武骨な柄)
 // 席数は2〜4。通常ロビーは4席で、そろった人数のまま試合を始める。
 // ランダムマッチは希望人数をそのまま席数にし、autoStart で準備ボタンなしに開始する。
 export const MAX_PLAYERS = 4;
@@ -41,9 +48,9 @@ export const SOLO_BUFF = Object.freeze({
 
 export function validateSword(sword) {
   if (!sword || typeof sword.name !== 'string' || !sword.name.trim() ||
-      !Number.isInteger(sword.hp) || sword.hp < 1 ||
-      !Number.isInteger(sword.attack) || sword.attack < 1 ||
-      !Number.isInteger(sword.weight) || sword.weight < 1 ||
+      !Number.isInteger(sword.hp) || sword.hp < 1 || sword.hp > MAX_HP ||
+      !Number.isInteger(sword.attack) || sword.attack < 1 || sword.attack > MAX_ATTACK ||
+      !Number.isInteger(sword.weight) || sword.weight < 1 || sword.weight > MAX_WEIGHT ||
       typeof sword.imageStr !== 'string' || !sword.imageStr || sword.imageStr.length > MAX_IMAGE_LENGTH) {
     throw new Error('武器データが不正です。再錬成してください。');
   }
@@ -66,9 +73,9 @@ export function validateSword(sword) {
       if (!s) return { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: '0', isEmpty: true };
       return {
         name: typeof s.name === 'string' ? s.name : 'empty',
-        hp: Number.isInteger(s.hp) ? s.hp : 1,
-        attack: Number.isInteger(s.attack) ? s.attack : 1,
-        weight: Number.isInteger(s.weight) ? s.weight : 1,
+        hp: Number.isInteger(s.hp) && s.hp >= 1 && s.hp <= MAX_HP ? s.hp : 1,
+        attack: Number.isInteger(s.attack) && s.attack >= 1 && s.attack <= MAX_ATTACK ? s.attack : 1,
+        weight: Number.isInteger(s.weight) && s.weight >= 1 && s.weight <= MAX_WEIGHT ? s.weight : 1,
         imageStr: typeof s.imageStr === 'string' ? s.imageStr : '',
         hiltType: typeof s.hiltType === 'string' ? s.hiltType : '0',
         isEmpty: Boolean(s.isEmpty)
