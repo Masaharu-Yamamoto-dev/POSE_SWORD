@@ -10,7 +10,7 @@
  */
 export const SEARCH_INTERVAL = 4000;
 export const HOST_INTERVAL = 8000;
-export const JOIN_TIMEOUT = 10000;
+export const JOIN_TIMEOUT = 6000;
 export const EMPTY_POLLS_BEFORE_HOSTING = 2;
 const SEEKING = ['ENTERING', 'FULL', 'SEARCHING', 'JOINING', 'HOSTING'];
 const REASONS = {
@@ -23,11 +23,13 @@ const REASONS = {
 };
 
 export class MatchSeeker {
-  constructor({ client, room, targetSize, now = () => Date.now(), onChange = () => {} }) {
+  constructor({ client, room, targetSize, gameMode = '0', now = () => Date.now(), onChange = () => {} }) {
     if (![2, 4].includes(targetSize)) throw new Error('対戦人数は2人か4人です。');
+    if (!['0', '1'].includes(gameMode)) throw new Error('ルールの指定が不正です。');
     this.client = client;
     this.room = room;
     this.targetSize = targetSize;
+    this.gameMode = gameMode;
     this.now = now;
     this.onChange = onChange;
     this.phase = 'IDLE';
@@ -105,7 +107,8 @@ export class MatchSeeker {
 
   async search(now) {
     if (now < this.nextAt) return;
-    const result = await this.client.poll({ ticket: this.ticket, targetSize: this.targetSize, exclude: this.exclude });
+    const result = await this.client.poll({ ticket: this.ticket, targetSize: this.targetSize,
+      exclude: this.exclude, gameMode: this.gameMode });
     if (!result.ok) return this.recover(result, now);
     this.waiting = result.waiting ?? this.waiting;
     this.error = '';

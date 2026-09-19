@@ -105,6 +105,20 @@ test('同一IPが持てる券には上限がある', async () => {
   assert.equal((await s.store.enter({ targetSize: 4, ipHash: 'other' })).ok, true);
 });
 
+test('pollで延命した券はIP上限にも数え続けられ、3枚目は断られる', async () => {
+  const s = setup(); // perIpMax 2, ticketTtl 30s
+  const a = (await s.store.enter({ targetSize: 2, ipHash: 'same' })).ticket;
+  const b = (await s.store.enter({ targetSize: 2, ipHash: 'same' })).ticket;
+  s.advance(25_000);
+  assert.equal((await s.store.poll({ ticket: a, targetSize: 2, ipHash: 'same' })).ok, true);
+  assert.equal((await s.store.poll({ ticket: b, targetSize: 2, ipHash: 'same' })).ok, true);
+  // enterから35秒後。IPエントリを延ばさないと、券は生きているのにIP枠だけ空いてしまう。
+  s.advance(10_000);
+  const third = await s.store.enter({ targetSize: 2, ipHash: 'same' });
+  assert.equal(third.ok, false);
+  assert.equal(third.reason, 'IP_LIMIT');
+});
+
 test('期限切れの券は掃除され、その枠は次の人に渡る', async () => {
   const s = setup();
   for (let i = 0; i < 4; i++) await s.store.enter({ targetSize: 2, ipHash: `ip-${i}` });
@@ -166,6 +180,31 @@ test('満員・対戦中・除外指定の部屋は候補に出ない', async ()
   await s.store.poll({ ticket: c, targetSize: 2, room: host('333333') });
   const found = await s.store.poll({ ticket: seeker, targetSize: 2, exclude: ['333333'] });
   assert.deepEqual(found.rooms, []);
+});
+
+test('希望と違うルールの部屋は候補に出ない', async () => {
+  const s = setup({ maxWaiting: 8 });
+  const sword = (await s.store.enter({ targetSize: 2, ipHash: 'sword' })).ticket;
+  const koma = (await s.store.enter({ targetSize: 2, ipHash: 'koma' })).ticket;
+  await s.store.poll({ ticket: sword, targetSize: 2, room: host('111111', { gameMode: '0' }) });
+  await s.store.poll({ ticket: koma, targetSize: 2, room: host('222222', { gameMode: '1' }) });
+
+  const sworder = (await s.store.enter({ targetSize: 2, ipHash: 'sworder' })).ticket;
+  assert.deepEqual((await s.store.poll({ ticket: sworder, targetSize: 2, gameMode: '0' }))
+    .rooms.map(r => r.roomId), ['111111']);
+  const komaSeeker = (await s.store.enter({ targetSize: 2, ipHash: 'komaSeeker' })).ticket;
+  assert.deepEqual((await s.store.poll({ ticket: komaSeeker, targetSize: 2, gameMode: '1' }))
+    .rooms.map(r => r.roomId), ['222222']);
+});
+
+test('ホストは自分と違うルールの部屋には移らない', async () => {
+  const s = setup({ maxWaiting: 8 });
+  const older = (await s.store.enter({ targetSize: 4, ipHash: 'older' })).ticket;
+  await s.store.poll({ ticket: older, targetSize: 4, room: host('111111', { gameMode: '1' }) });
+  s.advance(1_000);
+  const koma = (await s.store.enter({ targetSize: 4, ipHash: 'koma' })).ticket;
+  const res = await s.store.poll({ ticket: koma, targetSize: 4, room: host('222222', { gameMode: '0' }) });
+  assert.deepEqual(res.rooms, []);
 });
 
 test('候補は待ち時間の長い順に返り、渡した直後は他の人に渡らない', async () => {

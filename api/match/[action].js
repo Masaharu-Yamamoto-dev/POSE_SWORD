@@ -41,12 +41,15 @@ export default async function handler(req, res) {
   if (!url || !token) return res.status(503).json({ error: 'ランダムマッチは現在利用できません' });
 
   const ttlSeconds = Number(process.env.MATCH_TICKET_TTL ?? 30);
+  // 部屋の募集はホストの生存確認（HOST_INTERVAL=8s）より十分長く、券より短くする。
+  // 短いほど、peerが落ちたホストの募集が早く消え、探索者が空振りに待たされない。
+  const roomTtlSeconds = Number(process.env.MATCH_ROOM_TTL ?? 18);
   const store = new MatchStore({
     redis: createUpstashClient({ url, token }),
-    maxWaiting: Number(process.env.MATCH_MAX_WAITING ?? 16),
+    maxWaiting: Number(process.env.MATCH_MAX_WAITING ?? 64),
     perIpMax: Number(process.env.MATCH_PER_IP_MAX ?? 2),
     ticketTtlMs: ttlSeconds * 1000,
-    roomTtlMs: ttlSeconds * 1000,
+    roomTtlMs: roomTtlSeconds * 1000,
   });
 
   let body;
@@ -73,7 +76,9 @@ export default async function handler(req, res) {
       case 'poll': {
         if (!isToken(body.ticket)) return res.status(400).json({ error: 'ticket がありません' });
         const exclude = Array.isArray(body.exclude) ? body.exclude.filter(isRoomId).slice(0, 8) : [];
-        const result = await store.poll({ ticket: body.ticket, targetSize, exclude, room: readRoom(body) });
+        const gameMode = ['0', '1'].includes(body.gameMode) ? body.gameMode : '0';
+        const result = await store.poll({ ticket: body.ticket, targetSize, exclude, gameMode, ipHash,
+          room: readRoom(body) });
         return res.status(200).json(result);
       }
       case 'leave': {
