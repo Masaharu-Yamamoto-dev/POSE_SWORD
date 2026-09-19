@@ -2,7 +2,7 @@ import { HostRoom, MAX_PLAYERS, PROTOCOL_VERSION, SOLO_BUFF, validateSword } fro
 
 const ACTIVE = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 // 自動開始の部屋のタイミング。席が埋まれば少し待って開始し、埋まらなければ人数を切り上げる。
-export const AUTO_START_DELAY = 6000;
+export const AUTO_START_DELAY = 3000;
 export const FILL_TIMEOUT = 60000;
 // 通信が遅いと剣画像(ROSTER)の受信完了がAUTO_START_DELAYより遅れ、猶予が
 // 実質ゼロのまま開始してしまうことがあった。受信完了からも別途この分だけ待つ。
@@ -329,6 +329,17 @@ export class RoomSession {
     // ASSETS_READY_DELAY分だけ別途待つ（そうしないと猶予が実質ゼロになってしまう）
     const ready = this.view().canStart;
     if (ready) this.readyAt ??= now; else this.readyAt = null;
+    // ▼【調査用】オートスタートが詰まる不具合の調査用ログ。
+    // localStorage.setItem('POSE_SWORD_NET_DEBUG', '1') で有効化できる。
+    try {
+      if (localStorage.getItem('POSE_SWORD_NET_DEBUG') === '1') {
+        console.log('[net] autoStartTick', { now, deadline, hitDeadline: now >= deadline, ready, readyAt: this.readyAt,
+          hitReadyDelay: this.readyAt != null && now >= this.readyAt + ASSETS_READY_DELAY,
+          players: this.room.players.length, seatLimit: this.host.seatLimit,
+          links: [...this.links.values()].map(l => ({ playerId: l.playerId, assetAck: l.assetAck })),
+          assetVersion: this.assetVersion });
+      }
+    } catch { /* ignore */ }
     if (now >= deadline && ready && now >= this.readyAt + ASSETS_READY_DELAY) { this.cancelAutoStart(); this.prepare(); }
   }
 
