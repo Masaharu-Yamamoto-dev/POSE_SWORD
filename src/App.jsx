@@ -94,7 +94,8 @@ export default function PoseSwordWeb() {
           weight: stats.weight,
           imageStr: sendStr, // 🌟 Unityが画像を生成する時に使うデータ
           imageSrc: sendSrc, // 🌟 相手のReact画面で表示する時に使うデータ
-          hiltType: Number(sword.hiltType || 0),
+          imageStr: sword.imageStr,
+          hiltType: typeof sword.hiltType === 'string' ? sword.hiltType : String(sword.hiltType || 0),
           isEmpty: false
         };
       } else {
@@ -104,8 +105,7 @@ export default function PoseSwordWeb() {
           attack: 1,
           weight: 1,
           imageStr: "",
-          imageSrc: "",
-          hiltType: 0,
+          hiltType: "0",
           isEmpty: true
         };
       }
@@ -125,7 +125,7 @@ export default function PoseSwordWeb() {
       weight: equippedStats.weight,
       imageStr: mainSendStr, // 🌟 修正：ここが元の画像のままになっていたのが原因
       imageSrc: mainSendSrc, 
-      hiltType: Number(equipped.hiltType || 0),
+      hiltType: typeof equipped.hiltType === 'string' ? equipped.hiltType : String(equipped.hiltType || 0),
       swords: swords,
       equippedIndex: equippedIndex
     };

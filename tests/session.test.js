@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RoomSession } from '../src/network/RoomSession.js';
+import { RoomSession, ASSETS_READY_DELAY } from '../src/network/RoomSession.js';
 import { PROTOCOL_VERSION } from '../src/network/HostRoom.js';
 
 const sword = { name: '剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
@@ -48,8 +48,15 @@ function tick(s, seconds) {
   }
 }
 
+// 手動の部屋も、武器データが届いてからASSETS_READY_DELAY分待たないとprepare()できない
+// (ランダムマッチと同じ猶予。詳しくはRoomSession.jsのassetsBaseReady/readyAtを参照)。
+function awaitReady(s) {
+  s.host.pump(); s.advance(ASSETS_READY_DELAY); s.host.pump();
+}
+
 function start(s) {
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   s.host.prepare(); s.net.flush();
   const matchId = s.host.view().room.matchId;
   [s.host, ...s.guests].forEach(p => p.unityEvent('INITIALIZED', { matchId })); s.net.flush();
@@ -61,6 +68,7 @@ test('four sessions receive the same roster and wait for every Unity instance', 
   const s = setup();
   for (const guest of s.guests) assert.equal(guest.view().room.players.length, 4);
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   assert.equal(s.host.view().canStart, true);
   s.host.prepare(); s.net.flush();
   const id = s.host.view().room.matchId;
@@ -102,6 +110,7 @@ test('only host results end the match, are acknowledged, and survive a host disc
 test('loading timeout cancels all clients; next match ignores old initialization', () => {
   const s = setup();
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   s.host.prepare(); s.net.flush();
   const oldId = s.host.view().room.matchId;
   // Keep transports healthy while Unity fails to initialize.
@@ -110,6 +119,7 @@ test('loading timeout cancels all clients; next match ignores old initialization
   assert.equal(s.guests[0].view().room.phase, 'LOBBY');
   assert.equal(s.commands[1].filter(c => c.method === 'StopMultiplayer').length, 1);
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   s.host.prepare(); s.net.flush();
   s.guests[0].unityEvent('INITIALIZED', { matchId: oldId }); s.net.flush();
   assert.equal(s.host.view().room.players.find(p => p.playerId === s.guests[0].view().localPlayerId).loaded, false);
@@ -191,6 +201,7 @@ test('backpressure replaces unsent sync with latest and discards it on result', 
 test('an initialization failure cancels every participant before play', () => {
   const s = setup();
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   s.host.prepare(); s.net.flush();
   s.guests[1].unityEvent('LOAD_FAILED', { matchId: s.host.view().room.matchId }); s.net.flush();
   assert.equal(s.host.view().room.phase, 'LOBBY');
@@ -235,6 +246,7 @@ test('three players start with three spawns and three arena slots', () => {
 test('a weapon change reaches the host, clears that player ready state and re-sends the roster', () => {
   const s = setup();
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   assert.equal(s.host.view().canStart, true);
   const other = { name: '別の剣', hp: 200, attack: 10, weight: 20, imageStr: 'd29ybGQ=' };
   s.guests[0].updateSword(other); s.net.flush();
@@ -296,6 +308,7 @@ test('an auto-start room falling below two players stops counting down', () => {
 test('a manual room never starts by itself', () => {
   const s = setup();
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   assert.equal(s.host.view().canStart, true);
   tick(s, 70);
   assert.equal(s.host.view().room.phase, 'LOBBY');
