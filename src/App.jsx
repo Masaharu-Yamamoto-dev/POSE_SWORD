@@ -17,6 +17,27 @@ import { useIceConfig } from './network/useIceConfig.js';
 const ACTIVE_PHASES = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 const ROOM_STEPS = ['LOBBY', 'PLAYING', 'RESULT'];
 
+// 🌟 画像を真っ黒なシルエットに変換する関数
+const makeSilhouetteImage = (base64Src) => {
+  return new Promise((resolve, reject) => {
+    if (!base64Src) return resolve("");
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      ctx.globalCompositeOperation = "source-in";
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = reject;
+    img.src = base64Src;
+  });
+};
+
 // 武器の中身が変わったかどうかだけを見る。
 const swordKey = sword => sword && `${sword.id}:${sword.name}:${sword.hp}:${sword.attack}:${sword.weight}:${sword.hiltType}:${sword.imageStr?.length ?? 0}`;
 
@@ -52,19 +73,27 @@ export default function PoseSwordWeb() {
   const mySwordRef = useRef(null);
   useEffect(() => { mySwordRef.current = mySwordData; }, [mySwordData]);
 
-  // 🌟 通信・Unity送信用のデータ生成
-  const createSyncSwordData = (list, equipped) => {
+// 🌟 通信・Unity送信用のデータ生成（isRandomMatchフラグで画像をすり替え）
+  const createSyncSwordData = (list, equipped, isRandomMatch = false) => {
     if (!equipped) return null;
 
     const swords = [0, 1, 2].map(index => {
       const sword = list[index];
       if (sword) {
         const stats = getFinalStats(sword);
+        
+        // 🌟 シルエットを使う場合、imageSrc と imageStr の両方をすり替える
+        const sendSrc = (isRandomMatch && sword.silhouetteSrc) ? sword.silhouetteSrc : sword.imageSrc;
+        // silhouetteSrc に含まれる "data:image/png;base64," の部分を消して抽出
+        const sendStr = (isRandomMatch && sword.silhouetteSrc) ? sword.silhouetteSrc.split(',')[1] : sword.imageStr;
+
         return {
           name: sword.name,
           hp: stats.hp,
           attack: stats.attack,
           weight: stats.weight,
+          imageStr: sendStr, // 🌟 Unityが画像を生成する時に使うデータ
+          imageSrc: sendSrc, // 🌟 相手のReact画面で表示する時に使うデータ
           imageStr: sword.imageStr,
           hiltType: typeof sword.hiltType === 'string' ? sword.hiltType : String(sword.hiltType || 0),
           isEmpty: false
@@ -84,19 +113,23 @@ export default function PoseSwordWeb() {
 
     const equippedIndex = Math.max(0, list.findIndex(s => s.id === equipped.id));
     const equippedStats = getFinalStats(equipped);
+    
+    // 🌟 装備中の剣（自分自身のメイン剣）についても同様に両方をすり替え
+    const mainSendSrc = (isRandomMatch && equipped.silhouetteSrc) ? equipped.silhouetteSrc : equipped.imageSrc;
+    const mainSendStr = (isRandomMatch && equipped.silhouetteSrc) ? equipped.silhouetteSrc.split(',')[1] : equipped.imageStr;
 
     return {
       ...equipped,
       hp: equippedStats.hp,
       attack: equippedStats.attack,
       weight: equippedStats.weight,
+      imageStr: mainSendStr, // 🌟 修正：ここが元の画像のままになっていたのが原因
+      imageSrc: mainSendSrc, 
       hiltType: typeof equipped.hiltType === 'string' ? equipped.hiltType : String(equipped.hiltType || 0),
       swords: swords,
       equippedIndex: equippedIndex
     };
   };
-
-  const currentSyncSword = createSyncSwordData(swordList, mySwordData);
 
   const [userName, setUserName] = useState("");
   const [targetId, setTargetId] = useState("");
@@ -106,6 +139,9 @@ export default function PoseSwordWeb() {
   const [capturedImage, setCapturedImage] = useState(null);
   const [systemMessage, setSystemMessage] = useState("");
   const [isCopied, setIsCopied] = useState(false);
+
+  // 🌟 ランダムマッチ状態の管理を追加
+  const [isRandomMatchActive, setIsRandomMatchActive] = useState(false);
 
   // 🌟 アニメーション・撮り直し用の状態管理
   const [transitionDir, setTransitionDir] = useState("forward");
@@ -123,10 +159,14 @@ export default function PoseSwordWeb() {
   const sentSwordRef = useRef(null);
   const [matchSize, setMatchSize] = useState(2);
   const [matchMode, setMatchMode] = useState("0");
+
+  // 🌟 isRandomMatchActive の状態を渡してデータを生成
+  const currentSyncSword = createSyncSwordData(swordList, mySwordData, isRandomMatchActive);
   const randomMatch = useRandomMatch({ room, sword: currentSyncSword });
 
   const resetToTitle = useCallback((msg = "") => {
     setTitleMode("DEFAULT"); setTargetId(""); setSystemMessage(msg); setStep("TITLE");
+    setIsRandomMatchActive(false); // 🌟 追加
     sentSwordRef.current = null;
   }, []);
   useEffect(() => { resetToTitleRef.current = resetToTitle; }, [resetToTitle]);
@@ -265,18 +305,21 @@ export default function PoseSwordWeb() {
     if (!mySwordData) return;
     setMatchSize(size);
     setSystemMessage(""); setTitleMode("DEFAULT");
-    sentSwordRef.current = syncKey(currentSyncSword);
+    setIsRandomMatchActive(true); // 🌟 追加
+    sentSwordRef.current = syncKey(createSyncSwordData(swordList, mySwordData, true)); // 🌟 追加
     randomMatch.start(size, matchMode);
   };
 
   const cancelRandomMatch = () => {
     randomMatch.cancel();
+    setIsRandomMatchActive(false); // 🌟 追加
     resetToTitle("");
   };
 
   const findNewOpponents = () => {
     room.leave();
-    sentSwordRef.current = syncKey(currentSyncSword);
+    setIsRandomMatchActive(true); // 🌟 追加
+    sentSwordRef.current = syncKey(createSyncSwordData(swordList, mySwordData, true)); // 🌟 追加
     randomMatch.start(matchSize, matchMode);
   };
 
@@ -290,8 +333,9 @@ export default function PoseSwordWeb() {
   const handleCreateRoom = () => {
     if (!mySwordData) return;
     setSystemMessage(""); setTitleMode("DEFAULT");
-    sentSwordRef.current = syncKey(currentSyncSword);
-    room.createRoom(currentSyncSword);
+    setIsRandomMatchActive(false); // 🌟 追加
+    sentSwordRef.current = syncKey(createSyncSwordData(swordList, mySwordData, false)); // 🌟 追加
+    room.createRoom(createSyncSwordData(swordList, mySwordData, false)); // 🌟 追加
   };
 
   const connectToHost = () => {
@@ -301,8 +345,9 @@ export default function PoseSwordWeb() {
     if (targetId.length < 6) return setSystemMessage("6桁で入力してください。");
     if (!mySwordData) return setSystemMessage("先に剣を錬成してください。");
 
-    sentSwordRef.current = syncKey(currentSyncSword);
-    room.joinRoom(targetId, currentSyncSword);
+    setIsRandomMatchActive(false); // 🌟 追加
+    sentSwordRef.current = syncKey(createSyncSwordData(swordList, mySwordData, false)); // 🌟 追加
+    room.joinRoom(targetId, createSyncSwordData(swordList, mySwordData, false)); // 🌟 追加
   };
 
   const handleJoinRoom = () => {
@@ -336,19 +381,24 @@ export default function PoseSwordWeb() {
       const base64DataOnly = base64Full.split(',')[1];
       const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? '/api'}/cutout`;
 
+      // 🌟 asyncを追加
       fetch(pythonApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: base64DataOnly, userName: userName }) })
         .then(res => { if (!res.ok) throw new Error(`HTTPエラー`); return res.json(); })
-        .then((data) => {
+        .then(async (data) => {
           setLastCraftWasRecapture(!!craftingTargetId);
+          
+          // 🌟 シルエット画像の生成処理を追加
+          const newImageSrc = "data:image/png;base64," + data.imageData;
+          const silhouette = await makeSilhouetteImage(newImageSrc);
 
           if (craftingTargetId) {
-            const updatedProps = { hp: data.params.hp, attack: data.params.attack, weight: data.params.weight, imageStr: data.imageData, imageSrc: "data:image/png;base64," + data.imageData };
+            const updatedProps = { hp: data.params.hp, attack: data.params.attack, weight: data.params.weight, imageStr: data.imageData, imageSrc: newImageSrc, silhouetteSrc: silhouette };
             updateSword(craftingTargetId, updatedProps);
             const targetOld = swordList.find(s => s.id === craftingTargetId);
             if (targetOld) setMySwordData({ ...targetOld, ...updatedProps });
             setCraftingTargetId(null);
           } else {
-            const newSword = { id: Date.now().toString(), baseName: userName, name: data.swordName || "無銘の剣", hp: data.params.hp, attack: data.params.attack, weight: data.params.weight, imageStr: data.imageData, imageSrc: "data:image/png;base64," + data.imageData, hiltType: "0" };
+            const newSword = { id: Date.now().toString(), baseName: userName, name: data.swordName || "無銘の剣", hp: data.params.hp, attack: data.params.attack, weight: data.params.weight, imageStr: data.imageData, imageSrc: newImageSrc, silhouetteSrc: silhouette, hiltType: "0" };
             setSwordList(prev => {
               let updatedList = [...prev];
               if (updatedList.length >= 3) updatedList.shift();

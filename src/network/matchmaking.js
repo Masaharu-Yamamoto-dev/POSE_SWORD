@@ -25,8 +25,8 @@ export function createMatchClient({ base = DEFAULT_BASE, fetchImpl = fetch } = {
 
   return {
     enter: ({ targetSize }) => call('enter', { targetSize }),
-    poll: ({ ticket, targetSize, room = null, exclude = [] }) =>
-      call('poll', { ticket, targetSize, exclude, ...(room ?? {}) }),
+    poll: ({ ticket, targetSize, room = null, exclude = [], gameMode = '0' }) =>
+      call('poll', { ticket, targetSize, exclude, gameMode, ...(room ?? {}) }),
     leave: ({ ticket, targetSize, roomId = null, hostToken = null, keepTicket = false }) =>
       call('leave', { ticket, targetSize, roomId, hostToken, keepTicket }),
   };

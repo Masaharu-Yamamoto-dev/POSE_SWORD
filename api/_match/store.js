@@ -73,7 +73,7 @@ export class MatchStore {
     return { ok: true, ticket, waiting: countWaiting(members) };
   }
 
-  async poll({ ticket, targetSize, room = null, exclude = [] }) {
+  async poll({ ticket, targetSize, room = null, exclude = [], gameMode = '0', ipHash = null }) {
     const now = this.now();
     const member = `${targetSize}:${ticket}`;
     const queue = queueKey(targetSize);
@@ -87,9 +87,13 @@ export class MatchStore {
     const waiting = countWaiting(members);
     if (!members.includes(member)) return { ok: false, reason: 'EXPIRED', waiting };
 
+    // 券を延命した以上、IP制限の集計もその券を数え続ける。ここを延ばさないと、
+    // 券は生きているのにIPエントリだけ先に失効し、同一回線から上限超えで新券を取れてしまう。
+    const writes = ipHash ? [['ZADD', ipKey(ipHash), now + this.ticketTtlMs, ticket]] : [];
+
     const entries = Object.entries(raw ?? {}).map(([roomId, value]) => [roomId, JSON.parse(value)]);
     const live = entries.filter(([, entry]) => entry.expiresAt > now);
-    const writes = entries.filter(([, entry]) => entry.expiresAt <= now).map(([roomId]) => ['HDEL', queue, roomId]);
+    for (const [roomId] of entries.filter(([, entry]) => entry.expiresAt <= now)) writes.push(['HDEL', queue, roomId]);
 
     let hostToken = room?.hostToken ?? null;
     let mine = null;
@@ -108,7 +112,9 @@ export class MatchStore {
       })]);
     }
 
-    const rooms = this.candidates({ live, now, room, mine, exclude, targetSize });
+    // 探索者は希望ルールの部屋だけ、ホストは自分の部屋と同じルールの部屋だけを候補にする。
+    const wantMode = room ? room.gameMode : gameMode;
+    const rooms = this.candidates({ live, now, room, mine, exclude, targetSize, gameMode: wantMode });
     // 探索者に渡した部屋は少しの間ほかの人に渡さない。ホストの移籍先は押さえない。
     if (!room) {
       for (const [roomId, entry] of rooms) {
@@ -122,13 +128,13 @@ export class MatchStore {
         waitingSeconds: Math.floor((now - entry.createdAt) / 1000) })) };
   }
 
-  candidates({ live, now, room, mine, exclude, targetSize }) {
+  candidates({ live, now, room, mine, exclude, targetSize, gameMode }) {
     // ホストは「自分より先に待っている部屋」へ移るためだけに候補を見る。誰か来ていれば動かない。
     if (room && room.players > 1) return [];
     const createdAt = room ? (mine?.createdAt ?? now) : Infinity;
     return live
       .filter(([roomId, entry]) => roomId !== room?.roomId && !exclude.includes(roomId) &&
-        entry.phase === 'LOBBY' && entry.players < targetSize &&
+        entry.gameMode === gameMode && entry.phase === 'LOBBY' && entry.players < targetSize &&
         entry.createdAt < createdAt && (entry.heldUntil ?? 0) <= now)
       .sort((a, b) => a[1].createdAt - b[1].createdAt)
       .slice(0, room ? 1 : 3);
