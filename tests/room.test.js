@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HostRoom } from '../src/network/HostRoom.js';
+import { HostRoom, MAX_HP, MAX_ATTACK, MAX_WEIGHT } from '../src/network/HostRoom.js';
 
 const sword = { name: 'テスト剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
 function fullRoom(count = 4) {
@@ -153,9 +153,18 @@ test('changing weapons clears readiness and rejects invalid stats', () => {
   const room = fullRoom();
   room.updateSword('p0', { ...sword, name: '新しい剣' });
   assert.equal(room.canStart(), false);
-  for (const hp of [NaN, Infinity, -1, 0, 1001]) {
+  // 送られてくる値は柄補正込みの最終値なので、上限は剣本体の最大値そのものではなく
+  // 柄が乗せうる最大の補正込みの値(MAX_HP等)。それより上だけを不正として弾く。
+  for (const hp of [NaN, Infinity, -1, 0, MAX_HP + 1]) {
     assert.throws(() => room.updateSword('p0', { ...sword, hp }));
   }
+  for (const attack of [NaN, Infinity, -1, 0, MAX_ATTACK + 1]) {
+    assert.throws(() => room.updateSword('p0', { ...sword, attack }));
+  }
+  for (const weight of [NaN, Infinity, -1, 0, MAX_WEIGHT + 1]) {
+    assert.throws(() => room.updateSword('p0', { ...sword, weight }));
+  }
+  assert.doesNotThrow(() => room.updateSword('p0', { ...sword, hp: MAX_HP, attack: MAX_ATTACK, weight: MAX_WEIGHT }));
   assert.throws(() => room.updateSword('missing', sword));
 });
 

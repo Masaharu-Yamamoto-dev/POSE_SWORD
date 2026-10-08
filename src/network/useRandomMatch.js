@@ -52,7 +52,7 @@ export function useRandomMatch({ room, sword, client = null }) {
   const start = useCallback((targetSize, gameMode = '0') => {
     modeRef.current = gameMode;
     seekerRef.current?.cancel();
-    const seeker = new MatchSeeker({ client: matchClient, room: adapter, targetSize, onChange: setView });
+    const seeker = new MatchSeeker({ client: matchClient, room: adapter, targetSize, gameMode, onChange: setView });
     seekerRef.current = seeker;
     seeker.start();
   }, [adapter, matchClient]);

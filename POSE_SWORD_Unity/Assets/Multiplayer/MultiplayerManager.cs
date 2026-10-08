@@ -105,6 +105,8 @@ public class MultiplayerManager : MonoBehaviour
     [Tooltip("画面下端からトリオパネルまでの距離")]
     [SerializeField] float trioPanelBottom = 16f;
     [SerializeField] Color trioPanelColor = new Color(.07f, .09f, .14f, .82f);
+    [Tooltip("1vs3の間だけ必殺技ボタンを上へ逃がす時に、トリオパネルの上端との間に空ける余白(ボタンが乗っているCanvasの単位)")]
+    [SerializeField] float soloUltimateButtonMargin = 12f;
 
     [Header("1vs3 HUD の文字サイズ")]
     [Tooltip("ボスの名前（👑＋剣名）")]
@@ -119,6 +121,9 @@ public class MultiplayerManager : MonoBehaviour
     [SerializeField] float trioValueFontSize = 16f;
 
     private GameObject soloHudRoot;
+    // 1vs3の間だけ持ち上げる必殺技ボタンと、その元の位置。StopCurrent()で必ず戻す。
+    private RectTransform ultimateButtonRect;
+    private Vector2 ultimateButtonHome;
     private Sprite slantSprite;
     // 実行時に作る文字が使うフォント。シーンで使われているものに揃える。
     private TMP_FontAsset hudFont;
@@ -478,7 +483,52 @@ public class MultiplayerManager : MonoBehaviour
         BuildBossPanel(swords[bossConfig.playerId], font);
 
         var trio = config.players.Where(p => p.team == TrioTeam).OrderBy(p => p.slotIndex).ToArray();
-        for (int i = 0; i < trio.Length; i++) BuildTrioPanel(swords[trio[i].playerId], trio[i].slotIndex, i, trio.Length, font);
+        var panels = new List<RectTransform>();
+        for (int i = 0; i < trio.Length; i++)
+            panels.Add(BuildTrioPanel(swords[trio[i].playerId], trio[i].slotIndex, i, trio.Length, font));
+        LiftUltimateButton(panels);
+    }
+
+    // トリオのHPパネルは画面下端に3枚並ぶので、真ん中の1枚が画面下中央の必殺技ボタンへ重なる。
+    // ボタンは画面中央アンカー、パネルは下端アンカーなので重なり具合は画面の縦横比で変わり、
+    // 実際に遊ぶ16:9ではボタンの下半分がパネルの裏に入る。SoloHudのCanvasはsortingOrderが上で、
+    // しかもGraphicRaycasterを持たない(=押せるのにパネルの裏で見えないだけ)ため、隠れた下端を
+    // 狙った指がボタンの外へ落ち、通常タップ(ジャンプ/小ダッシュ)としてSPを消費→必殺技のラインを
+    // 割ってボタンごと消える、という形で「押しても必殺技が出ない」ように見えていた。
+    // パネルの上端より上へ逃がす。必要な量は縦横比で変わるので実寸から出し、
+    // 試合が終わったら必ず元の位置へ戻す。
+    void LiftUltimateButton(IEnumerable<RectTransform> trioPanels)
+    {
+        if (ultimateButtonRect != null || hudCanvas == null) return;
+        var button = hudCanvas.transform.Find("SpecialAttackButtonPL1") as RectTransform;
+        if (button == null) return;
+        // 作ったばかりのパネルは、このフレームのレイアウトを回すまで実寸を返さない
+        Canvas.ForceUpdateCanvases();
+        // ScreenSpaceOverlayのCanvasでは、RectTransformのワールド座標がそのまま画面ピクセル
+        var corners = new Vector3[4];
+        float panelTop = float.NegativeInfinity;
+        foreach (var panel in trioPanels)
+        {
+            if (panel == null) continue;
+            panel.GetWorldCorners(corners);
+            panelTop = Mathf.Max(panelTop, corners[1].y);
+        }
+        if (float.IsNegativeInfinity(panelTop)) return;
+        float scale = Mathf.Max(hudCanvas.scaleFactor, .0001f);
+        button.GetWorldCorners(corners);
+        float overlap = panelTop + soloUltimateButtonMargin * scale - corners[0].y;
+        if (overlap <= 0f) return;
+        ultimateButtonRect = button;
+        ultimateButtonHome = button.anchoredPosition;
+        button.anchoredPosition = ultimateButtonHome + new Vector2(0f, overlap / scale);
+    }
+
+    // ボタンはシーンに1つしか無く次の対戦へ持ち越されるので、1vs3以外へ戻る時に位置も必ず復帰させる。
+    void RestoreUltimateButton()
+    {
+        if (ultimateButtonRect == null) return;
+        ultimateButtonRect.anchoredPosition = ultimateButtonHome;
+        ultimateButtonRect = null;
     }
 
     // 既存のPL1Bar〜PL4Barは1vs3の間だけ隠す。試合が終わったら必ず戻す（シーンは触らない）。
@@ -559,7 +609,7 @@ public class MultiplayerManager : MonoBehaviour
         crown.text = "\U0001F451 " + boss.swordName;
     }
 
-    void BuildTrioPanel(SwordBattle battle, int slotIndex, int index, int count, TMP_FontAsset font)
+    RectTransform BuildTrioPanel(SwordBattle battle, int slotIndex, int index, int count, TMP_FontAsset font)
     {
         float width = trioPanelSize.x, gap = trioPanelGap;
         float span = count * width + (count - 1) * gap;
@@ -605,6 +655,7 @@ public class MultiplayerManager : MonoBehaviour
         battle.delayHpBar = null;
         battle.UpdateUI();
         name.text = (slotIndex + 1) + "P " + battle.swordName;
+        return panel;
     }
 
     // 毎フレームの差分。自分がどれか、誰が掌握斬で固められているか、ボスが撃てる状態か。
@@ -1648,8 +1699,9 @@ public class MultiplayerManager : MonoBehaviour
         bossPlayerId = null; judgmentVisualStart = -999f;
         RestoreJudgmentGravity();
         if (suppressRange != null) { Destroy(suppressRange.gameObject); suppressRange = null; }
-        // 1vs3 専用HUDを片付け、隠していた元のHPバーを必ず戻す
+        // 1vs3 専用HUDを片付け、隠していた元のHPバーと必殺技ボタンの位置を必ず戻す
         if (soloHudRoot != null) { soloHudRoot.SetActive(false); Destroy(soloHudRoot); soloHudRoot = null; }
+        RestoreUltimateButton();
         foreach (var bar in hiddenSceneBars) if (bar != null) bar.SetActive(true);
         hiddenSceneBars.Clear(); soloHudStates.Clear(); bossSpFill = null; hudFont = null;
         if (slantSprite != null)

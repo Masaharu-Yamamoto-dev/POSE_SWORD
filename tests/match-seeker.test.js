@@ -24,7 +24,7 @@ function fakeRoom() {
   };
 }
 
-function setup({ enter, poll, targetSize = 2 } = {}) {
+function setup({ enter, poll, targetSize = 2, gameMode = '0' } = {}) {
   const nowRef = { value: 1_000 };
   const calls = [];
   const client = {
@@ -40,7 +40,7 @@ function setup({ enter, poll, targetSize = 2 } = {}) {
     async leave(args) { calls.push(['leave', args]); return { ok: true }; },
   };
   const room = fakeRoom();
-  const seeker = new MatchSeeker({ client, room, targetSize, now: () => nowRef.value });
+  const seeker = new MatchSeeker({ client, room, targetSize, gameMode, now: () => nowRef.value });
   return { seeker, client, room, calls, advance: ms => { nowRef.value += ms; } };
 }
 
@@ -61,6 +61,14 @@ test('満員なら待ってから入場をやり直す', async () => {
   await s.seeker.tick();
   await s.seeker.tick();
   assert.equal(s.seeker.view().phase, 'SEARCHING');
+});
+
+test('探索は選んだルールでのみ相手を探す', async () => {
+  const s = setup({ gameMode: '1' });
+  s.seeker.start();
+  await s.seeker.tick();
+  await s.seeker.tick();
+  assert.equal(lastCall(s.calls, 'poll').gameMode, '1');
 });
 
 test('待合所が使えなければ探索をあきらめて知らせる', async () => {

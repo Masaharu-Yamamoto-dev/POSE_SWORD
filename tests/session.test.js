@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AUTO_START_DELAY, FILL_TIMEOUT, RoomSession } from '../src/network/RoomSession.js';
+import { ASSETS_READY_DELAY, AUTO_START_DELAY, FILL_TIMEOUT, RoomSession } from '../src/network/RoomSession.js';
 import { PROTOCOL_VERSION } from '../src/network/HostRoom.js';
 
 const sword = { name: '剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
@@ -48,8 +48,15 @@ function tick(s, seconds) {
   }
 }
 
+// 手動の部屋も、武器データが届いてからASSETS_READY_DELAY分待たないとprepare()できない
+// (ランダムマッチと同じ猶予。詳しくはRoomSession.jsのassetsBaseReady/readyAtを参照)。
+function awaitReady(s) {
+  s.host.pump(); s.advance(ASSETS_READY_DELAY); s.host.pump();
+}
+
 function start(s) {
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   s.host.prepare(); s.net.flush();
   const matchId = s.host.view().room.matchId;
   [s.host, ...s.guests].forEach(p => p.unityEvent('INITIALIZED', { matchId })); s.net.flush();
@@ -61,6 +68,7 @@ test('four sessions receive the same roster and wait for every Unity instance', 
   const s = setup();
   for (const guest of s.guests) assert.equal(guest.view().room.players.length, 4);
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   assert.equal(s.host.view().canStart, true);
   s.host.prepare(); s.net.flush();
   const id = s.host.view().room.matchId;
@@ -102,6 +110,7 @@ test('only host results end the match, are acknowledged, and survive a host disc
 test('loading timeout cancels all clients; next match ignores old initialization', () => {
   const s = setup();
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   s.host.prepare(); s.net.flush();
   const oldId = s.host.view().room.matchId;
   // Keep transports healthy while Unity fails to initialize.
@@ -110,6 +119,7 @@ test('loading timeout cancels all clients; next match ignores old initialization
   assert.equal(s.guests[0].view().room.phase, 'LOBBY');
   assert.equal(s.commands[1].filter(c => c.method === 'StopMultiplayer').length, 1);
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   s.host.prepare(); s.net.flush();
   s.guests[0].unityEvent('INITIALIZED', { matchId: oldId }); s.net.flush();
   assert.equal(s.host.view().room.players.find(p => p.playerId === s.guests[0].view().localPlayerId).loaded, false);
@@ -191,6 +201,7 @@ test('backpressure replaces unsent sync with latest and discards it on result', 
 test('an initialization failure cancels every participant before play', () => {
   const s = setup();
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   s.host.prepare(); s.net.flush();
   s.guests[1].unityEvent('LOAD_FAILED', { matchId: s.host.view().room.matchId }); s.net.flush();
   assert.equal(s.host.view().room.phase, 'LOBBY');
@@ -236,6 +247,7 @@ test('three players start with three spawns and three arena slots', () => {
 test('a weapon change reaches the host, clears that player ready state and re-sends the roster', () => {
   const s = setup();
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   assert.equal(s.host.view().canStart, true);
   const other = { name: '別の剣', hp: 200, attack: 10, weight: 20, imageStr: 'd29ybGQ=' };
   s.guests[0].updateSword(other); s.net.flush();
@@ -298,6 +310,7 @@ test('an auto-start room falling below two players stops counting down', () => {
 test('a manual room never starts by itself', () => {
   const s = setup();
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
   assert.equal(s.host.view().canStart, true);
   tick(s, 70);
   assert.equal(s.host.view().room.phase, 'LOBBY');
@@ -382,6 +395,7 @@ test('a solo room can be prepared without naming anyone: the host is the boss', 
   const s = setup({ soloMode: true });
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
   assert.equal(s.host.view().room.bossPlayerId, 'p0');
+  awaitReady(s); // 武器データが届いてからの猶予（main で手動の部屋にも入った）を待つ
   assert.equal(s.host.view().canStart, true);
   s.host.prepare(); s.net.flush();
   assert.equal(soloConfig(s).players.find(p => p.team === 0).playerId, 'p0');
@@ -486,4 +500,44 @@ test('spinning your own sword in the lobby reaches every screen once and is igno
   start(s);
   s.host.spinSword(); s.net.flush();
   assert.equal(spins(s.guests[1]).p0, 1);
+});
+
+test('once the weapon data has settled, the last ready press makes the room startable at once', () => {
+  const s = setup();
+  // 武器データが届いてからの猶予は、準備完了を待っているあいだに過ぎる。
+  awaitReady(s);
+  assert.equal(s.host.view().canStart, false, '準備完了がそろうまでは開始できない');
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  assert.equal(s.host.view().canStart, true, '最後の1人が準備完了にした瞬間に開始できる');
+  // 武器を変えて配り直したら、届き直してからもう一度猶予を待つ。
+  s.guests[0].updateSword({ ...sword, name: '別の剣' }); s.net.flush();
+  s.guests[0].setReady(true); s.net.flush();
+  s.host.pump();
+  assert.equal(s.host.view().canStart, false);
+  awaitReady(s);
+  assert.equal(s.host.view().canStart, true);
+});
+
+test('a player back in the lobby can ready up while others are still on the result screen', () => {
+  const s = setup(); const matchId = start(s);
+  const scores = s.host.view().room.players.map((p, i) => ({ playerId: p.playerId, rank: i + 1, damageDealt: 0, damageTaken: 0, kills: 0 }));
+  s.host.unityEvent('RESULT', { matchId, scores, winnerPlayerId: 'p0' }); s.net.flush();
+  assert.equal(s.host.view().room.phase, 'RESULT');
+  // ホストとゲスト1人だけ先にロビーへ戻る。残りは結果画面のまま。
+  s.host.returnToLobby(); s.guests[0].returnToLobby(); s.net.flush();
+  assert.equal(s.host.view().room.phase, 'RESULT');
+  s.host.setReady(true); s.guests[0].setReady(true); s.net.flush();
+  const g0 = s.guests[0].view().localPlayerId;
+  const ready = id => s.host.view().room.players.find(p => p.playerId === id).ready;
+  assert.equal(ready('p0'), true);
+  assert.equal(ready(g0), true);
+  assert.equal(s.host.view().canStart, false, '全員が戻るまでは開始できない');
+  // 結果画面にいる人は準備完了にできない。
+  s.guests[1].setReady(true); s.net.flush();
+  assert.equal(ready(s.guests[1].view().localPlayerId), false);
+  // 全員が戻っても、先に押した準備完了は保たれる。
+  s.guests[1].returnToLobby(); s.guests[2].returnToLobby(); s.net.flush();
+  assert.equal(s.host.view().room.phase, 'LOBBY');
+  assert.equal(ready('p0'), true);
+  assert.equal(ready(g0), true);
 });
