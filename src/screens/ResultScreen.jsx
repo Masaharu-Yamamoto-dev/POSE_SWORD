@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PLAYER_COLORS, styles, swordImageSource } from '../styles';
 import { HILT_DATABASE } from './SwordListScreen';
+import InkButton from '../components/InkButton.jsx';
 
 const REASONS = { DISCONNECTED: '（切断）', FORFEIT: '（降参）' };
 
@@ -23,7 +24,7 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
   const isKoma = gameMode === "1";
 
   const headline = result?.draw ? "DRAW" : iWon ? "YOU WIN!!" : myScore ? `${myScore.rank}位` : "試合終了";
-  const accent = iWon ? '#d32f2f' : '#1976d2';
+  const accent = iWon ? 'var(--shu)' : 'var(--sumi)';
 
   // 勝者の剣と柄のデータ
   const winnerHilt = winner ? (HILT_DATABASE[winner.swordData?.hiltType || "0"] || HILT_DATABASE["0"]) : null;
@@ -54,7 +55,7 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
     (phase === 'SLAM' || phase === 'UI') ? 'result-sword-slam' : '';
 
   return (
-    <div style={{ ...styles.container, overflowX: 'hidden', position: 'relative', backgroundColor: phase === 'INIT' ? '#000' : '#eef2f5', transition: 'background-color 0.5s' }}>
+    <div style={{ ...styles.container, overflowX: 'hidden', position: 'relative', backgroundColor: phase === 'INIT' ? '#000' : 'transparent', transition: 'background-color 0.5s' }}>
       
       {/* 🌟 背景の勝者の剣（画面いっぱいに収まるよう縦横比とサイズを調整） */}
       {winner && phase === 'UI' && (
@@ -102,8 +103,8 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
               transform: (phase === 'SLAM' || phase === 'UI') ? 'translateY(0)' : 'translateY(20px)',
               transition: 'all 0.4s ease 0.2s', textAlign: 'center', marginTop: '15px'
             }}>
-              <span style={{ color: '#666', fontSize: '14px', fontWeight: 'bold' }}>WINNER</span>
-              <h2 style={{ margin: 0, fontSize: '32px', color: PLAYER_COLORS[winner?.slotIndex || 0], textShadow: '1px 1px 0 #fff', fontFamily: "'Kurobara Gothic', sans-serif" }}>
+              <span style={{ color: 'var(--usuzumi)', fontSize: '14px' }}>WINNER</span>
+              <h2 style={{ margin: 0, fontSize: '32px', color: PLAYER_COLORS[winner?.slotIndex || 0] }}>
                 {soloMode && winner?.playerId === bossPlayerId ? "👑 " : ""}{winner?.swordData?.name}
               </h2>
             </div>
@@ -117,20 +118,19 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
           }}>
             
             <h2 style={{
-              fontSize: 'clamp(40px, 8vw, 60px)', fontWeight: '900', fontStyle: 'italic', margin: '0 0 20px 0', color: accent,
-              textShadow: '2px 2px 0px #fff, -2px -2px 0px #fff, 2px -2px 0px #fff, -2px 2px 0px #fff, 4px 4px 10px rgba(0,0,0,0.3)'
+              fontSize: 'clamp(40px, 8vw, 60px)', margin: '0 0 20px 0', color: accent
             }}>
               {headline}
             </h2>
 
-            <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: '20px', borderRadius: '15px', boxShadow: '0 8px 20px rgba(0,0,0,0.2)', border: `4px solid ${accent}`, width: '100%', boxSizing: 'border-box' }}>
-              <h3 style={{ fontSize: '22px', color: '#333', margin: '0 0 15px 0', textAlign: 'center' }}>
+            <div className="sumi-panel sumi-frame" style={{ padding: '20px', width: '100%' }}>
+              <h3 style={{ fontSize: '22px', color: 'var(--sumi)', margin: '0 0 15px 0', textAlign: 'center' }}>
                 {result.draw ? "引き分け" : "最終結果"}
               </h3>
 
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'clamp(12px, 3vw, 15px)' }}>
                 <thead>
-                  <tr style={{ borderBottom: '2px solid #ddd', color: '#666', textAlign: 'left' }}>
+                  <tr style={{ borderBottom: '2px solid var(--sumi)', color: 'var(--usuzumi)', textAlign: 'left' }}>
                     <th style={{ padding: '8px 4px' }}>順位</th>
                     <th style={{ padding: '8px 4px' }}>プレイヤー</th>
                     <th style={{ padding: '8px 4px' }}>与</th>
@@ -145,12 +145,12 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
                     const isBoss = soloMode && player?.playerId === bossPlayerId;
 
                     return (
-                      <tr key={score.playerId} style={{ borderBottom: '1px solid #eee', backgroundColor: isMe ? '#fffde7' : 'transparent', fontWeight: isMe ? 'bold' : 'normal' }}>
+                      <tr key={score.playerId} style={{ borderBottom: '1px solid var(--kasure)', backgroundColor: isMe ? 'var(--washi-deep)' : 'transparent' }}>
                         <td style={{ padding: '10px 4px', fontSize: '16px' }}>{score.rank}位</td>
                         <td style={{ padding: '10px 4px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             {player && <img src={swordImageSource(player.swordData)} alt="" style={{ width: '30px', height: '30px', objectFit: 'contain' }} />}
-                            <span style={{ color: player ? PLAYER_COLORS[player.slotIndex] : '#666' }}>
+                            <span style={{ color: player ? PLAYER_COLORS[player.slotIndex] : 'var(--usuzumi)' }}>
                               {player ? `${player.slotIndex + 1}P ${isBoss ? "👑 " : ""}${player.swordData.name}` : score.playerId}
                               {isMe ? "（あなた）" : ""}{REASONS[score.eliminationReason] ?? ""}
                             </span>
@@ -169,21 +169,11 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
             {/* ボタン群 */}
             <div style={{ marginTop: '25px', display: 'flex', flexWrap: 'wrap', gap: '15px', width: '100%' }}>
               {!view.closed && (
-                <div className="ink-btn-container" style={{ flex: 1, minWidth: '150px' }}>
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button className="sharp-button" style={{ '--btn-color': '#4CAF50' }} onClick={onReturnToLobby}>
-                    ロビーに戻る
-                  </button>
-                </div>
+                <InkButton variant="shu" style={{ flex: 1, minWidth: '150px' }} onClick={onReturnToLobby}>ロビーに戻る</InkButton>
               )}
 
               {onFindNewOpponents && (
-                <div className="ink-btn-container" style={{ flexBasis: '100%' }}>
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button className="sharp-button" style={{ '--btn-color': '#d32f2f' }} onClick={onFindNewOpponents}>
-                    ⚡ 別の相手を探す
-                  </button>
-                </div>
+                <InkButton style={{ flexBasis: '100%' }} onClick={onFindNewOpponents}>別の相手を探す</InkButton>
               )}
             </div>
           </div>

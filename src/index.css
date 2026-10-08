@@ -1,25 +1,29 @@
+/* ===== デザイントークン =====
+   色やフォントはここに集める。画面側では var(--sumi) のように参照する。 */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  /* 色：和紙・墨・朱の3色が基本。金は「装備中」など特別な印だけに使う */
+  --washi: #efe9dc;       /* 和紙：背景 */
+  --washi-deep: #e4dccb;  /* 和紙の影：一段沈めた面 */
+  --sumi: #171412;        /* 墨：文字・線 */
+  --usuzumi: #6f675d;     /* 薄墨：補足の文字 */
+  --kasure: #a69d8f;      /* かすれ：無効状態・罫線 */
+  --shu: #b3261e;         /* 朱：主要操作・印 */
+  --kin: #9a7a2c;         /* 金 */
+  --kage: rgba(80, 62, 40, 0.40); /* 陰り：画面の外側に落とす影 */
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* 素材：墨の筆跡。mask に使って、色は background で塗る */
+  --sumi-stroke: url('/sumi_touka.png');
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
+  /* フォント */
+  --font-brush: 'Kurobara', serif;
+
+  /* レイアウト */
+  --page-width: 1126px;
+
+  font: 18px/145% var(--font-brush);
+  color-scheme: light;
+  color: var(--sumi);
+  background: var(--washi);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -30,63 +34,53 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
 @font-face {
   font-family: 'Kurobara';
   src: url('/kurobara-gothic-heavy.ttf') format('truetype');
   font-display: swap;
 }
 
-/* 基本設定 */
-body {
-  font-family: 'Kurobara', sans-serif; /* 全体に適用する場合 */
-}
-
+/* ===== 基本設定 ===== */
 body {
   margin: 0;
 }
 
+/* 和紙の陰り：画面の外側に向かって少しだけ暗くする。
+   画面に固定して敷くので、スクロールしても中央が明るいまま */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 50%, var(--kage) 100%);
+}
+
 #root {
-  width: 1126px;
+  width: var(--page-width);
   max-width: 100%;
   margin: 0 auto;
   text-align: center;
-  border-inline: 1px solid var(--border);
   min-height: 100svh;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
 }
 
+/* ボタンや入力欄はブラウザ既定だとシステムフォントになるので、周りの書体を継がせる */
+button,
+input {
+  font-family: inherit;
+}
+
 h1,
 h2 {
-  font-family: var(--heading);
   font-weight: 500;
-  color: var(--text-h);
+  color: var(--sumi);
 }
 
 h1 {
   font-size: 56px;
-  letter-spacing: -1.68px;
   margin: 32px 0;
   @media (max-width: 1024px) {
     font-size: 36px;
@@ -96,7 +90,6 @@ h1 {
 h2 {
   font-size: 24px;
   line-height: 118%;
-  letter-spacing: -0.24px;
   margin: 0 0 8px;
   @media (max-width: 1024px) {
     font-size: 20px;
@@ -105,18 +98,3 @@ h2 {
 p {
   margin: 0;
 }
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
-}
-

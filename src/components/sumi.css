@@ -1,0 +1,339 @@
+/* ===== 墨の共通部品 =====
+   どの画面でも使える見た目の部品。色は index.css の変数から取る。
+   .sumi-frame と .hanko は <SumiFilters /> のSVGフィルタを使う（App.jsx に設置済み）。 */
+
+/* --- 筆のかすれ線（区切り線） ---
+   <div className="brush-rule" />
+   色を変えるときは style={{ '--rule-color': 'var(--shu)' }} */
+.brush-rule {
+  height: 12px;
+  background: var(--rule-color, var(--sumi));
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+  opacity: 0.6;
+}
+
+/* --- 筆のバー（ステータス表示） ---
+   <span className="brush-bar" style={{ '--value': '70%' }} />
+   朱にするときは className="brush-bar brush-bar--shu" */
+.brush-bar {
+  --bar-color: var(--sumi);
+
+  position: relative;
+  display: block;
+  height: 18px;
+}
+
+.brush-bar--shu {
+  --bar-color: var(--shu);
+}
+
+.brush-bar::before,
+.brush-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+}
+
+/* 下地：最大値までの薄い筆跡 */
+.brush-bar::before {
+  background: var(--kasure);
+  opacity: 0.25;
+}
+
+/* 値の分だけ墨が走る */
+.brush-bar::after {
+  background: var(--bar-color);
+  clip-path: inset(0 calc(100% - var(--value, 0%)) 0 0);
+  animation: brush-bar-draw 0.9s cubic-bezier(0.1, 0.9, 0.2, 1) both;
+}
+
+@keyframes brush-bar-draw {
+  from { clip-path: inset(0 100% 0 0); }
+}
+
+/* --- 落款（状態を示す朱のハンコ） ---
+   <span className="hanko">備</span>
+   大きさ：hanko--sm / hanko--lg　色：hanko--kin（装備中など）
+   未確定の状態：hanko--ghost（点線の枠だけ）
+   押す演出：hanko--stamp を付けた瞬間に「ドン」と捺される */
+.hanko {
+  display: inline-grid;
+  place-items: center;
+  width: 1.9em;
+  height: 1.9em;
+  flex-shrink: 0;
+  font-family: var(--font-brush);
+  font-size: 18px;
+  line-height: 1;
+  color: var(--washi);
+  background: var(--shu);
+  filter: url(#sumi-hanko);
+  transform: rotate(-5deg);
+}
+
+/* 小さい落款は朱肉のムラを付けると字がつぶれるので、縁の揺れだけにする */
+.hanko--sm {
+  font-size: 15px;
+  filter: url(#sumi-rough);
+}
+.hanko--lg { font-size: 26px; }
+
+.hanko--kin {
+  background: var(--kin);
+}
+
+.hanko--ghost {
+  color: var(--kasure);
+  background: transparent;
+  outline: 2px dashed var(--kasure);
+  outline-offset: -3px;
+  filter: none;
+}
+
+.hanko--stamp {
+  animation: hanko-stamp 0.32s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+@keyframes hanko-stamp {
+  0%   { transform: rotate(-14deg) scale(2.2); opacity: 0; }
+  60%  { opacity: 1; }
+  100% { transform: rotate(-5deg) scale(1); opacity: 1; }
+}
+
+/* --- 墨枠（パネルの枠） ---
+   <div className="sumi-frame">…</div>
+   四辺の線だけを揺らす。線は角で少しはみ出す。中身の文字は揺れない。 */
+.sumi-frame {
+  position: relative;
+}
+
+.sumi-frame::before,
+.sumi-frame::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  filter: url(#sumi-rough);
+}
+
+.sumi-frame::before {
+  inset: 0 -6px;
+  border-top: 2px solid var(--sumi);
+  border-bottom: 2px solid var(--sumi);
+}
+
+.sumi-frame::after {
+  inset: -6px 0;
+  border-left: 2px solid var(--sumi);
+  border-right: 2px solid var(--sumi);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brush-bar::after,
+  .hanko--stamp {
+    animation: none;
+  }
+}
+
+/* --- 面（パネルの下地） ---
+   <div className="sumi-panel sumi-frame">…</div> のように墨枠と組み合わせて使う。
+   中は塗らず、背景の和紙と陰りをそのまま見せる */
+.sumi-panel {
+  position: relative;
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+/* --- 角ボタン（小さめの操作用） ---
+   <button className="sumi-btn">コピー</button>
+   大きく見せたい主要操作は <InkButton> を使う。
+   sumi-btn--sm：小さい　sumi-btn--shu：朱（破棄など注意が要る操作）
+   sumi-btn--on：切り替えがONの状態 */
+.sumi-btn {
+  font-family: var(--font-brush);
+  font-size: 16px;
+  letter-spacing: 0.05em;
+  padding: 10px 16px;
+  color: var(--sumi);
+  background: transparent;
+  border: 2px solid var(--sumi);
+  border-radius: 0;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.sumi-btn:hover:not(:disabled),
+.sumi-btn:focus-visible,
+.sumi-btn--on {
+  color: var(--washi);
+  background: var(--sumi);
+  outline: none;
+}
+
+.sumi-btn--sm {
+  font-size: 13px;
+  padding: 5px 10px;
+}
+
+.sumi-btn--shu {
+  color: var(--shu);
+  border-color: var(--shu);
+}
+
+.sumi-btn--shu:hover:not(:disabled),
+.sumi-btn--shu:focus-visible {
+  background: var(--shu);
+}
+
+.sumi-btn:disabled {
+  color: var(--kasure);
+  border-color: var(--kasure);
+  background: transparent;
+  cursor: not-allowed;
+}
+
+/* --- 入力欄：枠なし、墨の下線だけ --- */
+.sumi-input {
+  font-family: var(--font-brush);
+  font-size: 20px;
+  text-align: center;
+  padding: 8px 4px;
+  color: var(--sumi);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid var(--sumi);
+  border-radius: 0;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.sumi-input:focus {
+  border-bottom-color: var(--shu);
+}
+
+.sumi-input::placeholder {
+  color: var(--kasure);
+}
+
+/* --- ステータスの数字並び ---
+   <div className="sumi-stats"><span><small>HP</small>140</span>…</div> */
+.sumi-stats {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.sumi-stats small {
+  margin-right: 5px;
+  font-size: 0.72em;
+  color: var(--usuzumi);
+}
+
+/* --- 墨札ボタン（小さめの操作用・塗りつぶし） ---
+   <button className="fuda-btn">武器庫へ</button>
+   墨で塗りつぶし、右下の角を落とした札。乗せると朱になる。
+   fuda-btn--sm：小さい　fuda-btn--on：選択中（朱）　fuda-btn--off：選択されていない（薄い） */
+.fuda-btn {
+  font-family: var(--font-brush);
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  padding: 8px 18px 8px 14px;
+  color: var(--washi);
+  background: var(--sumi);
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.fuda-btn:hover:not(:disabled),
+.fuda-btn--on {
+  background: var(--shu);
+}
+
+.fuda-btn--off {
+  color: var(--usuzumi);
+  background: var(--washi-deep);
+}
+
+.fuda-btn--off:hover:not(:disabled) {
+  color: var(--washi);
+}
+
+.fuda-btn--sm {
+  font-size: 12px;
+  padding: 5px 13px 5px 9px;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%);
+}
+
+.fuda-btn:disabled {
+  color: var(--kasure);
+  background: var(--washi-deep);
+  cursor: not-allowed;
+}
+
+.fuda-btn--on:disabled {
+  color: var(--washi);
+  background: var(--shu);
+  cursor: default;
+}
+
+.fuda-btn:focus-visible,
+.brush-link:focus-visible {
+  outline: 2px solid var(--shu);
+  outline-offset: 2px;
+}
+
+/* --- 筆の下線ボタン（枠なしの控えめな操作用） ---
+   <button className="brush-link">退室する</button>
+   文字の下に筆の線。乗せると線が朱になって太くなる。筆跡は縦横比を保ったまま切り出す */
+.brush-link {
+  position: relative;
+  font-family: var(--font-brush);
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  padding: 5px 5px 13px;
+  color: var(--sumi);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.brush-link::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  bottom: 0;
+  height: 9px;
+  background: var(--sumi);
+  -webkit-mask: var(--sumi-stroke) center / cover no-repeat;
+          mask: var(--sumi-stroke) center / cover no-repeat;
+  transition: background-color 0.15s, height 0.15s;
+}
+
+.brush-link:hover:not(:disabled) {
+  color: var(--shu);
+}
+
+.brush-link:hover:not(:disabled)::after {
+  background: var(--shu);
+  height: 12px;
+}
+
+.brush-link:disabled {
+  color: var(--kasure);
+  cursor: not-allowed;
+}
+
+.brush-link:disabled::after {
+  background: var(--kasure);
+  height: 5px;
+}

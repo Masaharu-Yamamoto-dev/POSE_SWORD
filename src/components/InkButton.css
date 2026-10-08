@@ -1,0 +1,119 @@
+.ink-btn {
+  --ink-text: var(--sumi);   /* 通常時の文字色 */
+  --ink-stroke: var(--sumi); /* ホバー時に走る墨の色 */
+
+  position: relative;
+  display: block;
+  width: 100%;
+  z-index: 1; /* 重なりの基準 */
+}
+
+.ink-btn--shu {
+  --ink-text: var(--shu);
+  --ink-stroke: var(--shu);
+}
+
+.ink-btn--usuzumi {
+  --ink-text: var(--usuzumi);
+}
+
+/* 墨の筆跡。画像を型抜き（mask）に使い、色は --ink-stroke で塗る */
+.ink-btn__stroke {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 500px;  /* 墨の大きさを固定 */
+  height: 200px;
+  background: var(--ink-stroke);
+  -webkit-mask: var(--sumi-stroke) center / contain no-repeat;
+          mask: var(--sumi-stroke) center / contain no-repeat;
+
+  pointer-events: none;
+  clip-path: inset(0 100% 0 0); /* 初期状態は右から100%隠す */
+  transition: clip-path 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
+
+  /* ボタンの文字より奥に配置 */
+  z-index: -1;
+}
+
+.ink-btn__label {
+  position: relative;
+  z-index: 2; /* 墨より手前に配置 */
+  font-family: var(--font-brush);
+  font-size: 26px;
+  font-weight: bold;
+  background-color: transparent;
+  border: none;
+  outline: none;
+  color: var(--ink-text);
+
+  /* ホバー時の文字色変化をフワッとさせる */
+  transition: color 0.15s ease-out;
+
+  padding: 15px 20px;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+  width: 100%;
+  box-sizing: border-box;
+
+  white-space: nowrap;
+}
+
+/* ホバー時（キーボードで選んだ時も）に墨が左から右へ現れ、文字が和紙色に抜ける */
+.ink-btn:not(.is-disabled):hover .ink-btn__stroke,
+.ink-btn:not(.is-disabled):has(.ink-btn__label:focus-visible) .ink-btn__stroke {
+  clip-path: inset(0 0 0 0);
+}
+
+.ink-btn:not(.is-disabled):hover .ink-btn__label,
+.ink-btn:not(.is-disabled) .ink-btn__label:focus-visible {
+  color: var(--washi);
+}
+
+/* 押せないボタン */
+.ink-btn.is-disabled .ink-btn__label {
+  color: var(--kasure);
+  cursor: not-allowed;
+}
+
+/* fit：横に並べる・パネルの中に置くとき用。墨をボタンの幅に合わせ、文字も一回り小さくする。
+   墨は縦横比を保ったまま拡大縮小する（引き伸ばすと筆跡がつぶれて見えるため） */
+.ink-btn--fit .ink-btn__stroke {
+  width: 130%;
+  height: auto;
+  aspect-ratio: 628 / 342; /* sumi_touka.png の縦横比 */
+}
+
+.ink-btn--fit .ink-btn__label {
+  font-size: 20px;
+  padding: 12px 8px;
+}
+
+/* lit：墨を出したまま、文字を白抜きにして脈打たせる。乗せると墨色に変わる */
+.ink-btn--lit .ink-btn__stroke {
+  clip-path: inset(0 0 0 0);
+}
+
+.ink-btn--lit .ink-btn__label {
+  color: var(--washi);
+}
+
+.ink-btn--lit:hover {
+  --ink-stroke: var(--sumi);
+}
+
+.ink-btn--lit {
+  animation: ink-btn-pulse 1s ease-in-out infinite;
+}
+
+@keyframes ink-btn-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.07); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ink-btn--lit {
+    animation: none;
+  }
+}
