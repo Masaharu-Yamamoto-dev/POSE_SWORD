@@ -110,8 +110,9 @@ export class HostRoom {
     this.gameMode = gameMode;
     this.livesMode = livesMode;
     this.soloMode = soloMode;
-    // 1vs3 で誰がボスをやるか。ホストが指名するまで null で、その間は開始できない。
-    this.bossPlayerId = null;
+    // 1vs3 で誰がボスをやるか。1vs3 をONにした時点ではホスト（p0）で、ホストが指名し直せる。
+    // 1vs3 でないあいだは null。
+    this.bossPlayerId = soloMode ? 'p0' : null;
     this.phase = 'LOBBY';
     this.revision = 0;
     this.readyVersion = 0;
@@ -159,10 +160,12 @@ export class HostRoom {
   // Unity requires slots 0..n-1, so vacated seats close up while the room waits in the lobby.
   compactSlots() { this.players.sort((a, b) => a.slotIndex - b.slotIndex).forEach((p, i) => { p.slotIndex = i; }); }
 
+  // ルールの変更では準備完了を解除しない（ホストがルールを選び直すたびに全員がやり直しになるのを避けるため）。
+  // setGameMode / setLivesMode / setSoloMode のどれも同じ扱い。
   setGameMode(mode) {
     if (this.phase !== 'LOBBY' || !['0', '1'].includes(mode)) throw new Error('モードを変更できません。');
     this.gameMode = mode;
-    this.resetReady();
+    this.revision++;
   }
 
   // 残機モード：剣/独楽どちらとも組み合わせられる独立したON/OFFトグル
@@ -170,8 +173,8 @@ export class HostRoom {
     if (this.phase !== 'LOBBY' || typeof enabled !== 'boolean') throw new Error('モードを変更できません。');
     this.livesMode = enabled;
     // 1vs3 との併用は当面見送る。ボスの実効HPが「剣の本数 × 強化倍率」で膨らみ、調整が追えなくなるため。
-    if (enabled) this.soloMode = false;
-    this.resetReady();
+    if (enabled) { this.soloMode = false; this.bossPlayerId = null; }
+    this.revision++;
   }
 
   // 1vs3：剣/独楽どちらとも組み合わせられる独立したON/OFFトグル。ボスはホストが指名する。
@@ -179,7 +182,9 @@ export class HostRoom {
     if (this.phase !== 'LOBBY' || typeof enabled !== 'boolean') throw new Error('モードを変更できません。');
     this.soloMode = enabled;
     if (enabled) this.livesMode = false;
-    this.resetReady();
+    // ONにしたら、まずホストをボスにしておく（指名し忘れて開始できないのを避ける）。OFFにしたら指名も外す。
+    this.bossPlayerId = enabled ? (this.get(this.bossPlayerId) ? this.bossPlayerId : 'p0') : null;
+    this.revision++;
   }
 
   // ボスの指名。誰がボスかは戦い方に直結するが、ここでは準備完了を解除しない
@@ -193,9 +198,9 @@ export class HostRoom {
     this.revision++;
   }
 
-  // 指名した人が抜けたら指名も外す。残ったままだと誰もいない席を指したまま開始できなくなる。
+  // 指名した人が抜けたら、ボスをホストに戻す。残ったままだと誰もいない席を指したまま開始できなくなる。
   pruneBossPlayer() {
-    if (this.bossPlayerId && !this.get(this.bossPlayerId)) this.bossPlayerId = null;
+    if (this.bossPlayerId && !this.get(this.bossPlayerId)) this.bossPlayerId = this.soloMode ? 'p0' : null;
   }
 
   updateSword(playerId, sword) {

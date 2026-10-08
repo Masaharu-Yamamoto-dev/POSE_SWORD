@@ -7,6 +7,10 @@ export const FILL_TIMEOUT = 60000;
 // 通信が遅いと剣画像(ROSTER)の受信完了がAUTO_START_DELAYより遅れ、猶予が
 // 実質ゼロのまま開始してしまうことがあった。受信完了からも別途この分だけ待つ。
 export const ASSETS_READY_DELAY = 3000;
+// ロビーで剣を回す合図を、同じ人から受け付ける最短間隔。回転1回（0.6秒）より少し短くしてある。
+export const SPIN_INTERVAL = 500;
+// 自分の画面で次に回せるまでの時間。回転1回の長さと同じにして、回っている途中に重ねて回せないようにする。
+export const SPIN_DURATION = 600;
 // 剣画像は ROSTER でしか配らない。STATE は同じ形のまま imageStr だけを落とす。
 // 残機モードの swords[] は3本それぞれが画像を持つので、そこまで潜って削る。
 // ここを浅く削ると STATE 1通が数MBになり、心拍が詰まって接続が切れる。
@@ -66,11 +70,15 @@ export class RoomSession {
     this.gatheredAt = null;
     this.fullAt = null;
     this.readyAt = null;
+    // ロビーで誰かが剣を回した回数（playerId → 回数）。部屋の状態ではなく演出の合図なので、
+    // HostRoom には持たせず、revision も進めない。画面は回数が増えたのを見て剣を回す。
+    this.spins = {};
   }
 
   view() {
     return { room: this.room, localPlayerId: this.localPlayerId, isHost: this.isHost,
       result: this.result, resultPlayers: this.resultPlayers, sync: this.sync, closed: this.closed, error: this.error,
+      spins: this.spins,
       canStart: !this.closed && !!this.host?.canStart() &&
         [...this.links.values()].every(l => l.playerId && l.assetAck === this.assetVersion) };
   }
@@ -164,6 +172,14 @@ export class RoomSession {
       case 'RETURN':
         if (m.matchId === this.room.matchId && this.host.returnToLobby(link.playerId)) this.publish(); break;
       case 'LEAVE': this.disconnected(link); link.conn.close(); break;
+      case 'SPIN':
+        // 連打で全員の画面が回り続けないよう、同じ人からは回転1回分の間隔を空けて受ける。
+        // 回せるのは自分の剣だけ。誰の剣かはパケットの中身ではなく、送ってきた接続から決める。
+        if (this.now() - (link.lastSpin ?? -Infinity) < SPIN_INTERVAL || !this.markSpin(link.playerId)) break;
+        link.lastSpin = this.now();
+        // 送ってきた本人は自分の画面でもう回しているので、ほかの人にだけ配る。
+        for (const other of this.links.values()) if (other !== link && other.playerId) this.send(other, 'SPIN', { playerId: link.playerId });
+        this.notify(); break;
       case 'PING': this.send(link, 'PONG'); break;
       default: break; // Guests may not publish state, modes, sync or results.
     }
@@ -206,6 +222,7 @@ export class RoomSession {
         if (m.matchId !== this.room?.matchId) return;
         this.error = m.reason; this.initializing = null;
         this.command('StopMultiplayer', { matchId: m.matchId }); break;
+      case 'SPIN': if (!this.markSpin(m.playerId)) return; break;
       case 'PING': this.send(link, 'PONG'); break;
       case 'CLOSED': this.error = 'ホストが部屋を終了しました。'; this.close(false); return;
       default: break;
@@ -222,6 +239,20 @@ export class RoomSession {
     if (this.closed) return;
     if (this.isHost) { if (this.host.setReady('p0', ready)) this.publish(); }
     else this.sendToHost('READY', { ready, readyVersion: this.room?.readyVersion });
+  }
+  // ロビーで自分の剣を回す。全員の画面で同じ剣が回る。回っている途中は重ねて回せない。
+  spinSword() {
+    if (this.closed || this.now() - (this.lastSpin ?? -Infinity) < SPIN_DURATION || !this.markSpin(this.localPlayerId)) return;
+    this.lastSpin = this.now();
+    if (this.isHost) this.broadcast('SPIN', { playerId: this.localPlayerId });
+    else this.sendToHost('SPIN');
+    this.notify();
+  }
+  markSpin(playerId) {
+    if (this.room?.phase !== 'LOBBY' || typeof playerId !== 'string' ||
+        !this.room.players.some(p => p.playerId === playerId)) return false;
+    this.spins = { ...this.spins, [playerId]: (this.spins[playerId] ?? 0) + 1 };
+    return true;
   }
   setGameMode(mode) { if (!this.closed && this.isHost) { this.host.setGameMode(mode); this.publish(); } }
   setLivesMode(enabled) { if (!this.closed && this.isHost) { this.host.setLivesMode(enabled); this.publish(); } }

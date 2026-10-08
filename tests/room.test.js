@@ -198,11 +198,14 @@ test('leaving results releases the rematch barrier for the remaining players', (
   assert.equal(room.reserve('replacement'), true);
 });
 
-test('configuration changes invalidate all ready states and are locked during loading', () => {
+test('configuration changes keep ready states and are locked during loading', () => {
   const room = fullRoom();
-  room.setGameMode('1');
-  assert.ok(room.snapshot().players.every(p => !p.ready));
   for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  const version = room.snapshot().readyVersion;
+  room.setGameMode('1');
+  room.setLivesMode(true);
+  assert.ok(room.snapshot().players.every(p => p.ready), 'ルールを変えても準備完了は保たれる');
+  assert.equal(room.snapshot().readyVersion, version);
   room.prepare();
   assert.throws(() => room.setGameMode('0'));
   assert.throws(() => room.updateSword('p0', sword));
@@ -242,16 +245,21 @@ test('solo mode waits for a full room of four before it may start', () => {
   assert.equal(room.canStart(), true);
 });
 
-test('solo mode cannot start until the host names a boss', () => {
+test('solo mode starts with the host as boss and the host may name someone else', () => {
   const room = fullRoom();
+  assert.equal(room.snapshot().bossPlayerId, null, '1vs3 でないあいだは誰もボスではない');
   room.setSoloMode(true);
   for (const p of room.snapshot().players) room.setReady(p.playerId, true);
-  assert.equal(room.snapshot().bossPlayerId, null);
-  assert.equal(room.canStart(), false, '指名前は開始できない');
-  assert.throws(() => room.prepare());
+  assert.equal(room.snapshot().bossPlayerId, 'p0', 'ONにした時点ではホストがボス');
+  assert.equal(room.canStart(), true, '指名し直さなくても開始できる');
   room.setBossPlayer('p2');
   assert.equal(room.snapshot().bossPlayerId, 'p2');
   assert.equal(room.canStart(), true);
+  room.setSoloMode(false);
+  assert.equal(room.snapshot().bossPlayerId, null, 'OFFにしたら指名も外れる');
+  room.setSoloMode(true);
+  room.setLivesMode(true);
+  assert.equal(room.snapshot().bossPlayerId, null, '残機制に切り替えても指名は外れる');
 });
 
 test('naming a boss does not clear anyone\'s ready state', () => {
@@ -265,12 +273,12 @@ test('naming a boss does not clear anyone\'s ready state', () => {
   assert.equal(room.snapshot().readyVersion, version);
 });
 
-test('a boss who leaves is unnamed again so the room cannot start', () => {
+test('when the boss leaves the host becomes boss again, and the room waits for a fourth player', () => {
   const room = fullRoom();
   room.setSoloMode(true);
   room.setBossPlayer(room.playerForConnection('peer-2'));
   room.removeConnection('peer-2');
-  assert.equal(room.snapshot().bossPlayerId, null, '抜けた人の指名は外れる');
+  assert.equal(room.snapshot().bossPlayerId, 'p0', '抜けた人の指名は外れ、ホストに戻る');
   for (const p of room.snapshot().players) room.setReady(p.playerId, true);
   assert.equal(room.canStart(), false);
 });
@@ -297,12 +305,13 @@ test('a solo room that loses a player cannot start until the seat is filled agai
   assert.equal(room.canStart(), false);
 });
 
-test('solo mode is published to guests and clears ready like any other rule change', () => {
+test('solo mode is published to guests and keeps ready like any other rule change', () => {
   const room = fullRoom();
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
   assert.equal(room.snapshot().soloMode, false);
   room.setSoloMode(true);
   assert.equal(room.snapshot().soloMode, true);
-  assert.ok(room.snapshot().players.every(p => !p.ready), 'ルール変更で準備完了は解除される');
+  assert.ok(room.snapshot().players.every(p => p.ready), 'ルール変更では準備完了を解除しない');
 });
 
 test('solo mode and lives mode switch each other off instead of stacking', () => {

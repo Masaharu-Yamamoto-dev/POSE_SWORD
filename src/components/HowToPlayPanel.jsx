@@ -37,7 +37,7 @@ export default function HowToPlayPanel({ open, onClose }) {
 
   return (
     <div className="howto-overlay" onClick={handleClose}>
-      <div className="howto-panel glass" onClick={(e) => e.stopPropagation()}>
+      <div className="howto-panel" onClick={(e) => e.stopPropagation()}>
         <button className="howto-close" onClick={handleClose} aria-label="閉じる">×</button>
 
         <p className="howto-step">{page + 1} / {PAGES.length}</p>
@@ -59,7 +59,7 @@ export default function HowToPlayPanel({ open, onClose }) {
             onClick={() => setPage((p) => p - 1)}
             disabled={page === 0}
           >
-            ← 戻る
+            戻る
           </button>
           {isLast ? (
             <button className="howto-nav-btn howto-nav-btn--primary" onClick={handleClose}>
@@ -70,7 +70,7 @@ export default function HowToPlayPanel({ open, onClose }) {
               className="howto-nav-btn howto-nav-btn--primary"
               onClick={() => setPage((p) => p + 1)}
             >
-              次へ →
+              次へ
             </button>
           )}
         </div>

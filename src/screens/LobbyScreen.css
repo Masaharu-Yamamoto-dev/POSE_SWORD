@@ -1,0 +1,582 @@
+/* ===== 対戦ロビー =====
+   上に退室と題、中央にプレイヤーの縦列（席の数だけ）、下にルール・対戦開始・ロビーID。
+   列は箱で囲まず、上のプレイヤー色の線と薄い写真で一人分のまとまりを作る。
+   表示が切り替わっても配置が動かないよう、切り替わる部品は先に場所を確保している。 */
+.lobby {
+  position: relative;
+  width: 100%;
+  max-width: 1140px;
+  margin: 0 auto;
+  font-family: var(--font-brush);
+}
+
+.lobby-top {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.lobby-top > :first-child { justify-self: start; }
+
+.lobby-top h2 {
+  margin: 0;
+  font-size: 30px;
+  font-weight: normal;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+}
+
+.lobby-top .brush-link { font-size: 17px; }
+
+/* ---------- 縦列 ---------- */
+.lobby-cols {
+  display: grid;
+  grid-template-columns: repeat(var(--seats), minmax(0, 1fr));
+  gap: 62px 18px;
+  max-width: calc(var(--seats) * 290px);
+  margin: 62px auto 0; /* 上の余白は、線の上の名札と、大きくなったボスの剣のための場所 */
+}
+
+.lobby-col {
+  position: relative;
+  padding: 14px 10px 16px;
+}
+
+/* 列の上の線：プレイヤー色 */
+.lobby-col::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 7px;
+  background: var(--pc);
+  filter: url(#sumi-edge);
+}
+
+/* 列の下の線：準備完了のときだけ、その場で濃くなって現れる */
+.lobby-col::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  background: var(--pc);
+  filter: url(#sumi-edge);
+  opacity: 0;
+}
+
+.lobby-col.is-ready::after {
+  opacity: 1;
+  animation: lobby-appear 0.55s ease-out both;
+}
+
+@keyframes lobby-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 剣の後ろに、その人の写真の上のほうを大きく薄く敷く。列からはみ出した分は切り、下に向かって薄く消す */
+.lobby-col__photo {
+  position: absolute;
+  inset: 7px 0 0;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+          mask-image: linear-gradient(to bottom, #000 78%, transparent 100%);
+}
+
+.lobby-col__photo img {
+  position: absolute;
+  left: 50%;
+  top: 2%;
+  width: 165%;
+  max-width: none;
+  height: auto;
+  transform: translateX(-50%);
+  opacity: 0.14;
+  filter: grayscale(0.5);
+  transition: opacity 0.5s ease-out, filter 0.5s ease-out;
+}
+
+.lobby-col.is-ready .lobby-col__photo img {
+  opacity: 0.3;
+  filter: grayscale(0.15);
+}
+
+/* 名札：線の上に「何P」と剣の名前。ボスの剣が後ろを通るので、手前に出して縁をぼかす */
+.lobby-col__tag {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  bottom: 100%;
+  z-index: 4;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-shadow: 0 0 4px var(--washi), 0 0 4px var(--washi), 0 0 7px var(--washi);
+}
+
+.lobby-col__who {
+  flex-shrink: 0;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  color: var(--pc);
+}
+
+.lobby-col__who small {
+  margin-left: 6px;
+  font-size: 13px;
+  color: var(--usuzumi);
+}
+
+/* 自分の列：いつも左端。上の線を太くし、「あなた」を墨の札にする */
+.lobby-col.is-me::before {
+  top: -3px;
+  height: 12px;
+}
+
+.lobby-col.is-me .lobby-col__who small {
+  padding: 1px 7px;
+  color: var(--washi);
+  background: var(--sumi);
+  text-shadow: none;
+  vertical-align: 2px;
+}
+
+.lobby-col__name {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ボスの札と「ボスにする」：線の下の右上、同じ場所に出す */
+.lobby-col__boss {
+  position: absolute;
+  right: 2px;
+  top: 16px;
+  z-index: 3;
+}
+
+.lobby-bossmark {
+  display: inline-block;
+  padding: 2px 10px;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: var(--washi);
+  background: var(--kin);
+  transform: rotate(-3deg);
+  filter: url(#sumi-rough);
+}
+
+/* 舞台：中央に剣、左下にレーダーチャート、右下に準備の印 */
+.lobby-stage {
+  position: relative;
+  z-index: 1;
+  height: 262px;
+  margin-top: 6px;
+}
+
+/* 剣は足元を基点に立てる。ボスのときは上へ伸ばすだけで、周りの配置は動かさない */
+.lobby-sword {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  z-index: 1;
+  transform: translateX(-50%);
+  transform-origin: 50% 100%;
+  transition: transform 0.35s cubic-bezier(0.2, 1.3, 0.4, 1);
+}
+
+.lobby-col.is-boss .lobby-sword {
+  transform: translateX(-50%) scale(1.62);
+}
+
+/* ふわふわ浮かぶ動き（武器庫と同じ）。列ごとに開始をずらして、全員がそろって上下しないようにする */
+.lobby-sword__float {
+  animation: lobby-float 3s ease-in-out infinite;
+  animation-delay: calc(var(--seat, 0) * -0.8s);
+}
+
+@keyframes lobby-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.lobby-sword__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0;
+  background: none;
+  border: 0;
+  transform-origin: center;
+}
+
+/* 回せるのは自分の剣だけ */
+button.lobby-sword__body { cursor: pointer; }
+
+.lobby-sword__blade { height: 132px; width: auto; max-width: 170px; object-fit: contain; }
+.lobby-sword__hilt { height: 112px; width: auto; margin-top: -35px; object-fit: contain; }
+
+.lobby-sword__body.is-spinning {
+  animation: lobby-spin 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes lobby-spin {
+  to { transform: rotate(360deg); }
+}
+
+.lobby-radar {
+  position: absolute;
+  left: -8px;
+  bottom: 0;
+  z-index: 2;
+  width: 118px;
+  height: 100px;
+  overflow: visible;
+}
+
+.lobby-radar__axis { fill: none; stroke: var(--kasure); stroke-width: 1; }
+.lobby-radar__value { fill: var(--pc); fill-opacity: 0.22; stroke: var(--sumi); stroke-width: 2; }
+.lobby-radar text { font-family: var(--font-brush); font-size: 11px; fill: var(--usuzumi); }
+.lobby-radar tspan { font-size: 14px; fill: var(--sumi); }
+
+/* 準備の場所：全員同じ位置に印を出す。自分の列だけ、印の下に「準備完了／準備取消」が付く */
+.lobby-side {
+  position: absolute;
+  right: -4px;
+  bottom: 0;
+  z-index: 2;
+  width: 104px;
+  height: 108px;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  padding-top: 4px;
+}
+
+.lobby-side .brush-link {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+}
+
+.lobby-side__note {
+  align-self: center;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--usuzumi);
+}
+
+/* 準備の印：二行に組んだ角印。準備が済んでいないあいだは、同じ形の半透明の箱 */
+.lobby-seal {
+  display: inline-block;
+  padding: 6px 7px 5px;
+  font-size: 18px;
+  line-height: 1.08;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: pre-line;
+}
+
+.lobby-seal--done {
+  color: var(--washi);
+  background: var(--shu);
+  transform: rotate(-5deg);
+  filter: url(#sumi-rough);
+  animation: lobby-stamp 0.32s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+.lobby-seal--wait {
+  color: var(--kasure);
+  background: rgba(179, 38, 30, 0.07);
+  outline: 2px dashed var(--kasure);
+  outline-offset: -2px;
+  transform: rotate(-5deg);
+}
+
+@keyframes lobby-stamp {
+  0% { transform: rotate(-14deg) scale(2.2); opacity: 0; }
+  60% { opacity: 1; }
+  100% { transform: rotate(-5deg) scale(1); opacity: 1; }
+}
+
+/* 下段：墨の線の下に、番号つきの装備スロットと武器庫。線と箱の縁は筆で引いたように揺らす（中の画像は揺らさない） */
+.lobby-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 14px;
+}
+
+.lobby-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--usuzumi);
+  filter: url(#sumi-edge);
+}
+
+.lobby-col.is-ready .lobby-row::before {
+  top: -1px;
+  height: 4px;
+  background: var(--pc);
+  animation: lobby-appear 0.55s ease-out both;
+}
+
+.lobby-slots {
+  display: flex;
+  gap: 7px;
+}
+
+.lobby-slot {
+  position: relative;
+  width: 44px;
+  height: 50px;
+  padding: 6px 0 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-brush);
+  font-size: 8px;
+  letter-spacing: 0.02em;
+  color: var(--kasure);
+  background: none;
+  border: 0;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.lobby-slot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--kasure);
+  filter: url(#sumi-rough);
+  pointer-events: none;
+}
+
+.lobby-slot::before {
+  content: attr(data-n);
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--usuzumi);
+}
+
+.lobby-slot img { height: 38px; width: auto; max-width: 38px; object-fit: contain; pointer-events: none; }
+.lobby-slot.is-equipped::after { border: 3px solid var(--sumi); }
+.lobby-slot.is-equipped::before { color: var(--sumi); }
+.lobby-slot.is-empty::after { border: 2px dashed var(--kasure); }
+.lobby-slot.is-dim img { opacity: 0.5; }
+.lobby-slot.is-usable { cursor: pointer; }
+.lobby-slot.is-dragging { opacity: 0.4; }
+.lobby-slot.is-target { transform: scale(1.08); }
+.lobby-slot.is-target::after { border: 2px dashed var(--shu); }
+.lobby-slot:focus-visible { outline: 2px solid var(--shu); outline-offset: 2px; }
+
+/* 空席 */
+.lobby-col--empty {
+  display: grid;
+  place-items: center;
+  min-height: 380px;
+}
+
+.lobby-col--empty::before { background: var(--kasure); }
+.lobby-col--empty .lobby-col__who { color: var(--kasure); }
+
+.lobby-col__wait {
+  font-size: 15px;
+  letter-spacing: 0.3em;
+  color: var(--kasure);
+  writing-mode: vertical-rl;
+}
+
+/* ---------- 下の帯：左にルール、中央に対戦開始、右にロビーID ---------- */
+.lobby-bar {
+  position: relative;
+  margin-top: 8px;
+  padding-top: 18px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 16px;
+  align-items: center;
+}
+
+.lobby-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 4px;
+  background: var(--sumi);
+  filter: url(#sumi-edge);
+}
+
+.lobby-bar small {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--usuzumi);
+}
+
+.lobby-rule {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  text-align: left;
+}
+
+.lobby-rule__now { min-width: 9.5em; }
+.lobby-rule__now b { font-size: 18px; font-weight: normal; white-space: nowrap; }
+
+.lobby-mid {
+  min-width: 240px;
+  text-align: center;
+}
+
+.lobby-mid .ink-btn__label { font-size: 26px; padding: 14px 10px; }
+/* 文字が長い（「1 vs 3 で対戦開始」）と、筆跡の濃い部分からはみ出して白抜きが読めなくなるので、墨を一回り大きくする */
+.lobby-mid .ink-btn__stroke { width: 680px; height: 272px; }
+
+.lobby-mid__status {
+  position: relative;
+  z-index: 2; /* 対戦開始の墨が後ろを通るので、文字を手前に出す */
+  min-height: 1.75em;
+  font-size: 13px;
+  color: var(--usuzumi);
+}
+
+.lobby-id {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+}
+
+.lobby-id b { font-size: 26px; font-weight: normal; letter-spacing: 3px; line-height: 1.1; }
+.lobby-id b.is-random { font-size: 18px; letter-spacing: 0.06em; color: var(--shu); }
+
+.lobby-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.lobby-copy svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: square;
+}
+
+.lobby-error {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+/* ---------- ルール設定 ---------- */
+.lobby-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(23, 20, 18, 0.55);
+}
+
+.lobby-sheet {
+  width: min(520px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 22px 24px 20px;
+  text-align: left;
+  font-family: var(--font-brush);
+  background: var(--washi);
+  border-top: 6px solid var(--sumi);
+  border-bottom: 2px solid var(--sumi);
+  box-sizing: border-box;
+}
+
+.lobby-sheet h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: normal;
+  letter-spacing: 0.2em;
+  color: var(--usuzumi);
+}
+
+/* 名前は一行ずつ、説明は行数ぶんの高さを先に確保して、選び直しても下のボタンが動かないようにする */
+.lobby-sheet__name { font-size: 24px; line-height: 1.3; letter-spacing: 0.04em; white-space: nowrap; }
+.lobby-sheet__special { height: 1.3em; margin-top: 2px; font-size: 17px; line-height: 1.3; color: var(--shu); white-space: nowrap; }
+.lobby-sheet__special.is-none { color: var(--kasure); }
+.lobby-sheet__desc { margin-top: 12px; font-size: 14px; line-height: 1.7; letter-spacing: 0.04em; }
+.lobby-sheet__desc p { min-height: 1.7em; }
+.lobby-sheet__desc p + p { min-height: 3.4em; margin-top: 4px; color: var(--usuzumi); }
+
+.lobby-sheet__set {
+  margin-top: 14px;
+  padding-top: 6px;
+  border-top: 1px solid var(--kasure);
+}
+
+.lobby-sheet__group {
+  display: grid;
+  grid-template-columns: 5.5em 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.lobby-sheet__group > b { font-size: 14px; font-weight: normal; letter-spacing: 0.1em; color: var(--usuzumi); }
+.lobby-sheet__choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.lobby-sheet__choices .fuda-btn { min-width: 5.2em; text-align: center; }
+.lobby-sheet__note { min-height: 1.7em; font-size: 12px; color: var(--usuzumi); }
+.lobby-sheet__close { margin-top: 6px; }
+
+@media (max-width: 860px) {
+  .lobby-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 580px; }
+  .lobby-bar { grid-template-columns: 1fr; }
+  .lobby-id { justify-self: start; }
+  .lobby-top h2 { font-size: 22px; letter-spacing: 0.15em; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lobby-col.is-ready::after,
+  .lobby-col.is-ready .lobby-row::before,
+  .lobby-seal--done,
+  .lobby-sword__float,
+  .lobby-sword__body.is-spinning {
+    animation: none;
+  }
+  .lobby-sword { transition: none; }
+}

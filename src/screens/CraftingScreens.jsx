@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { styles } from '../styles';
 import { HILT_DATABASE } from './SwordListScreen';
+import InkButton from '../components/InkButton.jsx';
 
 // 🌟 共通：撮影画面と錬成中画面のサイズを完全に一致させるレスポンシブコンテナ
 const COMMON_CAMERA_STYLE = {
@@ -8,9 +9,10 @@ const COMMON_CAMERA_STYLE = {
   width: '100%', 
   maxWidth: '400px', 
   aspectRatio: '4/3', 
-  backgroundColor: '#111', 
+  backgroundColor: 'var(--sumi)', 
   marginBottom: '20px', 
-  borderRadius: '8px', 
+  border: '2px solid var(--sumi)',
+  boxSizing: 'border-box',
   display: 'flex', 
   justifyContent: 'center', 
   alignItems: 'center', 
@@ -44,36 +46,21 @@ export function NameInputScreen({ direction = "forward", userName, setUserName, 
     <div style={{ ...styles.container, overflowX: 'hidden' }} className={animClass}>
       <div style={styles.contentWrapper}>
         <h2>名前の入力</h2>
-        <p style={{ color: '#555', marginBottom: '20px' }}>あなたの名前を教えてください</p>
+        <p style={{ color: 'var(--usuzumi)', marginBottom: '20px' }}>あなたの名前を教えてください</p>
         <input
           type="text"
           value={userName}
           onChange={(e) => setUserName(e.target.value)}
           placeholder="名前を入力"
           maxLength={10}
-          style={styles.input}
+          className="sumi-input"
+          style={{ width: '100%', maxWidth: '250px' }}
         />
 
         <div style={{ marginTop: '30px', display: 'flex', gap: '4%', width: '100%', maxWidth: '400px' }}>
-          <div className="ink-btn-container" style={{ flex: 1 }}>
-            <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-            {}
-            <button className="sharp-button" onClick={handleCancel}>
-              キャンセル
-            </button>
-          </div>
+          <InkButton style={{ flex: 1 }} onClick={handleCancel}>キャンセル</InkButton>
 
-          <div className={`ink-btn-container ${!userName.trim() ? 'disabled' : ''}`} style={{ flex: 1 }}>
-            <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-            <button 
-              style={{ '--btn-color': '#4CAF50' }}
-              className="sharp-button"
-              onClick={() => setStep("CRAFT_POSE")}
-              disabled={!userName.trim()}
-            >
-              ポーズを撮影する
-            </button>
-          </div>
+          <InkButton variant="shu" style={{ flex: 1 }} onClick={() => setStep("CRAFT_POSE")} disabled={!userName.trim()}>ポーズを撮影する</InkButton>
         </div>
       </div>
     </div>
@@ -112,30 +99,16 @@ export function CraftPoseScreen({ direction = "forward", videoRef, canvasRef, ca
         <canvas ref={canvasRef} width="640" height="480" style={{ display: 'none' }} />
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px', margin: '0 auto' }}>
-          <div className={`ink-btn-container ${captureCountdown !== null ? 'disabled' : ''}`}>
-            <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-            <button 
-              className="sharp-button"
-              style={{ '--btn-color': '#ff9800' }}
-              onClick={startCaptureCountdown} 
-              disabled={captureCountdown !== null}
-            >
-              {captureCountdown !== null ? "ポーズをとれ！" : "撮影する！"}
-            </button>
-          </div>
+          <InkButton variant="shu" onClick={startCaptureCountdown} disabled={captureCountdown !== null}>{captureCountdown !== null ? "ポーズをとれ！" : "撮影する！"}</InkButton>
 
           {captureCountdown !== null && captureCountdown > 0 && (
             <div style={{ display: 'flex', justifyContent: 'center', margin: '-5px 0' }}>
               <button 
+                className="sumi-btn sumi-btn--sm sumi-btn--shu"
                 onClick={forceCapture}
-                style={{ 
-                  padding: '8px 24px', backgroundColor: '#e91e63', color: '#fff', 
-                  border: 'none', borderRadius: '25px', fontWeight: 'bold', fontSize: '14px',
-                  cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-                  animation: 'pulsePulse 1s infinite'
-                }}
+                style={{ animation: 'pulsePulse 1s infinite' }}
               >
-                ⏩ 今すぐ撮影！
+                今すぐ撮影！
               </button>
               <style>{`
                 @keyframes pulsePulse {
@@ -147,18 +120,7 @@ export function CraftPoseScreen({ direction = "forward", videoRef, canvasRef, ca
             </div>
           )}
 
-          <div className={`ink-btn-container ${captureCountdown !== null ? 'disabled' : ''}`}>
-            <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-            {}
-            <button 
-              className="sharp-button"
-              style={{ '--btn-color': '#666666' }}
-              onClick={handleBack}
-              disabled={captureCountdown !== null}
-            >
-              {captureCountdown !== null ? "" : "戻る"}
-            </button>
-          </div>
+          <InkButton variant="usuzumi" onClick={handleBack} disabled={captureCountdown !== null}>{captureCountdown !== null ? "" : "戻る"}</InkButton>
         </div>
       </div>
     </div>
@@ -172,7 +134,7 @@ export function CraftingApiScreen({ capturedImage }) {
   return (
     <div style={{ ...styles.container, overflowX: 'hidden' }}>
       <div style={styles.contentWrapper}>
-        <h2 style={{ fontFamily: "'Kurobara Gothic', sans-serif", letterSpacing: '0.1em', marginBottom: '20px' }}>錬成中...</h2>
+        <h2 style={{ fontFamily: "'Kurobara', serif", letterSpacing: '0.1em', marginBottom: '20px' }}>錬成中...</h2>
         
         {/* 🌟 撮影時と全く同じサイズの枠 */}
         <div style={COMMON_CAMERA_STYLE}>
@@ -183,7 +145,7 @@ export function CraftingApiScreen({ capturedImage }) {
 
         <div style={{ margin: '20px 0', fontSize: '60px', animation: 'spin 3s linear infinite' }}>⚙️</div>
         
-        <p style={{ marginTop: '50px', fontSize: '24px', fontWeight: 'bold', color: '#000', fontFamily: "'Kurobara Gothic', sans-serif", letterSpacing: '0.05em' }}>
+        <p style={{ marginTop: '50px', fontSize: '24px', color: 'var(--sumi)', fontFamily: "'Kurobara', serif", letterSpacing: '0.05em' }}>
           剣を錬成中...
         </p>
         
@@ -307,56 +269,31 @@ export function CraftCompleteScreen({ mySwordData, setStep, startNewCrafting, cr
             {/* 右側：文字・名前・ステータス・ボタン群 */}
             <div className="pop-in-anim" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '320px' }}>
               {/* 🌟 離すために margin-bottom を 35px に拡大 */}
-              <h1 style={{ fontSize: '48px', color: '#000', margin: '0 0 35px 0', letterSpacing: '0.05em', fontFamily: "'Kurobara Gothic', sans-serif" }}>
+              <h1 style={{ fontSize: '48px', color: 'var(--sumi)', margin: '0 0 35px 0', letterSpacing: '0.05em', fontFamily: "'Kurobara', serif" }}>
                 錬成完了！
               </h1>
               
               {mySwordData && (
                 <>
-                  <p style={{ ...styles.swordName, color: '#000', marginTop: '0', fontSize: '28px' }}>
+                  <p style={{ ...styles.swordName, color: 'var(--sumi)', marginTop: '0', fontSize: '28px' }}>
                     {mySwordData.name}
                   </p>
-                  <div style={{ ...styles.statsBox, marginBottom: '25px', width: '100%', fontSize: '18px' }}>
-                    HP:{mySwordData.hp} 攻撃:{mySwordData.attack} 重さ:{mySwordData.weight}
+                  <div className="sumi-stats" style={{ marginBottom: '25px', width: '100%', fontSize: '20px' }}>
+                    <span><small>HP</small>{mySwordData.hp}</span>
+                    <span><small>攻撃</small>{mySwordData.attack}</span>
+                    <span><small>重さ</small>{mySwordData.weight}</span>
                   </div>
                 </>
               )}
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '100%' }}>
                 
-                <div className="ink-btn-container">
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    style={{ '--btn-color': '#FF9800' }}
-                    onClick={onReturnTitle}
-                  >
-                    {craftReturnStep === "TITLE" ? "タイトルに戻って対戦！" : "ロビーに戻って対戦！"}
-                  </button>
-                </div>
+                <InkButton variant="shu" onClick={onReturnTitle}>{craftReturnStep === "TITLE" ? "タイトルに戻って対戦！" : "ロビーに戻って対戦！"}</InkButton>
 
-                <div className="ink-btn-container">
-                  <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                  <button 
-                    className="sharp-button"
-                    style={{ '--btn-color': '#4CAF50' }}
-                    onClick={onGoArmory}
-                  >
-                    武器庫へ進む
-                  </button>
-                </div>
+                <InkButton onClick={onGoArmory}>武器庫へ進む</InkButton>
 
                 {!isRecapture && swordListLength < 3 && (
-                  <div className="ink-btn-container">
-                    <img src="/sumi_touka.png" className="ink-hover-effect" alt="" />
-                    <button 
-                      className="sharp-button"
-                      style={{ '--btn-color': '#000' }}
-                      onClick={onCraftAnother}
-                    >
-                      もう1本錬成する
-                    </button>
-                  </div>
+                  <InkButton onClick={onCraftAnother}>もう1本錬成する</InkButton>
                 )}
 
               </div>

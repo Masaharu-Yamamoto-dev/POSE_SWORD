@@ -1,6 +1,7 @@
 // src/screens/SwordListScreen.jsx
 import React, { useState, useEffect } from 'react';
 import { styles } from '../styles';
+import InkButton from '../components/InkButton.jsx';
 
 // ==========================================
 // 📖 柄（ヒルト）のマスターデータ辞書
@@ -144,14 +145,14 @@ export default function SwordListScreen({
         (direction === "back" ? "page-enter-back" : "page-enter-forward");
 
   return (
-    <div className={animClass} style={{ ...styles.container, justifyContent: 'flex-start', paddingTop: '20px', backgroundColor: '#eef2f5' }}>
+    <div className={animClass} style={{ ...styles.container, justifyContent: 'flex-start', paddingTop: '20px' }}>
 
       {/* 👑 ヘッダー部分 */}
       <div style={{ width: '100%', maxWidth: '1000px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', marginBottom: '20px', boxSizing: 'border-box' }}>
-        <button style={{ padding: '10px 20px', backgroundColor: '#607d8b', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }} onClick={onCancel}>
+        <button className="sumi-btn" onClick={onCancel}>
           ◀ 戻る
         </button>
-        <h2 style={{ margin: 0, fontSize: '32px', color: '#333', letterSpacing: '2px' }}>武 器 庫</h2>
+        <h2 style={{ margin: 0, fontSize: '32px', color: 'var(--sumi)', letterSpacing: '2px' }}>武 器 庫</h2>
         <div style={{ width: '80px' }}></div>
       </div>
 
@@ -160,8 +161,8 @@ export default function SwordListScreen({
 
         {/* ======================= 行1：左上（プレビュー） ======================= */}
         {/* 高さを固定せず、右上のパネルと自動で高さが揃うようにしました */}
-        <div className="panel" style={{ minHeight: '280px', position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '30px', border: isEquipped ? '4px solid #4CAF50' : '2px solid transparent' }}>
-          {isEquipped && <div style={{ position: 'absolute', top: 10, left: 10, backgroundColor: '#4CAF50', color: 'white', padding: '5px 15px', fontWeight: 'bold', borderRadius: '5px' }}>★ 装備中</div>}
+        <div className="panel sumi-panel sumi-frame" style={{ minHeight: '280px', position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '30px' }}>
+          {isEquipped && <span key={selectedSword.id} className="hanko hanko--kin hanko--lg hanko--stamp" title="装備中" style={{ position: 'absolute', top: 14, left: 14 }}>装</span>}
 
           <div className="floating-sword" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
             <div
@@ -186,35 +187,35 @@ export default function SwordListScreen({
         </div>
 
         {/* ======================= 行1：右上（名前とステータス） ======================= */}
-        <div className="panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '15px', marginBottom: '15px' }}>
+        <div className="panel sumi-panel sumi-frame" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--kasure)', paddingBottom: '15px', marginBottom: '15px' }}>
             {isEditingName ? (
               <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
-                <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={15} style={{ flex: 1, padding: '10px', fontSize: '24px', fontWeight: 'bold', border: '2px solid #2196F3', borderRadius: '5px' }} />
-                <button onClick={handleNameSave} style={{ padding: '0 20px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}>保存</button>
+                <input type="text" className="sumi-input" value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={15} style={{ flex: 1, minWidth: 0, fontSize: '24px', textAlign: 'left' }} />
+                <button className="sumi-btn" onClick={handleNameSave}>保存</button>
               </div>
             ) : (
               <>
-                <h3 style={{ margin: 0, fontSize: '32px', color: '#000' }}>{selectedSword.name}</h3>
-                <button onClick={handleEditClick} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer' }}>✏️</button>
+                <h3 style={{ margin: 0, fontSize: '32px', color: 'var(--sumi)' }}>{selectedSword.name}</h3>
+                <button onClick={handleEditClick} className="sumi-btn sumi-btn--sm" style={{ flexShrink: 0 }}>編集</button>
               </>
             )}
           </div>
 
           <div>
-            <h4 style={{ margin: '0 0 15px 0', color: '#666' }}>総合ステータス</h4>
+            <h4 style={{ margin: '0 0 15px 0', color: 'var(--usuzumi)' }}>総合ステータス</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '18px', fontWeight: 'bold' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', backgroundColor: '#f5f5f5', padding: '10px 15px', borderRadius: '8px' }}>
-                <span style={{ color: '#d32f2f' }}>HP</span>
-                <span>{totalHp} <span style={{ fontSize: '14px', color: '#888', fontWeight: 'normal' }}>({selectedSword.hp} {currentHilt.hpBonus >= 0 ? `+${currentHilt.hpBonus}` : currentHilt.hpBonus})</span></span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 4px', borderBottom: '1px solid var(--kasure)' }}>
+                <span style={{ color: 'var(--usuzumi)' }}>HP</span>
+                <span>{totalHp} <span style={{ fontSize: '14px', color: 'var(--usuzumi)', fontWeight: 'normal' }}>({selectedSword.hp} {currentHilt.hpBonus >= 0 ? `+${currentHilt.hpBonus}` : currentHilt.hpBonus})</span></span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', backgroundColor: '#f5f5f5', padding: '10px 15px', borderRadius: '8px' }}>
-                <span style={{ color: '#f57c00' }}>攻撃力</span>
-                <span>{totalAttack} <span style={{ fontSize: '14px', color: '#888', fontWeight: 'normal' }}>({selectedSword.attack} {currentHilt.attackBonus >= 0 ? `+${currentHilt.attackBonus}` : currentHilt.attackBonus})</span></span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 4px', borderBottom: '1px solid var(--kasure)' }}>
+                <span style={{ color: 'var(--usuzumi)' }}>攻撃力</span>
+                <span>{totalAttack} <span style={{ fontSize: '14px', color: 'var(--usuzumi)', fontWeight: 'normal' }}>({selectedSword.attack} {currentHilt.attackBonus >= 0 ? `+${currentHilt.attackBonus}` : currentHilt.attackBonus})</span></span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', backgroundColor: '#f5f5f5', padding: '10px 15px', borderRadius: '8px' }}>
-                <span style={{ color: '#558b2f' }}>重さ</span>
-                <span>{totalWeight} <span style={{ fontSize: '14px', color: '#888', fontWeight: 'normal' }}>({selectedSword.weight} {currentHilt.weightBonus >= 0 ? `+${currentHilt.weightBonus}` : currentHilt.weightBonus})</span></span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 4px', borderBottom: '1px solid var(--kasure)' }}>
+                <span style={{ color: 'var(--usuzumi)' }}>重さ</span>
+                <span>{totalWeight} <span style={{ fontSize: '14px', color: 'var(--usuzumi)', fontWeight: 'normal' }}>({selectedSword.weight} {currentHilt.weightBonus >= 0 ? `+${currentHilt.weightBonus}` : currentHilt.weightBonus})</span></span>
               </div>
             </div>
           </div>
@@ -222,51 +223,44 @@ export default function SwordListScreen({
 
         {/* ======================= 行2：左下（アクションボタン） ======================= */}
         {/* 高さを自動で右下のパネルと同期させます */}
-        <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '10px', justifyContent: 'center' }}>
-          <button
-            style={{ padding: '15px', fontSize: '18px', fontWeight: 'bold', backgroundColor: isEquipped ? '#ccc' : '#2196F3', color: 'white', border: 'none', borderRadius: '8px', cursor: isEquipped ? 'default' : 'pointer' }}
-            onClick={() => equipSword(selectedSword)}
-            disabled={isEquipped}
-          >
-            {isEquipped ? "装備しています" : "⚔️ これを装備する"}
-          </button>
+        <div className="panel sumi-panel sumi-frame" style={{ display: 'flex', flexDirection: 'column', gap: '10px', justifyContent: 'center' }}>
+          <InkButton fit variant="shu" onClick={() => equipSword(selectedSword)} disabled={isEquipped}>
+            {isEquipped ? "装備しています" : "これを装備する"}
+          </InkButton>
           <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={() => toggleSwordFlip(selectedSword.id)} style={{ flex: 1, padding: '12px', backgroundColor: '#9C27B0', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>⇄ 左右反転</button>
-            <button onClick={() => onRecapture(selectedSword.id)} style={{ flex: 1, padding: '12px', backgroundColor: '#ff9800', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>📸 撮り直し</button>
+            <button className="sumi-btn" onClick={() => toggleSwordFlip(selectedSword.id)} style={{ flex: 1 }}>⇄ 左右反転</button>
+            <button className="sumi-btn" onClick={() => onRecapture(selectedSword.id)} style={{ flex: 1 }}>撮り直し</button>
           </div>
           <button
+            className="sumi-btn sumi-btn--shu"
             onClick={() => setIsDeleteModalOpen(true)}
             disabled={swordList.length === 1}
-            style={{ padding: '12px', backgroundColor: swordList.length === 1 ? '#e0e0e0' : '#f44336', color: swordList.length === 1 ? '#9e9e9e' : 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: swordList.length === 1 ? 'not-allowed' : 'pointer' }}
           >
-            🗑️ 破棄する
+            破棄する
           </button>
         </div>
 
         {/* ======================= 行2：右下（現在の柄と必殺技） ======================= */}
-        <div className="panel" style={{ borderLeft: '5px solid #2196F3', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div className="panel sumi-panel sumi-frame" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
               {/* 🌟 柄のプレビュー画像を追加 */}
-              <div style={{ width: '50px', height: '50px', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #ddd', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ width: '50px', height: '50px', border: '1px solid var(--kasure)', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
                 <img src={currentHilt.imageSrc} alt={currentHilt.name} style={{ width: '90%', height: 'auto', objectFit: 'contain' }} />
               </div>
               <div>
-                <span style={{ fontSize: '12px', color: '#666', display: 'block' }}>現在の柄</span>
-                <h4 style={{ margin: 0, fontSize: '24px', color: '#333' }}>{currentHilt.name}</h4>
+                <span style={{ fontSize: '12px', color: 'var(--usuzumi)', display: 'block' }}>現在の柄</span>
+                <h4 style={{ margin: 0, fontSize: '24px', color: 'var(--sumi)' }}>{currentHilt.name}</h4>
               </div>
             </div>
-            <button
-              onClick={() => setIsHiltModalOpen(true)}
-              style={{ /* ...既存のスタイル... */ }}
-            >
-              ⚙️ 柄を変更する
+            <button className="sumi-btn sumi-btn--sm" onClick={() => setIsHiltModalOpen(true)}>
+              柄を変更する
             </button>
           </div>
-          <div style={{ backgroundColor: '#e3f2fd', padding: '15px', borderRadius: '8px' }}>
-            <span style={{ fontSize: '12px', color: '#1976d2', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>⚔️ 必殺技</span>
+          <div style={{ backgroundColor: 'var(--washi-deep)', padding: '15px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--shu)', display: 'block', marginBottom: '5px' }}>必殺技</span>
             <div style={{ fontWeight: 'bold', fontSize: '18px', marginBottom: '5px' }}>{currentHilt.skillName}</div>
-            <div style={{ fontSize: '14px', color: '#555' }}>{currentHilt.skillDescription}</div>
+            <div style={{ fontSize: '14px', color: 'var(--usuzumi)' }}>{currentHilt.skillDescription}</div>
           </div>
         </div>
 
@@ -274,7 +268,7 @@ export default function SwordListScreen({
 
       {/* ======================= 画面下部：所持スロット ======================= */}
       <div style={{ width: '100%', maxWidth: '1000px', marginTop: '10px', padding: '20px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <p style={{ margin: '0 0 10px 0', fontWeight: 'bold', color: '#555', fontSize: '14px' }}>所持スロット ({swordList.length} / 3)</p>
+        <p style={{ margin: '0 0 10px 0', fontWeight: 'bold', color: 'var(--usuzumi)', fontSize: '14px' }}>所持スロット ({swordList.length} / 3)</p>
         <div style={{ display: 'flex', gap: '20px', justifyContent: 'center' }}>
           {[0, 1, 2].map(index => {
             const sword = swordList[index];
@@ -291,32 +285,24 @@ export default function SwordListScreen({
                     position: 'relative',
                     width: '80px',
                     height: '80px',
-                    backgroundColor: 'white',
-                    borderRadius: '10px',
-                    border: isSelectedSlot
-                      ? '3px solid #2196F3'
-                      : isEquippedSlot
-                        ? '3px solid #4CAF50'
-                        : '2px solid #ccc',
+                    border: isSelectedSlot ? '3px solid var(--sumi)' : '1px solid var(--kasure)',
                     cursor: 'pointer',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'center',
                     alignItems: 'center',
                     overflow: 'hidden',
-                    boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+                    boxSizing: 'border-box'
                   }}
                 >
                   {/* 左上に番号を表示 */}
-                  <span style={{ position: 'absolute', top: 3, left: 5, fontSize: '11px', fontWeight: 'bold', color: isEquippedSlot ? '#4CAF50' : '#888', zIndex: 10 }}>
+                  <span style={{ position: 'absolute', top: 3, left: 5, fontSize: '11px', fontWeight: 'bold', color: isEquippedSlot ? 'var(--sumi)' : 'var(--usuzumi)', zIndex: 10 }}>
                     {index + 1}
                   </span>
 
                   {/* 装備中バッジ */}
                   {isEquippedSlot && (
-                    <div style={{ position: 'absolute', top: -1, right: -1, backgroundColor: '#4CAF50', color: 'white', fontSize: '9px', fontWeight: 'bold', padding: '1px 5px', borderRadius: '0 6px 0 4px', zIndex: 12 }}>
-                      装備
-                    </div>
+                    <span className="hanko hanko--kin hanko--sm" title="装備中" style={{ position: 'absolute', top: 3, right: 3, fontSize: '12px', zIndex: 12 }}>装</span>
                   )}
 
                   {/* 🌟 剣（刃＋柄）の中央配置表示 */}
@@ -335,20 +321,19 @@ export default function SwordListScreen({
                     position: 'relative',
                     width: '80px',
                     height: '80px',
-                    backgroundColor: 'rgba(255,255,255,0.5)',
-                    borderRadius: '10px',
-                    border: '2px dashed #aaa',
+                    backgroundColor: 'transparent',
+                    border: '2px dashed var(--kasure)',
                     cursor: 'pointer',
                     display: 'flex',
                     justifyContent: 'center',
                     alignItems: 'center',
-                    color: '#888',
+                    color: 'var(--kasure)',
                     fontSize: '24px',
                     transition: '0.2s'
                   }}
                 >
                   {/* 空きスロットにも左上に番号を表示 */}
-                  <span style={{ position: 'absolute', top: 3, left: 5, fontSize: '11px', fontWeight: 'bold', color: '#aaa' }}>
+                  <span style={{ position: 'absolute', top: 3, left: 5, fontSize: '11px', fontWeight: 'bold', color: 'var(--kasure)' }}>
                     {index + 1}
                   </span>
                   ＋
@@ -361,24 +346,17 @@ export default function SwordListScreen({
 
       {/* ⚠️ 破棄確認モーダル */}
       {isDeleteModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 200 }}>
-          <div style={{ backgroundColor: '#fff', borderRadius: '15px', padding: '25px 30px', width: '90%', maxWidth: '420px', textAlign: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.4)' }}>
-            <div style={{ fontSize: '40px', marginBottom: '10px' }}>⚠️</div>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '22px', color: '#333' }}>剣を破棄しますか？</h3>
-            <p style={{ margin: '0 0 20px 0', fontSize: '14px', color: '#666', lineHeight: '1.5' }}>
-              「<strong style={{ color: '#d32f2f' }}>{selectedSword.name}</strong>」を破棄します。<br />この操作は取り消せません。
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(23, 20, 18, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 200 }}>
+          <div className="sumi-frame" style={{ backgroundColor: 'var(--washi)', padding: '25px 30px', width: '90%', maxWidth: '420px', textAlign: 'center', boxSizing: 'border-box' }}>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '22px', color: 'var(--sumi)' }}>剣を破棄しますか？</h3>
+            <p style={{ margin: '0 0 20px 0', fontSize: '14px', color: 'var(--usuzumi)', lineHeight: '1.5' }}>
+              「<strong style={{ color: 'var(--shu)' }}>{selectedSword.name}</strong>」を破棄します。<br />この操作は取り消せません。
             </p>
             <div style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
-              <button
-                onClick={() => setIsDeleteModalOpen(false)}
-                style={{ flex: 1, padding: '12px', backgroundColor: '#e0e0e0', color: '#333', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}
-              >
+              <button className="sumi-btn" onClick={() => setIsDeleteModalOpen(false)} style={{ flex: 1 }}>
                 キャンセル
               </button>
-              <button
-                onClick={ConfirmDeleteSword}
-                style={{ flex: 1, padding: '12px', backgroundColor: '#f44336', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}
-              >
+              <button className="sumi-btn sumi-btn--shu" onClick={ConfirmDeleteSword} style={{ flex: 1 }}>
                 破棄する
               </button>
             </div>
@@ -388,38 +366,39 @@ export default function SwordListScreen({
 
       {/* 🛡️ 柄の変更モーダル */}
       {isHiltModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 100 }}>
-          <div style={{ backgroundColor: '#fff', borderRadius: '15px', padding: '30px', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
-            <h2 style={{ margin: '0 0 20px 0', borderBottom: '2px solid #2196F3', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(23, 20, 18, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 100 }}>
+          <div className="sumi-frame" style={{ backgroundColor: 'var(--washi)', padding: '30px', boxSizing: 'border-box', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <h2 style={{ margin: '0 0 20px 0', borderBottom: '2px solid var(--sumi)', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
               <span>柄（つか）の変更</span>
-              <button onClick={() => setIsHiltModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#999' }}>✖</button>
+              <button onClick={() => setIsHiltModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--usuzumi)' }}>✖</button>
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', overflowY: 'auto', paddingRight: '10px' }}>
               {Object.entries(HILT_DATABASE).map(([hiltId, hiltData]) => {
                 const isCurrentlySet = (selectedSword.hiltType || "0") === hiltId;
                 return (
-                  <div key={hiltId} style={{ display: 'flex', border: isCurrentlySet ? '3px solid #4CAF50' : '1px solid #ccc', borderRadius: '10px', padding: '15px', alignItems: 'center', gap: '20px', backgroundColor: isCurrentlySet ? '#f1f8e9' : '#fff', transition: '0.2s' }}>
+                  <div key={hiltId} style={{ display: 'flex', border: isCurrentlySet ? '2px solid var(--sumi)' : '1px solid var(--kasure)', padding: '15px', alignItems: 'center', gap: '20px', backgroundColor: isCurrentlySet ? 'var(--washi-deep)' : 'transparent', transition: '0.2s' }}>
                     <div style={{ width: '60px', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
                       <img src={hiltData.imageSrc} alt={hiltData.name} style={{ width: '100%', height: 'auto', objectFit: 'contain' }} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <h4 style={{ margin: '0 0 5px 0', fontSize: '20px' }}>
                         {hiltData.name}
-                        {isCurrentlySet && <span style={{ marginLeft: '10px', fontSize: '12px', color: 'white', backgroundColor: '#4CAF50', padding: '2px 8px', borderRadius: '10px', verticalAlign: 'middle' }}>装着中</span>}
+                        {isCurrentlySet && <span className="hanko hanko--kin hanko--sm" title="装着中" style={{ marginLeft: '10px', verticalAlign: 'middle' }}>装</span>}
                       </h4>
-                      <div style={{ fontSize: '14px', color: '#666', marginBottom: '5px', fontWeight: 'bold' }}>
-                        <span style={{ color: '#d32f2f' }}>HP {hiltData.hpBonus > 0 ? `+${hiltData.hpBonus}` : hiltData.hpBonus}</span> |
-                        <span style={{ color: '#f57c00' }}> 攻 {hiltData.attackBonus > 0 ? `+${hiltData.attackBonus}` : hiltData.attackBonus}</span> |
-                        <span style={{ color: '#558b2f' }}> 重 {hiltData.weightBonus > 0 ? `+${hiltData.weightBonus}` : hiltData.weightBonus}</span>
+                      <div style={{ fontSize: '14px', color: 'var(--usuzumi)', marginBottom: '5px' }}>
+                        <span>HP {hiltData.hpBonus > 0 ? `+${hiltData.hpBonus}` : hiltData.hpBonus}</span> |
+                        <span> 攻 {hiltData.attackBonus > 0 ? `+${hiltData.attackBonus}` : hiltData.attackBonus}</span> |
+                        <span> 重 {hiltData.weightBonus > 0 ? `+${hiltData.weightBonus}` : hiltData.weightBonus}</span>
                       </div>
-                      <div style={{ fontSize: '12px', color: '#1976d2', fontWeight: 'bold', backgroundColor: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', display: 'inline-block' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--shu)', display: 'inline-block' }}>
                         技: {hiltData.skillName}
                       </div>
                     </div>
                     <button
+                      className="sumi-btn"
                       disabled={isCurrentlySet}
                       onClick={() => handleHiltChange(hiltId)}
-                      style={{ padding: '12px 20px', backgroundColor: isCurrentlySet ? '#ccc' : '#2196F3', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: isCurrentlySet ? 'default' : 'pointer', flexShrink: 0, fontSize: '16px' }}
+                      style={{ flexShrink: 0 }}
                     >
                       {isCurrentlySet ? "装着中" : "変更する"}
                     </button>
@@ -434,10 +413,7 @@ export default function SwordListScreen({
       {/* 🌀 アニメーションCSS */}
       <style>{`
         .panel {
-          background-color: #fff;
-          border-radius: 12px;
           padding: 20px;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.05);
           box-sizing: border-box;
         }
 

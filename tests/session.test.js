@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RoomSession } from '../src/network/RoomSession.js';
+import { AUTO_START_DELAY, FILL_TIMEOUT, RoomSession } from '../src/network/RoomSession.js';
 import { PROTOCOL_VERSION } from '../src/network/HostRoom.js';
 
 const sword = { name: '剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
@@ -197,13 +197,14 @@ test('an initialization failure cancels every participant before play', () => {
   for (const guest of s.guests) assert.equal(guest.view().room.phase, 'LOBBY');
 });
 
-test('a delayed ready message from before a mode change cannot ready the player again', () => {
+test('a ready message sent just before a mode change still counts', () => {
   const s = setup();
-  s.guests[0].setReady(true); // Queued on the old settings.
+  s.guests[0].setReady(true); // Queued before the host changes the rule.
   s.host.setGameMode('1');
   s.net.flush();
   const playerId = s.guests[0].view().localPlayerId;
-  assert.equal(s.host.view().room.players.find(p => p.playerId === playerId).ready, false);
+  // ルール変更では準備完了を解除しないので、行き違いになった準備完了もそのまま通る。
+  assert.equal(s.host.view().room.players.find(p => p.playerId === playerId).ready, true);
 });
 
 test('two players use the shared initialization barrier, spawns and rematch', () => {
@@ -250,9 +251,10 @@ test('an auto-start room begins on its own once every seat is taken', () => {
   const s = setup({ seatLimit: 2, autoStart: true }, 1);
   assert.equal(s.host.view().room.players.length, 2);
   s.host.pump(); s.net.flush();
-  assert.equal(s.host.view().room.startsInMs, 3000);
-  assert.equal(s.guests[0].view().room.startsInMs, 3000);
-  tick(s, 2);
+  // 待ち時間は RoomSession の定数をそのまま見る（値を調整してもテストを書き直さずに済むように）。
+  assert.equal(s.host.view().room.startsInMs, AUTO_START_DELAY);
+  assert.equal(s.guests[0].view().room.startsInMs, AUTO_START_DELAY);
+  tick(s, AUTO_START_DELAY / 1000 - 1);
   assert.equal(s.host.view().room.phase, 'LOBBY');
   tick(s, 1);
   assert.equal(s.host.view().room.phase, 'LOADING');
@@ -262,8 +264,8 @@ test('an auto-start room begins on its own once every seat is taken', () => {
 test('a four-seat auto room waits for the fill timeout, then starts short-handed', () => {
   const s = setup({ autoStart: true }, 1);
   s.host.pump(); s.net.flush();
-  assert.equal(s.host.view().room.startsInMs, 60000);
-  tick(s, 59);
+  assert.equal(s.host.view().room.startsInMs, FILL_TIMEOUT);
+  tick(s, FILL_TIMEOUT / 1000 - 1);
   assert.equal(s.host.view().room.phase, 'LOBBY');
   tick(s, 1);
   assert.equal(s.host.view().room.phase, 'LOADING');
@@ -273,11 +275,11 @@ test('a four-seat auto room waits for the fill timeout, then starts short-handed
 test('losing a player cancels the imminent start and waits again', () => {
   const s = setup({ autoStart: true }, 3);
   s.host.pump(); s.net.flush();
-  assert.equal(s.host.view().room.startsInMs, 3000);
+  assert.equal(s.host.view().room.startsInMs, AUTO_START_DELAY);
   s.links[0][0].close(); s.net.flush();
   s.host.pump(); s.net.flush();
-  assert.equal(s.host.view().room.startsInMs, 60000);
-  tick(s, 3);
+  assert.equal(s.host.view().room.startsInMs, FILL_TIMEOUT);
+  tick(s, AUTO_START_DELAY / 1000);
   assert.equal(s.host.view().room.phase, 'LOBBY');
   assert.equal(s.host.view().room.players.length, 3);
 });
@@ -285,7 +287,7 @@ test('losing a player cancels the imminent start and waits again', () => {
 test('an auto-start room falling below two players stops counting down', () => {
   const s = setup({ seatLimit: 2, autoStart: true }, 1);
   s.host.pump(); s.net.flush();
-  assert.equal(s.host.view().room.startsInMs, 3000);
+  assert.equal(s.host.view().room.startsInMs, AUTO_START_DELAY);
   s.links[0][0].close(); s.net.flush();
   s.host.pump(); s.net.flush();
   assert.equal(s.host.view().room.startsInMs, null);
@@ -340,7 +342,7 @@ function soloConfig(s) {
   return s.commands[0].find(c => c.method === 'InitializeMultiplayer').data;
 }
 
-// 1vs3 はホストがボスを指名しないと開始できない
+// 1vs3 のボスは既定でホスト。ほかの人をボスにするテストのために指名し直す
 function startSolo(s, bossId = 'p0') {
   s.host.setBossPlayer(bossId); s.net.flush();
   return start(s);
@@ -376,11 +378,13 @@ test('any seat may be named boss, including the host', () => {
   }
 });
 
-test('a match cannot be prepared before a boss is named', () => {
+test('a solo room can be prepared without naming anyone: the host is the boss', () => {
   const s = setup({ soloMode: true });
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
-  assert.equal(s.host.view().canStart, false);
-  assert.throws(() => s.host.prepare());
+  assert.equal(s.host.view().room.bossPlayerId, 'p0');
+  assert.equal(s.host.view().canStart, true);
+  s.host.prepare(); s.net.flush();
+  assert.equal(soloConfig(s).players.find(p => p.team === 0).playerId, 'p0');
 });
 
 test('the boss spawns apart from the trio and every seat is used once', () => {
@@ -448,4 +452,38 @@ test('unknown input actions are still discarded after adding suppress', () => {
   s.guests[0].unityEvent('INPUT', { matchId, action: 'STUN' }); s.net.flush();
   s.guests[0].unityEvent('INPUT', { matchId, action: 'PRIMARY', direction: 'UP' }); s.net.flush();
   assert.equal(s.commands[0].filter(c => c.method === 'ReceiveMultiplayerInput').length, 0);
+});
+
+test('spinning your own sword in the lobby reaches every screen once and is ignored outside the lobby', () => {
+  const s = setup();
+  const spins = session => session.view().spins;
+  const g0 = s.guests[0].view().localPlayerId;
+  // ゲストが自分の剣を回す：本人はすぐ、ホストとほかのゲストは合図を受けて1回ずつ回る。
+  s.guests[0].spinSword();
+  assert.equal(spins(s.guests[0])[g0], 1);
+  s.net.flush();
+  assert.equal(spins(s.host)[g0], 1);
+  assert.equal(spins(s.guests[1])[g0], 1);
+  assert.equal(spins(s.guests[0])[g0], 1, '回した本人に合図が戻って二重に回らない');
+  // 回っている途中の連打は、自分の画面でも重ねて回らない。
+  s.guests[0].spinSword(); s.net.flush();
+  assert.equal(spins(s.guests[0])[g0], 1);
+  assert.equal(spins(s.host)[g0], 1);
+  s.advance(1000);
+  s.guests[0].spinSword(); s.net.flush();
+  assert.equal(spins(s.guests[0])[g0], 2);
+  assert.equal(spins(s.host)[g0], 2);
+  // 回るのは送ってきた本人の剣だけ。パケットで他人を名指ししても、その人の剣は回らない。
+  s.advance(1000);
+  s.guests[0].sendToHost('SPIN', { playerId: 'p0' }); s.net.flush();
+  assert.equal(spins(s.host).p0, undefined);
+  assert.equal(spins(s.host)[g0], 3);
+  // ホストが回した分は全員に届く。
+  s.host.spinSword(); s.net.flush();
+  for (const guest of s.guests) assert.equal(spins(guest).p0, 1);
+  // 対戦が始まったら回せない。
+  s.advance(1000);
+  start(s);
+  s.host.spinSword(); s.net.flush();
+  assert.equal(spins(s.guests[1]).p0, 1);
 });

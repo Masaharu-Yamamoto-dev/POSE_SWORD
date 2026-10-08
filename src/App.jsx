@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import './App.css';
+import './components/sumi.css';
 import { styles } from './styles';
 
 import TitleScreen from './screens/TitleScreen';
@@ -10,6 +11,7 @@ import SwordListScreen, { HILT_DATABASE } from './screens/SwordListScreen';
 import MatchmakingScreen from './screens/MatchmakingScreen';
 import BattleArena from './components/BattleArena.jsx';
 import HowToPlayPanel from './components/HowToPlayPanel.jsx';
+import SumiFilters from './components/SumiFilters.jsx';
 import { useRoom } from './network/useRoom.js';
 import { useRandomMatch } from './network/useRandomMatch.js';
 import { useIceConfig } from './network/useIceConfig.js';
@@ -396,7 +398,7 @@ export default function PoseSwordWeb() {
       case "SWORD_LIST":
         return <SwordListScreen direction={transitionDir} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} deleteSword={deleteSword} startNewCrafting={startNewCrafting} startRecapture={startRecapture} updateSword={updateSword} cancelList={cancelList} toggleSwordFlip={toggleSwordFlip} />;
       case "LOBBY":
-        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} reorderSwords={reorderSwords} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onSoloMode={room.setSoloMode} onBossPlayer={room.setBossPlayer} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
+        return <LobbyScreen view={view} roomId={room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} reorderSwords={reorderSwords} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onSoloMode={room.setSoloMode} onBossPlayer={room.setBossPlayer} onSpin={() => room.spinSword()} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={room.error} />;
       case "RESULT":
         return <ResultScreen view={view} onReturnToLobby={room.returnToLobby} onLeave={handleLeave} onFindNewOpponents={view?.room?.autoStart ? findNewOpponents : null} />;
       default: return null;
@@ -404,8 +406,10 @@ export default function PoseSwordWeb() {
   };
 
   return (
-    <div style={{ fontFamily: 'sans-serif', textAlign: 'center', backgroundColor: '#f5f5f5', minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>
+    <div style={{ textAlign: 'center', minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>
       
+      <SumiFilters />
+
       {/* 撮影フラッシュ演出用のスタイル */}
       <style>{`
         @keyframes flashFade {
