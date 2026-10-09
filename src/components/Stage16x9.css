@@ -1,0 +1,13 @@
+.stage169 { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+/* 舞台そのもの。transform が掛かるので、中の position: fixed はウィンドウではなく舞台が基準になる。
+   文字の大きさはウィンドウ幅で変えない（狭いウィンドウでは舞台ごと縮むため） */
+.stage169__canvas {
+  --stage-vw: 12.8px;
+  --stage-vh: 7.2px;
+  position: relative;
+  flex: none;
+  width: 1280px;
+  height: 720px;
+  font-size: 18px;
+  line-height: 145%;
+}

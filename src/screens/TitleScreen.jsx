@@ -25,7 +25,8 @@ export default function TitleScreen({
   const animClass = direction === "back" ? "page-enter-back" : "page-enter-forward";
 
   return (
-    <div className={animClass} style={styles.container}>
+    // 中身はウィンドウの上下中央に置く（「遊び方」は画面の右上に固定なので動かない）
+    <div className={animClass} style={{ ...styles.container, justifyContent: 'center', minHeight: '100svh' }}>
       <button className="howto-open-btn" onClick={onOpenHowToPlay}>遊び方</button>
 
       {mySwordData?.imageSrc && (
@@ -33,7 +34,9 @@ export default function TitleScreen({
       )}
       
       <div style={styles.contentWrapper}>
-        <img src="/logo.png" alt="オレブレード" style={{ width: '90%', maxWidth: '800px', marginBottom: '40px', objectFit: 'contain' }} />
+        {/* ロゴはウィンドウの高さに合わせて先に縮める（下のボタンをできるだけ元の大きさで残す）。
+            480px はロゴ以外（ボタン・余白）が使う高さ */}
+        <img src="/logo.png" alt="オレブレード" style={{ width: '90%', maxWidth: '800px', maxHeight: 'max(120px, calc(100svh - 480px))', marginBottom: '40px', objectFit: 'contain' }} />
         
         {titleMode === "DEFAULT" ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', maxWidth: '300px' }}>
@@ -117,13 +120,14 @@ export default function TitleScreen({
           </div>
         )}
 
-        <div style={{ height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '30px', width: '90%' }}>
-          {systemMessage && (
+        {/* メッセージがあるときだけ場所を取る（空のまま高さを確保すると、画面に収まって見えるのに縦スクロールが出る） */}
+        {systemMessage && (
+          <div style={{ minHeight: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '30px', width: '90%' }}>
             <div style={{ ...styles.errorMessage, margin: '0', width: '100%', fontSize: 'clamp(12px, 3.5vw, 16px)' }}>
               {systemMessage}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

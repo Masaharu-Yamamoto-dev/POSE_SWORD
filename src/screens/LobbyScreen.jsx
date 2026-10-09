@@ -441,7 +441,8 @@ export default function LobbyScreen({
   };
 
   return (
-    <div className={animClass} style={{ ...styles.container, padding: '20px 16px' }}>
+    // この画面は16:9の舞台（Stage16x9）の中に出る。舞台の中央に置く
+    <div className={animClass} style={{ ...styles.container, padding: '20px 16px', justifyContent: 'center' }}>
       <div className="lobby">
 
         <div className="lobby-top">

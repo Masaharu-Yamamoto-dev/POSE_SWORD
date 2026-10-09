@@ -55,7 +55,9 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
     (phase === 'SLAM' || phase === 'UI') ? 'result-sword-slam' : '';
 
   return (
-    <div style={{ ...styles.container, overflowX: 'hidden', position: 'relative', backgroundColor: phase === 'INIT' ? '#000' : 'transparent', transition: 'background-color 0.5s' }}>
+    // この画面は16:9の舞台（Stage16x9）の中に出る。大きさは vw / vh ではなく舞台基準の --stage-vw / --stage-vh で決める。
+    // 開幕の暗転は box-shadow で舞台の外の余白まで広げる
+    <div style={{ ...styles.container, position: 'relative', justifyContent: 'center', backgroundColor: phase === 'INIT' ? '#000' : 'transparent', boxShadow: `0 0 0 5000px ${phase === 'INIT' ? '#000' : 'transparent'}`, transition: 'background-color 0.5s, box-shadow 0.5s' }}>
       
       {/* 🌟 背景の勝者の剣（画面いっぱいに収まるよう縦横比とサイズを調整） */}
       {winner && phase === 'UI' && (
@@ -68,8 +70,8 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
-            maxHeight: '85vh',
-            maxWidth: '85vw',
+            maxHeight: 'calc(85 * var(--stage-vh))',
+            maxWidth: 'calc(85 * var(--stage-vw))',
             width: 'auto',
             height: 'auto',
             objectFit: 'contain',
@@ -84,7 +86,7 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
         {/* ==========================================
             UIフェーズ（演出完了後）の2カラムレイアウト
         ========================================== */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '40px', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '40px', justifyContent: 'center', alignItems: 'center', minHeight: 'calc(60 * var(--stage-vh))' }}>
           
           {/* 左側：勝者の剣の表示エリア（SLAM以降に定位置につく） */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '300px' }}>
@@ -118,7 +120,7 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
           }}>
             
             <h2 style={{
-              fontSize: 'clamp(40px, 8vw, 60px)', margin: '0 0 20px 0', color: accent
+              fontSize: '60px', margin: '0 0 20px 0', color: accent
             }}>
               {headline}
             </h2>
@@ -128,7 +130,7 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
                 {result.draw ? "引き分け" : "最終結果"}
               </h3>
 
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'clamp(12px, 3vw, 15px)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '15px' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--sumi)', color: 'var(--usuzumi)', textAlign: 'left' }}>
                     <th style={{ padding: '8px 4px' }}>順位</th>
@@ -185,29 +187,29 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
         /* 🌟 1. 画面をズバッと横切る（個別イージングでヌルッと減速・スロー＆一気に画面外へ） */
         @keyframes swordSwipe {
           0% {
-            position: fixed; top: 40%; left: -50vw; transform: rotate(90deg) scale(1.8); zIndex: 1000;
+            position: fixed; top: 40%; left: calc(-50 * var(--stage-vw)); transform: rotate(90deg) scale(1.8); zIndex: 1000;
             animation-timing-function: cubic-bezier(0.1, 0.85, 0.25, 1);
           }
           40% {
-            position: fixed; top: 40%; left: 42vw; transform: rotate(90deg) scale(2.2); zIndex: 1000;
+            position: fixed; top: 40%; left: calc(42 * var(--stage-vw)); transform: rotate(90deg) scale(2.2); zIndex: 1000;
             animation-timing-function: ease-in-out;
           }
           60% {
-            position: fixed; top: 40%; left: 58vw; transform: rotate(90deg) scale(2.3); zIndex: 1000;
+            position: fixed; top: 40%; left: calc(58 * var(--stage-vw)); transform: rotate(90deg) scale(2.3); zIndex: 1000;
             animation-timing-function: cubic-bezier(0.75, 0, 0.9, 0.2);
           }
           100% {
-            position: fixed; top: 40%; left: 150vw; transform: rotate(90deg) scale(1.8); zIndex: 1000;
+            position: fixed; top: 40%; left: calc(150 * var(--stage-vw)); transform: rotate(90deg) scale(1.8); zIndex: 1000;
           }
         }
         
         /* 🌟 2. 画面内を回転しながら高速で右往左往 */
         @keyframes swordWander {
-          0% { position: fixed; top: -20vh; left: 80vw; transform: rotate(0deg) scale(1.5); zIndex: 1000; }
-          25% { position: fixed; top: 80vh; left: 20vw; transform: rotate(360deg) scale(1.5); zIndex: 1000; }
-          50% { position: fixed; top: 10vh; left: 50vw; transform: rotate(720deg) scale(1.5); zIndex: 1000; }
-          75% { position: fixed; top: 60vh; left: 80vw; transform: rotate(1080deg) scale(1.5); zIndex: 1000; }
-          100% { position: fixed; top: 40vh; left: -20vw; transform: rotate(1440deg) scale(1.5); zIndex: 1000; }
+          0% { position: fixed; top: calc(-20 * var(--stage-vh)); left: calc(80 * var(--stage-vw)); transform: rotate(0deg) scale(1.5); zIndex: 1000; }
+          25% { position: fixed; top: calc(80 * var(--stage-vh)); left: calc(20 * var(--stage-vw)); transform: rotate(360deg) scale(1.5); zIndex: 1000; }
+          50% { position: fixed; top: calc(10 * var(--stage-vh)); left: calc(50 * var(--stage-vw)); transform: rotate(720deg) scale(1.5); zIndex: 1000; }
+          75% { position: fixed; top: calc(60 * var(--stage-vh)); left: calc(80 * var(--stage-vw)); transform: rotate(1080deg) scale(1.5); zIndex: 1000; }
+          100% { position: fixed; top: calc(40 * var(--stage-vh)); left: calc(-20 * var(--stage-vw)); transform: rotate(1440deg) scale(1.5); zIndex: 1000; }
         }
 
         /* 3. 左側の定位置にドンッと着地 */
