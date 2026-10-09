@@ -476,7 +476,7 @@ export default function PoseSwordWeb() {
 
       {/* Unity側の描画 */}
       {room.hasArena && (
-        <div style={{ ...styles.unityContainer, display: screen === "PLAYING" ? 'flex' : 'none', margin: '0 auto' }}>
+        <div className="arena-stage" style={{ display: screen === "PLAYING" ? 'flex' : 'none' }}>
           <BattleArena bridge={room.bridge} view={view} onLoadFailed={room.reportLoadFailure} />
         </div>
       )}

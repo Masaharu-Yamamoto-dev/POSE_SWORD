@@ -10,7 +10,6 @@ export const styles = {
   
   bgImageCenter: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', height: '100vh', opacity: 0.15, pointerEvents: 'none', zIndex: 0 },
 
-  unityContainer: { width: '100%', maxWidth: '100vw', aspectRatio: '16 / 9', backgroundColor: 'var(--sumi)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '4px solid var(--sumi)', boxSizing: 'border-box' },
   errorMessage: { padding: '8px 12px', color: 'var(--shu)', borderBottom: '2px solid var(--shu)', boxSizing: 'border-box' }, // marginを削除しインラインで制御
   previewImage: { width: '100%', maxHeight: '200px', objectFit: 'contain', backgroundColor: 'var(--washi-deep)', marginBottom: '10px' },
   swordName: { fontSize: 'clamp(14px, 3.5vw, 20px)', margin: '5px 0' },

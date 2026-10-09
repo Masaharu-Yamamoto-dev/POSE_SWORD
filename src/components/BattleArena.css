@@ -1,3 +1,15 @@
-.mp-arena { position: relative; width: 100%; aspect-ratio: 16/9; max-width: 1400px; margin: 0 auto; background: #20252b; }
+/* 対戦画面の置き場：ウィンドウ全体を使い、中央に16:9の盤面を置く。
+   背景は塗らないので、余白には他の画面と同じ和紙の地と陰りがそのまま見える */
+.arena-stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+/* 盤面：幅と高さの両方に収まる最大の16:9。ウィンドウがどんな形でも全体が見える。
+   枠は box-shadow で外側に描く（border だと中のキャンバスが16:9からずれる） */
+.mp-arena {
+  position: relative;
+  width: min(100vw, calc(100vh * 16 / 9));
+  width: min(100vw, calc(100dvh * 16 / 9));
+  aspect-ratio: 16/9;
+  background: #20252b;
+  box-shadow: 0 0 0 4px var(--sumi);
+}
 .mp-status, .mp-loading { position: absolute; left: 10%; width: 80%; top: 45%; color: white; background: #000a; padding: 12px; box-sizing: border-box; pointer-events: none; text-align: center; font-weight: bold; }
 .mp-status { font-size: clamp(16px, 4vw, 40px); }
