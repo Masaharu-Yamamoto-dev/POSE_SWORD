@@ -1,0 +1,39 @@
+/* 画面全体にかぶせる。ルール設定の暗幕（200）より上、暗転・フラッシュ（9999）より下 */
+.rotate-notice {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  box-sizing: border-box;
+  /* 和紙の色を少しだけ透かして、下で動いている画面がうっすら見えるようにする */
+  background: rgba(239, 233, 220, 0.80);
+  font-family: var(--font-brush);
+  text-align: center;
+}
+
+/* 縦の端末が横へ倒れる絵 */
+.rotate-notice__phone {
+  width: 54px;
+  height: 92px;
+  margin-bottom: 26px;
+  border: 4px solid var(--sumi);
+  border-radius: 8px;
+  animation: rotateNoticeTurn 2.4s ease-in-out infinite;
+}
+
+.rotate-notice__text { font-size: 24px; color: var(--sumi); }
+.rotate-notice__sub { margin-bottom: 18px; font-size: 14px; color: var(--usuzumi); }
+
+@keyframes rotateNoticeTurn {
+  0%, 20% { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(-90deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotate-notice__phone { animation: none; transform: rotate(-90deg); }
+}

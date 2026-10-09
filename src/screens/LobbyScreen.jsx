@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { PLAYER_COLORS, styles, swordImageSource } from '../styles';
 import { MAX_PLAYERS, MIN_PLAYERS, SOLO_MODE_PLAYERS } from '../network/HostRoom';
-import { HILT_DATABASE } from './SwordListScreen';
+import { HILT_DATABASE } from './hiltDatabase.js';
 import InkButton from '../components/InkButton.jsx';
 import './LobbyScreen.css';
 
@@ -37,7 +37,7 @@ const SPECIAL_DESC = {
 // ==========================================
 // 上限は錬成で出る値の範囲（HP 100〜1000 / 攻・重 1〜100）。柄の補正で超えた分は外周で止める。
 const RADAR_MAX = { hp: 1000, attack: 100, weight: 100 };
-const RADAR_AXES = [[0, -1], [0.866, 0.5], [-0.866, 0.5]]; // 上：HP　右下：攻　左下：重
+const RADAR_AXES = [[0, -1], [0.866, 0.5], [-0.866, 0.5]]; // 上：HP 右下：攻 左下：重
 
 const RadarChart = ({ stats }) => {
   const cx = 59, cy = 56, radius = 34;
@@ -441,7 +441,8 @@ export default function LobbyScreen({
   };
 
   return (
-    <div className={animClass} style={{ ...styles.container, padding: '20px 16px' }}>
+    // この画面は16:9の舞台（Stage16x9）の中に出る。舞台の中央に置く
+    <div className={animClass} style={{ ...styles.container, padding: '20px 16px', justifyContent: 'center' }}>
       <div className="lobby">
 
         <div className="lobby-top">
@@ -478,7 +479,7 @@ export default function LobbyScreen({
               </InkButton>
             )}
             <p className="lobby-mid__status">
-              現在 {playerCount}人 ／ 最大 {seatLimit}人　{status}
+              現在 {playerCount}人 ／ 最大 {seatLimit}人{'\u3000'}{status}
             </p>
           </div>
 

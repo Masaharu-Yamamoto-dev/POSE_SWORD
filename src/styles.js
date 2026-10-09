@@ -5,7 +5,10 @@ export const swordImageSource = sword =>
   sword?.imageSrc ?? (sword?.imageStr?.startsWith('data:') ? sword.imageStr : `data:image/png;base64,${sword?.imageStr ?? ''}`);
 
 export const styles = {
-  container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%', fontFamily: 'Kurobara, serif', boxSizing: 'border-box', overflowX: 'hidden' },
+  // 各画面の外枠。横のはみ出しは clip で切る。
+  // ※ hidden にしないこと：hidden だと縦方向が自動的に「スクロール可能」になり、
+  //   背景の剣や筆跡が枠からはみ出しただけで、枠の内側にスクロールバーが出てしまう。
+  container: { padding: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', height: '100%', fontFamily: 'Kurobara, serif', boxSizing: 'border-box', overflowX: 'clip' },
   contentWrapper: { zIndex: 1, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' },
   
   bgImageCenter: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', height: '100vh', opacity: 0.15, pointerEvents: 'none', zIndex: 0 },

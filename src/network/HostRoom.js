@@ -67,7 +67,7 @@ export function validateSword(sword) {
     : 0;
 
   // 3. 3本分の配列（swords）の構築
-  let swords = [];
+  let swords;
   if (Array.isArray(sword.swords)) {
     swords = sword.swords.map(s => {
       if (!s) return { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: '0', isEmpty: true };

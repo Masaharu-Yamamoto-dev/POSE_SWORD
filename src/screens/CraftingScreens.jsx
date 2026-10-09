@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { styles } from '../styles';
-import { HILT_DATABASE } from './SwordListScreen';
+import { HILT_DATABASE } from './hiltDatabase.js';
 import InkButton from '../components/InkButton.jsx';
 
 // 🌟 共通：撮影画面と錬成中画面のサイズを完全に一致させるレスポンシブコンテナ
@@ -20,30 +20,22 @@ const COMMON_CAMERA_STYLE = {
   margin: '0 auto'
 };
 
+// 枠の縦横比をカメラ映像に合わせる（スマホの縦持ちでは縦長になる）。
+// 写る範囲と見えている範囲を一致させ、縦長でも画面の高さに収まる幅にする
+const cameraFrameStyle = (aspect = 4 / 3) => ({
+  ...COMMON_CAMERA_STYLE,
+  aspectRatio: String(aspect),
+  width: `min(100%, calc(55vh * ${aspect.toFixed(4)}))`,
+});
+
 // ==========================================
 // 1. 名前入力画面
 // ==========================================
 export function NameInputScreen({ direction = "forward", userName, setUserName, setStep, handleCancel }) {
-  const [transition, setTransition] = useState("enter");
-
-  const onCancel = () => {
-    if (transition !== "enter") return;
-    setTransition("exit-back");
-    setTimeout(handleCancel, 300);
-  };
-
-  const onNext = () => {
-    if (transition !== "enter" || !userName.trim()) return;
-    setTransition("exit-forward");
-    setTimeout(() => setStep("CRAFT_POSE"), 300);
-  };
-
-  const animClass = transition === "exit-back" ? "page-exit-back" :
-                    transition === "exit-forward" ? "page-exit-forward" : 
-                    (direction === "back" ? "page-enter-back" : "page-enter-forward");
+  const animClass = direction === "back" ? "page-enter-back" : "page-enter-forward";
 
   return (
-    <div style={{ ...styles.container, overflowX: 'hidden' }} className={animClass}>
+    <div style={styles.container} className={animClass}>
       <div style={styles.contentWrapper}>
         <h2>名前の入力</h2>
         <p style={{ color: 'var(--usuzumi)', marginBottom: '20px' }}>あなたの名前を教えてください</p>
@@ -57,10 +49,11 @@ export function NameInputScreen({ direction = "forward", userName, setUserName, 
           style={{ width: '100%', maxWidth: '250px' }}
         />
 
-        <div style={{ marginTop: '30px', display: 'flex', gap: '4%', width: '100%', maxWidth: '400px' }}>
-          <InkButton style={{ flex: 1 }} onClick={handleCancel}>キャンセル</InkButton>
+        {/* ほかの画面と同じ縦並び：主役のボタンを上、やめる操作を下に置く */}
+        <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', maxWidth: '300px' }}>
+          <InkButton variant="shu" onClick={() => setStep("CRAFT_POSE")} disabled={!userName.trim()}>ポーズを撮影する</InkButton>
 
-          <InkButton variant="shu" style={{ flex: 1 }} onClick={() => setStep("CRAFT_POSE")} disabled={!userName.trim()}>ポーズを撮影する</InkButton>
+          <InkButton variant="usuzumi" onClick={handleCancel}>キャンセル</InkButton>
         </div>
       </div>
     </div>
@@ -70,26 +63,15 @@ export function NameInputScreen({ direction = "forward", userName, setUserName, 
 // ==========================================
 // 2. 姿勢撮影画面
 // ==========================================
-export function CraftPoseScreen({ direction = "forward", videoRef, canvasRef, captureCountdown, startCaptureCountdown, forceCapture, handleBack }) {
-  const [transition, setTransition] = useState("enter");
-
-  const onBack = () => {
-    if (transition !== "enter") return;
-    setTransition("exit-back");
-    setTimeout(handleBack, 300);
-  };
-
-  const animClass = transition === "exit-back" ? "page-exit-back" : 
-                    (direction === "back" ? "page-enter-back" : "page-enter-forward");
-
+export function CraftPoseScreen({ camera, videoRef, canvasRef, captureCountdown, startCaptureCountdown, forceCapture, handleBack }) {
   return (
     <div style={styles.container}>
       <div style={styles.contentWrapper}>
         <h2>ポーズ撮影</h2>
         
         {/* 🌟 共通サイズコンテナを適用 */}
-        <div style={COMMON_CAMERA_STYLE}>
-          <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
+        <div style={cameraFrameStyle(camera.aspect)}>
+          <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: camera.mirrored ? 'scaleX(-1)' : 'none' }} />
           {captureCountdown !== null && (
             <div style={styles.countdownOverlay}>
               {captureCountdown > 0 ? captureCountdown : "📸"}
@@ -97,7 +79,30 @@ export function CraftPoseScreen({ direction = "forward", videoRef, canvasRef, ca
           )}
         </div>
         <canvas ref={canvasRef} width="640" height="480" style={{ display: 'none' }} />
-        
+
+        {/* カメラの操作：どの端末でも両方出し、使えない機能は押せない状態にする
+            （ズームできないカメラ・カメラが1台だけの端末）。
+            カウントダウン中は隠す。場所は取ったままにして、下のボタンが動かないようにする */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '100%', maxWidth: '400px', margin: '12px auto 15px', visibility: captureCountdown !== null ? 'hidden' : 'visible' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', fontSize: '14px', color: 'var(--usuzumi)', opacity: camera.zoom ? 1 : 0.5 }}>
+            <span>引き</span>
+            <input
+              type="range"
+              aria-label="ズーム"
+              min={camera.zoom?.min ?? 1}
+              max={camera.zoom?.max ?? 2}
+              step={camera.zoom?.step ?? 0.1}
+              value={camera.zoom?.value ?? 1}
+              onChange={(e) => camera.changeZoom(Number(e.target.value))}
+              disabled={!camera.zoom}
+              style={{ flex: 1, accentColor: 'var(--shu)' }}
+            />
+            <span>寄り</span>
+          </label>
+          <button className="sumi-btn sumi-btn--sm" onClick={camera.switchCamera} disabled={!camera.canSwitch}>カメラを切り替える</button>
+          {camera.label && <p style={{ fontSize: '12px', color: 'var(--usuzumi)' }}>{camera.label}</p>}
+        </div>
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px', margin: '0 auto' }}>
           <InkButton variant="shu" onClick={startCaptureCountdown} disabled={captureCountdown !== null}>{captureCountdown !== null ? "ポーズをとれ！" : "撮影する！"}</InkButton>
 
@@ -130,14 +135,14 @@ export function CraftPoseScreen({ direction = "forward", videoRef, canvasRef, ca
 // ==========================================
 // 3. 錬成中画面
 // ==========================================
-export function CraftingApiScreen({ capturedImage }) {
+export function CraftingApiScreen({ capturedImage, aspect }) {
   return (
-    <div style={{ ...styles.container, overflowX: 'hidden' }}>
+    <div style={styles.container}>
       <div style={styles.contentWrapper}>
         <h2 style={{ fontFamily: "'Kurobara', serif", letterSpacing: '0.1em', marginBottom: '20px' }}>錬成中...</h2>
         
         {/* 🌟 撮影時と全く同じサイズの枠 */}
-        <div style={COMMON_CAMERA_STYLE}>
+        <div style={cameraFrameStyle(aspect)}>
           {capturedImage && (
             <img src={capturedImage} alt="Captured Pose" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           )}
@@ -203,7 +208,7 @@ export function CraftCompleteScreen({ mySwordData, setStep, startNewCrafting, cr
   const exitClass = transition === "exit-back" ? "page-exit-back" : transition === "exit-forward" ? "page-exit-forward" : "";
 
   return (
-    <div style={{ ...styles.container, overflowX: 'hidden' }} className={exitClass}>
+    <div style={styles.container} className={exitClass}>
       <div style={{ ...styles.contentWrapper, maxWidth: '900px' }}>
         
         {/* 🌟 衝突の瞬間の短い白フラッシュ */}
