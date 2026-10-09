@@ -1,5 +1,4 @@
 // src/screens/TitleScreen.jsx
-import React from 'react';
 import { styles } from '../styles';
 import InkButton from '../components/InkButton.jsx';
 

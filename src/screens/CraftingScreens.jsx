@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { styles } from '../styles';
-import { HILT_DATABASE } from './SwordListScreen';
+import { HILT_DATABASE } from './hiltDatabase.js';
 import InkButton from '../components/InkButton.jsx';
 
 // 🌟 共通：撮影画面と錬成中画面のサイズを完全に一致させるレスポンシブコンテナ
@@ -24,23 +24,7 @@ const COMMON_CAMERA_STYLE = {
 // 1. 名前入力画面
 // ==========================================
 export function NameInputScreen({ direction = "forward", userName, setUserName, setStep, handleCancel }) {
-  const [transition, setTransition] = useState("enter");
-
-  const onCancel = () => {
-    if (transition !== "enter") return;
-    setTransition("exit-back");
-    setTimeout(handleCancel, 300);
-  };
-
-  const onNext = () => {
-    if (transition !== "enter" || !userName.trim()) return;
-    setTransition("exit-forward");
-    setTimeout(() => setStep("CRAFT_POSE"), 300);
-  };
-
-  const animClass = transition === "exit-back" ? "page-exit-back" :
-                    transition === "exit-forward" ? "page-exit-forward" : 
-                    (direction === "back" ? "page-enter-back" : "page-enter-forward");
+  const animClass = direction === "back" ? "page-enter-back" : "page-enter-forward";
 
   return (
     <div style={{ ...styles.container, overflowX: 'hidden' }} className={animClass}>
@@ -70,18 +54,7 @@ export function NameInputScreen({ direction = "forward", userName, setUserName, 
 // ==========================================
 // 2. 姿勢撮影画面
 // ==========================================
-export function CraftPoseScreen({ direction = "forward", videoRef, canvasRef, captureCountdown, startCaptureCountdown, forceCapture, handleBack }) {
-  const [transition, setTransition] = useState("enter");
-
-  const onBack = () => {
-    if (transition !== "enter") return;
-    setTransition("exit-back");
-    setTimeout(handleBack, 300);
-  };
-
-  const animClass = transition === "exit-back" ? "page-exit-back" : 
-                    (direction === "back" ? "page-enter-back" : "page-enter-forward");
-
+export function CraftPoseScreen({ videoRef, canvasRef, captureCountdown, startCaptureCountdown, forceCapture, handleBack }) {
   return (
     <div style={styles.container}>
       <div style={styles.contentWrapper}>

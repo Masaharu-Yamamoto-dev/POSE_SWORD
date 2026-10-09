@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useEffectEvent, useCallback } from 'react';
 import './App.css';
 import './components/sumi.css';
 import { styles } from './styles';
@@ -7,7 +7,8 @@ import TitleScreen from './screens/TitleScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import ResultScreen from './screens/ResultScreen';
 import { NameInputScreen, CraftPoseScreen, CraftingApiScreen, CraftCompleteScreen } from './screens/CraftingScreens';
-import SwordListScreen, { HILT_DATABASE } from './screens/SwordListScreen';
+import SwordListScreen from './screens/SwordListScreen';
+import { HILT_DATABASE } from './screens/hiltDatabase.js';
 import MatchmakingScreen from './screens/MatchmakingScreen';
 import BattleArena from './components/BattleArena.jsx';
 import HowToPlayPanel from './components/HowToPlayPanel.jsx';
@@ -174,13 +175,14 @@ export default function PoseSwordWeb() {
 
   // ▼【復元】決着演出(2.5秒)を見せるためのディレイ
   const resultMatchId = view?.result?.matchId ?? null;
-  const [resultDelayDone, setResultDelayDone] = useState(false);
+  // 「どの試合の演出待ちが済んだか」を覚える。次の試合では試合IDが変わるので、自動的に未完了へ戻る
+  const [delayDoneMatchId, setDelayDoneMatchId] = useState(null);
   useEffect(() => {
-    if (!resultMatchId) { setResultDelayDone(false); return; }
-    setResultDelayDone(false);
-    const timer = setTimeout(() => setResultDelayDone(true), 2500);
+    if (!resultMatchId) return;
+    const timer = setTimeout(() => setDelayDoneMatchId(resultMatchId), 2500);
     return () => clearTimeout(timer);
   }, [resultMatchId]);
+  const resultDelayDone = resultMatchId !== null && delayDoneMatchId === resultMatchId;
 
   const roomScreen = (() => {
     if (!view?.room || view.closed) return null;
@@ -213,18 +215,6 @@ export default function PoseSwordWeb() {
     }
     return () => { if (stream) stream.getTracks().forEach(track => track.stop()); };
   }, [step]);
-
-  useEffect(() => {
-    if (captureCountdown !== null) {
-      if (captureCountdown > 0) {
-        const timer = setTimeout(() => setCaptureCountdown(captureCountdown - 1), 1000);
-        return () => clearTimeout(timer);
-      } else {
-        setCaptureCountdown(null);
-        executeCaptureAndCraft();
-      }
-    }
-  }, [captureCountdown]);
 
   const equipSword = (sword) => setMySwordData(sword);
   const reorderSwords = (newList) => setSwordList(newList);
@@ -414,6 +404,19 @@ export default function PoseSwordWeb() {
     }, 50);
   };
 
+  // カウントダウンを打ち切って撮影する。数え終わった時と「今すぐ撮影！」の両方から呼ぶ
+  const captureNow = () => { setCaptureCountdown(null); executeCaptureAndCraft(); };
+  const onCountdownEnd = useEffectEvent(captureNow);
+
+  useEffect(() => {
+    if (captureCountdown === null) return;
+    const timer = setTimeout(() => {
+      if (captureCountdown > 1) setCaptureCountdown(captureCountdown - 1);
+      else onCountdownEnd();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [captureCountdown]);
+
   const handleCancelCrafting = () => {
     setUserName(""); setCraftingTargetId(null);
     setTransitionDir("back");
@@ -439,7 +442,7 @@ export default function PoseSwordWeb() {
       case "NAME_INPUT":
         return <NameInputScreen direction={transitionDir} userName={userName} setUserName={setUserName} mySwordData={mySwordData} setMySwordData={setMySwordData} setStep={setStep} handleCancel={handleCancelCrafting} />;
       case "CRAFT_POSE":
-        return <CraftPoseScreen direction={transitionDir} videoRef={videoRef} canvasRef={canvasRef} captureCountdown={captureCountdown} startCaptureCountdown={startCaptureCountdown} forceCapture={() => setCaptureCountdown(0)} handleBack={handleBackFromPose} />;
+        return <CraftPoseScreen videoRef={videoRef} canvasRef={canvasRef} captureCountdown={captureCountdown} startCaptureCountdown={startCaptureCountdown} forceCapture={captureNow} handleBack={handleBackFromPose} />;
       case "CRAFTING_API":
         return <CraftingApiScreen capturedImage={capturedImage} />;
       case "CRAFT_COMPLETE":

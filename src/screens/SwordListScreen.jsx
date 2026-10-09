@@ -1,56 +1,17 @@
 // src/screens/SwordListScreen.jsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { styles } from '../styles';
 import InkButton from '../components/InkButton.jsx';
-
-// ==========================================
-// 📖 柄（ヒルト）のマスターデータ辞書
-// ==========================================
-export const HILT_DATABASE = {
-  "0": {
-    name: "普通の柄",
-    imageSrc: "/sword_handle.png",
-    hpBonus: 20,
-    attackBonus: 10,
-    weightBonus: 5,
-    skillName: "大回転斬",
-    skillDescription: "敵に目掛けて回転突進する、必殺の一撃!"
-  },
-  "1": {
-    name: "武骨な柄",
-    imageSrc: "/sword_handle_1.png",
-    hpBonus: -50,
-    attackBonus: 30,
-    weightBonus: 20,
-    skillName: "巨大回転斬",
-    skillDescription: "巨大化して周囲を薙ぎ払う。複数KOも狙えるロマン技!"
-  },
-  "2": {
-    name: "悪魔の柄",
-    imageSrc: "/sword_handle_2.png",
-    hpBonus: 0,
-    attackBonus: 15,
-    weightBonus: 10,
-    skillName: "オレ達アタック",
-    skillDescription: "自分の分身を飛ばして攻撃する、武士道皆無の珍技!"
-  },
-  "3": {
-    name: "大翼の柄",
-    imageSrc: "/sword_handle_3.png",
-    hpBonus: 30,
-    attackBonus: 10,
-    weightBonus: -10,
-    skillName: "オレ達シールド",
-    skillDescription: "自分の分身を周囲に展開する、攻防一体の妙技!"
-  }
-};
+import { HILT_DATABASE } from './hiltDatabase.js';
 
 export default function SwordListScreen({
   direction = "forward",
   swordList, mySwordData, equipSword, deleteSword,
   startNewCrafting, startRecapture, updateSword, cancelList, toggleSwordFlip
 }) {
-  const [selectedId, setSelectedId] = useState(mySwordData?.id || swordList[0]?.id);
+  const [pickedId, setSelectedId] = useState(mySwordData?.id || swordList[0]?.id);
+  // 選んでいた剣が一覧から消えたら（破棄など）、先頭の剣を選んだことにする
+  const selectedId = swordList.some(s => s.id === pickedId) ? pickedId : swordList[0]?.id;
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
   const [isHiltModalOpen, setIsHiltModalOpen] = useState(false);
@@ -58,12 +19,6 @@ export default function SwordListScreen({
 
   const [transition, setTransition] = useState("enter");
   const [isSpinning, setIsSpinning] = useState(false);
-
-  useEffect(() => {
-    if (!swordList.find(s => s.id === selectedId)) {
-      setSelectedId(swordList[0]?.id);
-    }
-  }, [swordList, selectedId]);
 
   // 🌟 初回入場アニメーション完了後にクラスを解除し、リスト更新（破棄等）時のフェードインを防止
   useEffect(() => {

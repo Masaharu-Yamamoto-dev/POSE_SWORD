@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { PLAYER_COLORS, styles, swordImageSource } from '../styles';
-import { HILT_DATABASE } from './SwordListScreen';
+import { HILT_DATABASE } from './hiltDatabase.js';
 import InkButton from '../components/InkButton.jsx';
 
 const REASONS = { DISCONNECTED: '（切断）', FORFEIT: '（降参）' };
@@ -34,8 +34,8 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
     
     // 引き分け、または勝者がいない場合はすぐUIを表示
     if (result.draw || !winner) {
-      setPhase('UI');
-      return;
+      const t = setTimeout(() => setPhase('UI'), 0);
+      return () => clearTimeout(t);
     }
 
     const t1 = setTimeout(() => setPhase('SWIPE'), 100);
