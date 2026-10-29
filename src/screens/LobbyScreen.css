@@ -1,45 +1,104 @@
 /* ===== 対戦ロビー =====
-   上に退室と題、中央にプレイヤーの縦列（席の数だけ）、下にルール・対戦開始・ロビーID。
+   上に錬成・武器庫と同じ見出しの帯（退室・題・人数）、その下の残りの中央にプレイヤーの縦列（席の数だけ）、
+   下にヘッダーと同じ帯のフッター（ルール・対戦開始・ロビーID）。
    列は箱で囲まず、上のプレイヤー色の線と薄い写真で一人分のまとまりを作る。
    表示が切り替わっても配置が動かないよう、切り替わる部品は先に場所を確保している。 */
-.lobby {
-  position: relative;
+
+/* 舞台（1280×720）いっぱいの枠。余白は錬成・武器庫の横長と同じ */
+.lobby-screen {
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
   width: 100%;
-  max-width: 1140px;
-  margin: 0 auto;
+  height: 100%;
+  padding: 18px 24px 0; /* 下はフッターの帯が画面の下端まで届くよう 0（帯の中に余白を取る） */
+  box-sizing: border-box;
   font-family: var(--font-brush);
+  overflow-x: clip;
 }
 
-.lobby-top {
+/* ---------- 見出しの帯（錬成と同じ：左に退室、真ん中に題、右に人数） ---------- */
+.lobby-header {
+  --bar-top: 18px;
+  --bar-side: 24px;
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  margin-bottom: 18px;
+  flex-shrink: 0;
+  height: 60px;
 }
 
-.lobby-top > :first-child { justify-self: start; }
+/* 帯の地：画面の上端と左右の端まで敷く（錬成の見出しの帯と同じ色） */
+.lobby-header::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: calc(var(--bar-top) * -1) calc(var(--bar-side) * -1) 0;
+  background: linear-gradient(to bottom, rgba(198, 188, 171, 0.96), rgba(206, 197, 181, 0.94));
+  box-shadow: 0 10px 18px -12px rgba(60, 45, 30, 0.4);
+}
 
-.lobby-top h2 {
+.lobby-header > :first-child { justify-self: start; }
+.lobby-header .brush-link { font-size: 17px; }
+
+.lobby-header h1 {
   margin: 0;
-  font-size: 30px;
+  font-size: 38px;
   font-weight: normal;
   letter-spacing: 0.3em;
   text-indent: 0.3em;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
-.lobby-top .brush-link { font-size: 17px; }
+/* 人数（武器庫の「所持 1 / 3」と同じ形） */
+.lobby-header__count {
+  justify-self: end;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: var(--usuzumi);
+}
+
+.lobby-header__count span {
+  font-size: 24px;
+  color: var(--sumi);
+}
+
+/* 帯の下の残り。ロビーはここをちょうど埋め、余った高さは列の舞台（剣の場所）に回す */
+.lobby-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lobby {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin: 0 auto;
+}
 
 /* ---------- 縦列 ---------- */
 .lobby-cols {
   display: grid;
   grid-template-columns: repeat(var(--seats), minmax(0, 1fr));
-  gap: 62px 18px;
-  max-width: calc(var(--seats) * 290px);
-  margin: 62px auto 0; /* 上の余白は、線の上の名札と、大きくなったボスの剣のための場所 */
+  gap: 62px 24px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: calc(var(--seats) * 312px); /* 4人で画面の幅いっぱい。人数が少ないときは1列が広がりすぎないよう中央に寄せる */
+  margin: 54px auto 0; /* 上の余白は、線の上の名札（2行）のための場所（大きくなったボスの剣は帯に少し掛かってよい） */
 }
 
 .lobby-col {
   position: relative;
+  display: flex;
+  flex-direction: column;
   padding: 14px 10px 16px;
 }
 
@@ -62,7 +121,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  height: 6px;
+  height: 9px;
   background: var(--pc);
   filter: url(#sumi-edge);
   opacity: 0;
@@ -107,7 +166,40 @@
   filter: grayscale(0.15);
 }
 
-/* 名札：線の上に「何P」と剣の名前。ボスの剣が後ろを通るので、手前に出して縁をぼかす */
+/* ---- 自分と相手の見分け ----
+   自分の列は、自分のプレイヤー色をごく薄く混ぜた紙を、名札の上（ヘッダーの帯のすぐ下）からフッターの帯の上端まで敷き、下の端で地に溶かす。
+   地（黄みのある和紙）に色を透かして重ねると青や紫がくすんで灰色に見えるので、明るい無彩の紙に色を混ぜた色を敷く。
+   相手の列は一段引く：写真をほぼ消し、名前と数字を薄墨に、色の線を細くする。剣そのものは見せたいので薄くしない */
+.lobby-col__light {
+  position: absolute;
+  top: -52px;   /* 列の上の余白（名札の場所）ごと。明るい色は膨らんで見え、帯に食い込んで見えるので、帯の下端から少し離す */
+  bottom: -8px; /* フッターの帯の上端まで */
+  left: 0;
+  right: 0;
+  z-index: -1; /* 列の中のすべて（上の色の線も）より奥。画面の枠（isolation）の地よりは手前 */
+  pointer-events: none;
+  --tint: color-mix(in srgb, var(--pc) 13%, #fbf9f4);
+  background: linear-gradient(to bottom, var(--tint) 0%, color-mix(in srgb, var(--tint) 88%, transparent) 82%, transparent 100%);
+}
+
+.lobby-col.is-me .lobby-col__photo img { opacity: 0.24; }
+.lobby-col.is-me.is-ready .lobby-col__photo img { opacity: 0.34; }
+
+.lobby-col.is-other .lobby-col__photo img { opacity: 0.09; }
+.lobby-col.is-other.is-ready .lobby-col__photo img { opacity: 0.18; }
+
+.lobby-col.is-other .lobby-col__name,
+.lobby-col.is-other .lobby-stats__value,
+.lobby-col.is-other .lobby-count span { color: var(--usuzumi); }
+
+.lobby-col.is-other .lobby-radar__value { stroke: var(--usuzumi); fill-opacity: 0.14; }
+
+.lobby-col.is-other::before { top: 2px; height: 4px; }
+
+/* 下段の線は、準備完了でプレイヤー色に変わるまでは薄く */
+.lobby-col.is-other:not(.is-ready) .lobby-row::before { opacity: 0.5; }
+
+/* 名札：線の上に、上の行に「何P」、下の行に剣の名前（列の幅いっぱい）。ボスの剣が後ろを通るので、手前に出して縁をぼかす */
 .lobby-col__tag {
   position: absolute;
   left: 2px;
@@ -116,8 +208,9 @@
   z-index: 4;
   margin-bottom: 4px;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-shadow: 0 0 4px var(--washi), 0 0 4px var(--washi), 0 0 7px var(--washi);
@@ -125,8 +218,8 @@
 
 .lobby-col__who {
   flex-shrink: 0;
-  font-size: 22px;
-  line-height: 1.2;
+  font-size: 20px;
+  line-height: 1.15;
   letter-spacing: 0.04em;
   color: var(--pc);
 }
@@ -152,15 +245,13 @@
 }
 
 .lobby-col__name {
-  flex: 1;
+  align-self: stretch; /* 名前は列の幅いっぱい（この幅に収まるよう文字の大きさを合わせる） */
   min-width: 0;
   margin: 0;
   font-size: 19px;
   line-height: 1.2;
   letter-spacing: 0.04em;
-  text-align: right;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* ボスの札と「ボスにする」：線の下の右上、同じ場所に出す */
@@ -182,11 +273,12 @@
   filter: url(#sumi-rough);
 }
 
-/* 舞台：中央に剣、左下にレーダーチャート、右下に準備の印 */
+/* 舞台：中央に剣、右の中ほどに準備の印、いちばん下にステータス（レーダーチャートと数字） */
 .lobby-stage {
   position: relative;
   z-index: 1;
-  height: 262px;
+  flex: 1;
+  min-height: 300px; /* 高さは下の帯までの残りで決まる。剣は足もとから測って置くので、伸びた分は剣の上に空く */
   margin-top: 6px;
 }
 
@@ -194,7 +286,7 @@
 .lobby-sword {
   position: absolute;
   left: 50%;
-  bottom: 34px;
+  bottom: 112px; /* 下のステータスに掛からない高さ */
   z-index: 1;
   transform: translateX(-50%);
   transform-origin: 50% 100%;
@@ -202,7 +294,48 @@
 }
 
 .lobby-col.is-boss .lobby-sword {
-  transform: translateX(-50%) scale(1.62);
+  transform: translateX(-50%) scale(1.38); /* 大きさはボスでない剣を大きくする前の 1.62 倍と同じ */
+}
+
+/* ---- 入退室 ----
+   入ってきた人は、列のほかの部分はいつもどおりすぐに出し、剣だけを画面の上から落とす（着地で少し跳ねる）。
+   出ていった人は、剣を上へ抜けさせながら、列のほかの部分を消す。消え終わったら空席に戻る（LEAVE_MS と同じ長さ） */
+.lobby-col.is-arriving .lobby-sword__drop {
+  animation: lobby-drop 0.75s both;
+}
+
+@keyframes lobby-drop {
+  0%   { transform: translateY(-760px); animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.35); }
+  62%  { transform: translateY(0); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+  78%  { transform: translateY(-18px); animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.4); }
+  100% { transform: translateY(0); }
+}
+
+.lobby-col.is-leaving { pointer-events: none; }
+
+.lobby-col.is-leaving .lobby-sword__drop {
+  animation: lobby-rise 0.7s cubic-bezier(0.5, 0, 0.9, 0.5) both;
+}
+
+@keyframes lobby-rise {
+  0%   { transform: translateY(0); }
+  18%  { transform: translateY(10px); } /* 一度沈んでから飛び上がる */
+  100% { transform: translateY(-820px); }
+}
+
+.lobby-col.is-leaving::before,
+.lobby-col.is-leaving::after,
+.lobby-col.is-leaving .lobby-col__photo,
+.lobby-col.is-leaving .lobby-col__tag,
+.lobby-col.is-leaving .lobby-col__boss,
+.lobby-col.is-leaving .lobby-stats,
+.lobby-col.is-leaving .lobby-side,
+.lobby-col.is-leaving .lobby-row {
+  animation: lobby-vanish 0.45s ease-out both;
+}
+
+@keyframes lobby-vanish {
+  to { opacity: 0; }
 }
 
 /* ふわふわ浮かぶ動き（武器庫と同じ）。列ごとに開始をずらして、全員がそろって上下しないようにする */
@@ -229,8 +362,18 @@
 /* 回せるのは自分の剣だけ */
 button.lobby-sword__body { cursor: pointer; }
 
-.lobby-sword__blade { height: 132px; width: auto; max-width: 170px; object-fit: contain; }
-.lobby-sword__hilt { height: 112px; width: auto; margin-top: -35px; object-fit: contain; }
+.lobby-sword__blade { height: 156px; width: auto; max-width: 200px; object-fit: contain; }
+.lobby-sword__hilt {
+  height: 132px; width: auto; margin-top: -41px; object-fit: contain;
+  /* 付け直す時：下から差し込んで、少し行き過ぎてから収まる */
+  transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.3, 1.25), opacity 0.2s ease-out;
+}
+/* 独楽モード：柄が外れて、傾きながら下へ落ちて消える */
+.lobby-sword__hilt.is-off {
+  transform: translateY(64px) rotate(18deg);
+  opacity: 0;
+  transition: transform 0.5s cubic-bezier(0.55, 0, 0.85, 0.35), opacity 0.45s ease-in;
+}
 
 .lobby-sword__body.is-spinning {
   animation: lobby-spin 0.6s cubic-bezier(0.4, 0, 0.2, 1);
@@ -240,26 +383,63 @@ button.lobby-sword__body { cursor: pointer; }
   to { transform: rotate(360deg); }
 }
 
-.lobby-radar {
+.lobby-stats {
   position: absolute;
-  left: -8px;
+  left: -6px;
+  right: 0;
   bottom: 0;
   z-index: 2;
-  width: 118px;
-  height: 100px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lobby-radar {
+  flex-shrink: 0;
+  width: 124px;
+  height: 105px;
   overflow: visible;
 }
 
 .lobby-radar__axis { fill: none; stroke: var(--kasure); stroke-width: 1; }
 .lobby-radar__value { fill: var(--pc); fill-opacity: 0.22; stroke: var(--sumi); stroke-width: 2; }
-.lobby-radar text { font-family: var(--font-brush); font-size: 11px; fill: var(--usuzumi); }
-.lobby-radar tspan { font-size: 14px; fill: var(--sumi); }
+.lobby-radar text { font-family: var(--font-brush); font-size: 10px; fill: var(--usuzumi); }
 
-/* 準備の場所：全員同じ位置に印を出す。自分の列だけ、印の下に「準備完了／準備取消」が付く */
+/* 数字は一の位をそろえる（右寄せの決まった幅） */
+.lobby-stats__list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lobby-stats__row {
+  display: flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.lobby-stats__label {
+  flex-shrink: 0;
+  width: 2.8em;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--usuzumi);
+}
+
+.lobby-stats__value {
+  flex-shrink: 0;
+  width: 2.3em;
+  font-size: 28px;
+  line-height: 1.12;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 準備の場所：全員同じ位置（右の、ステータスのすぐ上）に印を出す。自分の列だけ、印の下に「準備完了／準備取消」が付く */
 .lobby-side {
   position: absolute;
   right: -4px;
-  bottom: 0;
+  bottom: 136px;
   z-index: 2;
   width: 104px;
   height: 108px;
@@ -348,14 +528,14 @@ button.lobby-sword__body { cursor: pointer; }
 
 .lobby-slots {
   display: flex;
-  gap: 7px;
+  gap: 9px; /* 装備中の円相が丸の外へ少しはみ出す分 */
 }
 
 .lobby-slot {
   position: relative;
-  width: 44px;
-  height: 50px;
-  padding: 6px 0 0;
+  width: 48px;
+  height: 48px;
+  padding: 0;
   display: grid;
   place-items: center;
   font-family: var(--font-brush);
@@ -364,44 +544,79 @@ button.lobby-sword__body { cursor: pointer; }
   color: var(--kasure);
   background: none;
   border: 0;
+  border-radius: 50%;
   transition: transform 0.15s ease, opacity 0.15s ease;
 }
 
+/* 囲いは武器庫と同じ丸。選んでいない剣と空きは点線の丸、装備中の剣は朱の円相 */
 .lobby-slot::after {
   content: '';
   position: absolute;
   inset: 0;
-  border: 2px solid var(--kasure);
-  filter: url(#sumi-rough);
+  border: 2px dashed var(--kasure);
+  border-radius: 50%;
   pointer-events: none;
 }
+
+.lobby-slot__enso {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  transform: translate(-50%, -50%);
+}
+
+/* 円相のかすれは、武器庫の沈んだ紙ではなくロビーの地の色で抜く */
+.lobby-slot__enso .enso__dry { fill: var(--washi); }
 
 .lobby-slot::before {
   content: attr(data-n);
   position: absolute;
-  top: 2px;
-  left: 5px;
-  font-size: 10px;
+  top: -3px;
+  left: -3px;
+  z-index: 1;
+  font-size: 11px;
   line-height: 1.2;
   color: var(--usuzumi);
 }
 
-.lobby-slot img { height: 38px; width: auto; max-width: 38px; object-fit: contain; pointer-events: none; }
-.lobby-slot.is-equipped::after { border: 3px solid var(--sumi); }
+.lobby-slot img { position: relative; height: 34px; width: auto; max-width: 34px; object-fit: contain; pointer-events: none; }
+.lobby-slot.is-equipped::after { display: none; }
 .lobby-slot.is-equipped::before { color: var(--sumi); }
-.lobby-slot.is-empty::after { border: 2px dashed var(--kasure); }
+.lobby-slot.is-empty::after { border-color: var(--kasure); opacity: 0.7; }
 .lobby-slot.is-dim img { opacity: 0.5; }
 .lobby-slot.is-usable { cursor: pointer; }
 .lobby-slot.is-dragging { opacity: 0.4; }
 .lobby-slot.is-target { transform: scale(1.08); }
-.lobby-slot.is-target::after { border: 2px dashed var(--shu); }
+.lobby-slot.is-target::after { display: block; border-color: var(--shu); }
 .lobby-slot:focus-visible { outline: 2px solid var(--shu); outline-offset: 2px; }
+
+/* ほかの人の下段：左に剣の本数、右に対戦で使う必殺技のアイコン（武器庫の「所持 1 / 3」と同じ形） */
+.lobby-count {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--usuzumi);
+  white-space: nowrap;
+}
+
+.lobby-count span {
+  font-size: 24px;
+  color: var(--sumi);
+}
+
+.lobby-skills {
+  --skill-box: 42px;
+  display: flex;
+  gap: 12px;
+  height: 48px; /* 自分の列の剣スロットと同じ高さにして、下段の線の位置をそろえる */
+  align-items: center;
+}
 
 /* 空席 */
 .lobby-col--empty {
   display: grid;
   place-items: center;
-  min-height: 380px;
 }
 
 .lobby-col--empty::before { background: var(--kasure); }
@@ -416,24 +631,24 @@ button.lobby-sword__body { cursor: pointer; }
 
 /* ---------- 下の帯：左にルール、中央に対戦開始、右にロビーID ---------- */
 .lobby-bar {
+  --bar-side: 24px;
   position: relative;
   margin-top: 8px;
-  padding-top: 18px;
+  padding: 12px 6px 16px; /* 左右は、ヘッダーの「退室する」「人数」の文字の位置にそろえる */
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   gap: 16px;
   align-items: center;
 }
 
+/* 帯の地：ヘッダーと同じ色を、画面の下端と左右の端まで敷く。影はヘッダーと逆に上へ落とす */
 .lobby-bar::before {
   content: '';
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 4px;
-  background: var(--sumi);
-  filter: url(#sumi-edge);
+  z-index: -1;
+  inset: 0 calc(var(--bar-side) * -1);
+  background: linear-gradient(to top, rgba(198, 188, 171, 0.96), rgba(206, 197, 181, 0.94));
+  box-shadow: 0 -10px 18px -12px rgba(60, 45, 30, 0.4);
 }
 
 .lobby-bar small {
@@ -462,6 +677,8 @@ button.lobby-sword__body { cursor: pointer; }
 .lobby-mid .ink-btn__label { font-size: 26px; padding: 14px 10px; }
 /* 文字が長い（「1 vs 3 で対戦開始」）と、筆跡の濃い部分からはみ出して白抜きが読めなくなるので、墨を一回り大きくする */
 .lobby-mid .ink-btn__stroke { width: 680px; height: 272px; }
+
+.lobby-mid__ghost { visibility: hidden; }
 
 .lobby-mid__status {
   position: relative;
@@ -499,7 +716,7 @@ button.lobby-sword__body { cursor: pointer; }
 }
 
 .lobby-error {
-  margin-top: 12px;
+  margin: 8px auto 0;
   font-size: 13px;
 }
 
@@ -570,8 +787,12 @@ button.lobby-sword__body { cursor: pointer; }
   .lobby-col.is-ready .lobby-row::before,
   .lobby-seal--done,
   .lobby-sword__float,
-  .lobby-sword__body.is-spinning {
+  .lobby-sword__body.is-spinning,
+  .lobby-col.is-arriving .lobby-sword__drop,
+  .lobby-col.is-leaving .lobby-sword__drop {
     animation: none;
   }
-  .lobby-sword { transition: none; }
+  .lobby-sword,
+  .lobby-sword__hilt,
+  .lobby-sword__hilt.is-off { transition: none; }
 }

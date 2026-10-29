@@ -27,3 +27,6 @@ dist-ssr
 # Unity editor build output (not needed for web deploy; only public/POSE_SWORD_Unity/Builds is served)
 POSE_SWORD_Unity/Builds/
 .vercel
+
+# tools/ の Python スクリプトを動かしたときにできるキャッシュ
+tools/**/__pycache__/

@@ -46,6 +46,17 @@ export const SOLO_BUFF = Object.freeze({
   judgmentSweepScale: 2.0,     // 薙ぎ払い中の剣の大きさ（元の大きさに掛ける）
 });
 
+// 柄の補正を外した剣本体の値（錬成で出る範囲: hp 100〜1000 / attack・weight 1〜100）。
+// 独楽モードは柄が見えず技も全員共通なので、柄の補正を乗せずにこちらで戦う（swordForGameMode）。
+// 引き算で戻すと、補正で下限1に張り付いた値（重さ5の剣に重さ-10の柄など）の元が分からないので、
+// 送る側が補正前の値を別に持たせる。古いクライアントが送ってこない時は null（＝補正込みのまま戦う）。
+export const MAX_BASE_HP = 1000;
+export const MAX_BASE_STAT = 100;
+const validBase = base => base && Number.isInteger(base.hp) && base.hp >= 1 && base.hp <= MAX_BASE_HP &&
+  Number.isInteger(base.attack) && base.attack >= 1 && base.attack <= MAX_BASE_STAT &&
+  Number.isInteger(base.weight) && base.weight >= 1 && base.weight <= MAX_BASE_STAT
+  ? { hp: base.hp, attack: base.attack, weight: base.weight } : null;
+
 export function validateSword(sword) {
   if (!sword || typeof sword.name !== 'string' || !sword.name.trim() ||
       !Number.isInteger(sword.hp) || sword.hp < 1 || sword.hp > MAX_HP ||
@@ -78,12 +89,14 @@ export function validateSword(sword) {
         weight: Number.isInteger(s.weight) && s.weight >= 1 && s.weight <= MAX_WEIGHT ? s.weight : 1,
         imageStr: typeof s.imageStr === 'string' ? s.imageStr : '',
         hiltType: typeof s.hiltType === 'string' ? s.hiltType : '0',
+        base: validBase(s.base),
         isEmpty: Boolean(s.isEmpty)
       };
     });
   } else {
     swords = [
-      { name: sword.name, hp: sword.hp, attack: sword.attack, weight: sword.weight, imageStr: sword.imageStr, hiltType, isEmpty: false },
+      { name: sword.name, hp: sword.hp, attack: sword.attack, weight: sword.weight, imageStr: sword.imageStr, hiltType,
+        base: validBase(sword.base), isEmpty: false },
       { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: '0', isEmpty: true },
       { name: 'empty', hp: 1, attack: 1, weight: 1, imageStr: '', hiltType: '0', isEmpty: true }
     ];
@@ -97,9 +110,18 @@ export function validateSword(sword) {
     weight: sword.weight,
     imageStr: sword.imageStr,
     hiltType: hiltType,
+    base: validBase(sword.base),
     swords: swords,
     equippedIndex: equippedIndex
   };
+}
+
+// 試合で使う値。独楽モード（gameMode "1"）だけ、柄の補正を外した剣本体の値に差し替える。
+// 手持ちの剣（swords[]）も揃えないと、残機の持ち替えで補正込みの値に戻ってしまう。
+export function swordForGameMode(swordData, gameMode) {
+  if (gameMode !== '1' || !swordData) return swordData;
+  const strip = s => s && s.base ? { ...s, hp: s.base.hp, attack: s.base.attack, weight: s.base.weight } : s;
+  return { ...strip(swordData), swords: Array.isArray(swordData.swords) ? swordData.swords.map(strip) : swordData.swords };
 }
 
 // The host owns this model. Transport identities never come from packet playerId fields.
@@ -108,7 +130,7 @@ export class HostRoom {
     livesMode = false, soloMode = false }) {
     if (!roomEpoch || !Number.isInteger(seatLimit) || seatLimit < MIN_PLAYERS || seatLimit > MAX_PLAYERS ||
         !['0', '1'].includes(gameMode) || typeof livesMode !== 'boolean' || typeof soloMode !== 'boolean' ||
-        (soloMode && livesMode)) {
+        (soloMode && livesMode) || (soloMode && gameMode === '1')) {
       throw new Error('Invalid room configuration');
     }
     this.seatLimit = seatLimit;
@@ -172,6 +194,8 @@ export class HostRoom {
   setGameMode(mode) {
     if (this.phase !== 'LOBBY' || !['0', '1'].includes(mode)) throw new Error('モードを変更できません。');
     this.gameMode = mode;
+    // 独楽には 1vs3 がないので、1vs3 のまま独楽にしたら特殊ルールは「なし」に戻す
+    if (mode === '1') { this.soloMode = false; this.bossPlayerId = null; }
     this.revision++;
   }
 
@@ -184,9 +208,10 @@ export class HostRoom {
     this.revision++;
   }
 
-  // 1vs3：剣/独楽どちらとも組み合わせられる独立したON/OFFトグル。ボスはホストが指名する。
+  // 1vs3：剣モードだけのON/OFFトグル（独楽には 1vs3 がない）。ボスはホストが指名する。
   setSoloMode(enabled) {
     if (this.phase !== 'LOBBY' || typeof enabled !== 'boolean') throw new Error('モードを変更できません。');
+    if (enabled && this.gameMode === '1') throw new Error('独楽モードでは 1vs3 を選べません。');
     this.soloMode = enabled;
     if (enabled) this.livesMode = false;
     // ONにしたら、まずホストをボスにしておく（指名し忘れて開始できないのを避ける）。OFFにしたら指名も外す。

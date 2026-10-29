@@ -1,399 +1,417 @@
 // src/screens/SwordListScreen.jsx
-import { useState, useEffect } from 'react';
-import { styles } from '../styles';
-import InkButton from '../components/InkButton.jsx';
-import { HILT_DATABASE } from './hiltDatabase.js';
+// 武器庫。上に持っている剣を刀掛けに並べ（選んだ剣は朱の円相の前で大きく）、下に選んだ剣の情報と設定。
+// 刀掛け（見る所）／選んだ剣の情報（読む所：名前・装備の状態・ステータス・必殺技、後ろに自分の姿）／設定（触る所）の3つに分ける。
+// 横長は16:9の舞台で、情報と設定（柄・プライバシー・手入れ）を左右に並べる。
+// 縦長は手入れのボタンを画面の下に固定し、その上の情報と設定をスクロールさせる（下へ流すと、上端に小さな情報の帯が出る）。
+// 剣はドラッグで並べ替えられる。「表示切替」で、刀掛けに剣ごとのステータスを出す
+import { useEffect, useRef, useState } from 'react';
+import Stage16x9 from '../components/Stage16x9.jsx';
+import {
+  CompactBar, ConfirmSheet, EnsoInk, HiltPicker, NameEditor, PrivacyPicker, RadarChart, SkillInfo, StatsList, SwordStand,
+} from '../components/SwordForgeParts.jsx';
+import {
+  STAT_LABELS, baseStatsOf, bonusOf, hiltOf, totalsOf, useAnimatedValues, useCompactLevel, usePortrait, useStageScale,
+} from '../components/swordForge.js';
+import { privacyOf } from '../swordPrivacy.js';
+import './SwordListScreen.css';
+
+const MAX_SWORDS = 3;
+const NAME_MAX = 15;
+const OVERLAY_SCALE = 0.8;
+// これより動いたらドラッグ（並べ替え）、それ未満なら押しただけ
+const DRAG_THRESHOLD = 8;
+// 縦長：これらが帯の後ろへ隠れた順に、上端の小さな情報の帯へ出す
+const COMPACT_PARTS = ['.armory__name-row', '.armory__stats', '.armory__skill'];
+const slotX = i => `${((i * 2 + 1) / 6 * 100).toFixed(3)}%`;
+// 指を離した所が、3つに分けた刀掛けのどこに当たるか
+const dropIndexOf = (from, dx, width, count) =>
+  Math.max(0, Math.min(count - 1, Math.floor(((from * 2 + 1) / 6 * width + dx) / (width / 3))));
+
+const CARE_ICONS = {
+  flip: <path d="M12 3 V21 M8 7 L3 12 L8 17 Z M16 7 L21 12 L16 17 Z" />,
+  recapture: <><path d="M4 8 H8 L10 5 H14 L16 8 H20 V19 H4 Z" /><circle cx="12" cy="13" r="3.5" /></>,
+  view: <path d="M5 20 V12 M12 20 V5 M19 20 V14 M3 20 H21" />,
+  delete: <path d="M4 7 H20 M9 7 V4 H15 V7 M6 7 L7 20 H17 L18 7 M10 11 V16 M14 11 V16" />,
+};
+
+// 必殺技のアイコンだけ（大きさは --skill-box）
+const SkillIcon = ({ hiltType, className = '' }) => {
+  const hilt = hiltOf(hiltType);
+  return <span className={`skill__icon ${className}`}><img src={hilt.skillIcon} alt={hilt.skillName} /></span>;
+};
 
 export default function SwordListScreen({
   direction = "forward",
-  swordList, mySwordData, equipSword, deleteSword,
-  startNewCrafting, startRecapture, updateSword, cancelList, toggleSwordFlip
+  swordList, mySwordData, equipSword, deleteSword, reorderSwords,
+  startNewCrafting, startRecapture, updateSword, updatePrivacy, cancelList, toggleSwordFlip,
+  // 戻る先（タイトルかロビーか）。左上のボタンに行き先を書く
+  returnStep = 'TITLE',
 }) {
+  const portrait = usePortrait();
+  const scale = useStageScale();
   const [pickedId, setSelectedId] = useState(mySwordData?.id || swordList[0]?.id);
   // 選んでいた剣が一覧から消えたら（破棄など）、先頭の剣を選んだことにする
   const selectedId = swordList.some(s => s.id === pickedId) ? pickedId : swordList[0]?.id;
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [isHiltModalOpen, setIsHiltModalOpen] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-
+  const [spins, setSpins] = useState({});
+  const [guided, setGuided] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [drag, setDrag] = useState(null); // { id, from, dx, to }：並べ替えでつまんでいる剣
   const [transition, setTransition] = useState("enter");
-  const [isSpinning, setIsSpinning] = useState(false);
+  // ワンポイントの丸を刀掛けの剣で動かせるのは、プライバシーをいじっている間だけ
+  // （プライバシーの札・大きさを触ると始まり、柄・手入れを触るか別の剣を選ぶと終わる）
+  const [privOpen, setPrivOpen] = useState(false);
+  // 表示切替：刀掛けに剣ごとのステータスを出す。開き直すたびに、いつもの表示から始まる
+  const [overview, setOverview] = useState(false);
+  const [nameEditing, setNameEditing] = useState(false);
+  // 装備したときだけ「装備中」の札を押印のように押す
+  const [stampId, setStampId] = useState(null);
+  const [compactLevel, onScroll] = useCompactLevel(COMPACT_PARTS);
+  const rackRef = useRef(null);
+  const moveRef = useRef(null);
+  const suppressRef = useRef(false);
 
   // 🌟 初回入場アニメーション完了後にクラスを解除し、リスト更新（破棄等）時のフェードインを防止
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setTransition("idle");
-    }, 350);
+    const timer = setTimeout(() => setTransition("idle"), 350);
     return () => clearTimeout(timer);
   }, []);
 
-  const selectedSword = swordList.find(s => s.id === selectedId);
-  if (!selectedSword) return null;
+  const selected = swordList.find(s => s.id === selectedId);
+  const hiltType = selected?.hiltType || '0';
+  const totals = totalsOf(selected, hiltType);
+  const shown = useAnimatedValues(totals);
 
-  const isEquipped = mySwordData?.id === selectedSword.id;
-  const currentHilt = HILT_DATABASE[selectedSword.hiltType] || HILT_DATABASE["0"];
+  if (!selected) return null;
 
-  const totalHp = Math.max(1, selectedSword.hp + currentHilt.hpBonus);
-  const totalAttack = Math.max(1, selectedSword.attack + currentHilt.attackBonus);
-  const totalWeight = Math.max(1, selectedSword.weight + currentHilt.weightBonus);
+  const base = baseStatsOf(selected);
+  const bonus = bonusOf(hiltType);
+  const privacy = privacyOf(selected);
+  const editingPrivacy = privOpen && privacy.mode === 'onepoint' && !overview;
+  const isEquipped = mySwordData?.id === selected.id;
+  const canCraft = swordList.length < MAX_SWORDS;
+  const isLast = swordList.length <= 1;
 
-  const handleEditClick = () => {
-    setEditName(selectedSword.name);
-    setIsEditingName(true);
+  const go = (next, action) => {
+    if (transition !== "enter" && transition !== "idle") return;
+    setTransition(next);
+    setTimeout(action, 300);
+  };
+  const onCancel = () => go("exit-back", cancelList);
+  const onNewCrafting = () => { if (canCraft) go("exit-forward", startNewCrafting); };
+
+  const endPriv = () => setPrivOpen(false);
+  const choose = id => {
+    setSelectedId(id);
+    setPrivOpen(false);
+    setStampId(null);
+  };
+  const spin = id => setSpins(prev => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
+  // 案内の点線は、剣に触った時点で消す
+  const onSpotStart = () => setGuided(true);
+  const onSpotChange = spot => updatePrivacy(selected.id, { mode: privacy.mode, spot });
+  const onPrivacy = next => { setPrivOpen(true); updatePrivacy(selected.id, next); };
+  const onHilt = id => { endPriv(); updateSword(selected.id, { hiltType: id }); };
+  const onEquip = () => { equipSword(selected); setStampId(selected.id); };
+  const onDelete = () => {
+    setTransition("idle");
+    deleteSword(selected.id);
+    setConfirmDelete(false);
   };
 
-  const handleNameSave = () => {
-    const finalName = editName.trim() === "" ? "無銘の剣" : editName;
-    updateSword(selectedSword.id, { name: finalName });
-    setIsEditingName(false);
-  };
+  const careButtons = [
+    { id: 'flip', title: '左右反転', desc: '剣の見た目を左右反転させます', onClick: () => { endPriv(); toggleSwordFlip(selected.id); } },
+    { id: 'recapture', title: '撮り直し', desc: '名前などは変えずに、剣を作り直します', onClick: () => { endPriv(); go("exit-forward", () => startRecapture(selected.id)); } },
+    {
+      id: 'view', title: '表示切替', pressed: overview,
+      desc: overview ? '通常表示モードに切り替えます' : '詳細表示モードに切り替えます',
+      onClick: () => { endPriv(); setOverview(v => !v); },
+    },
+    // 取り消せない操作なので、破棄だけは朱のまま
+    { id: 'delete', title: '破棄する', danger: true, disabled: isLast, desc: isLast ? '最後の1本は破棄できません' : 'この剣を削除します', onClick: () => { endPriv(); setConfirmDelete(true); } },
+  ];
+  const care = withDesc => careButtons.map(b => (
+    <button key={b.id} type="button" onClick={b.onClick} disabled={b.disabled} aria-pressed={b.id === 'view' ? b.pressed : undefined}
+      className={`armory__care forge-frame ${b.pressed ? 'is-pressed' : ''} ${b.danger ? 'is-danger' : ''}`}>
+      <svg viewBox="0 0 24 24" aria-hidden="true">{CARE_ICONS[b.id]}</svg>
+      {withDesc
+        ? <span className="armory__care-text"><span className="armory__care-title">{b.title}</span><span className="armory__care-desc">{b.desc}</span></span>
+        : b.title}
+    </button>
+  ));
 
-  const handleHiltChange = (hiltId) => {
-    updateSword(selectedSword.id, { hiltType: hiltId });
-    setIsHiltModalOpen(false);
+  // ---- 並べ替え（つまんで左右へ動かす） ----
+  const onMoveStart = (e, sword, index) => {
+    if (editingPrivacy) return;
+    const rack = rackRef.current;
+    const rect = rack.getBoundingClientRect();
+    moveRef.current = {
+      id: sword.id, from: index, sx: e.clientX, sy: e.clientY,
+      width: rect.width, k: rect.width / rack.offsetWidth || 1, moved: false, pointerId: e.pointerId, el: e.currentTarget, dx: 0,
+    };
   };
-
-  const handleSwordClick = () => {
-    if (!isSpinning) {
-      setIsSpinning(true);
+  const onMoveDrag = e => {
+    const m = moveRef.current;
+    if (!m) return;
+    const dx = e.clientX - m.sx, dy = e.clientY - m.sy;
+    if (!m.moved && Math.hypot(dx, dy) / m.k < DRAG_THRESHOLD) return;
+    if (!m.moved) {
+      m.moved = true;
+      try { m.el.setPointerCapture(m.pointerId); } catch { /* 取れなくても動かせる */ }
     }
+    m.dx = dx;
+    setDrag({ id: m.id, from: m.from, dx: dx / m.k, to: dropIndexOf(m.from, dx, m.width, swordList.length) });
+  };
+  const onMoveEnd = () => {
+    const m = moveRef.current;
+    moveRef.current = null;
+    if (!m?.moved) return;
+    // ドラッグのあとに続けて届く「押した」は無視する
+    suppressRef.current = true;
+    setTimeout(() => { suppressRef.current = false; }, 0);
+    const to = dropIndexOf(m.from, m.dx, m.width, swordList.length);
+    setDrag(null);
+    if (to === m.from) return;
+    const next = swordList.filter(s => s.id !== m.id);
+    next.splice(to, 0, swordList[m.from]);
+    reorderSwords(next);
   };
 
-  // 🌟 親コンポーネントの window.confirm による二重ダイアログ発火を完全にバイパスして破棄を実行
-  const ConfirmDeleteSword = () => {
-    if (selectedSword) {
-      setTransition("idle");
-      const origConfirm = window.confirm;
-      window.confirm = () => true;
-      try {
-        deleteSword(selectedSword.id);
-      } finally {
-        window.confirm = origConfirm;
-      }
-      setIsDeleteModalOpen(false);
-    }
+  const selectedIndex = swordList.findIndex(s => s.id === selected.id);
+  const equippedId = mySwordData?.id;
+  const eqTag = cls => <span className={`armory__eq-tag ${cls}`}>装備中</span>;
+
+  // 表示切替のときに、剣ごとに重ねる情報の窓（横長は名前・レーダー・数字・必殺技、縦長は数字と必殺技のアイコン）
+  const card = (sword, index) => {
+    const t = totalsOf(sword);
+    const numbers = (
+      <span className="armory__card-stats">
+        {STAT_LABELS.map((label, i) => (
+          <span key={label} className="armory__card-stat"><span className="armory__card-label">{label}</span><span className="armory__card-total">{t[i]}</span></span>
+        ))}
+      </span>
+    );
+    return (
+      <div key={sword.id} className="armory__card" style={{ left: slotX(index) }} aria-label={`${sword.name}のステータス`}>
+        {portrait ? (
+          <>
+            {sword.id === equippedId && eqTag('is-card')}
+            {numbers}
+            <SkillIcon hiltType={sword.hiltType} className="armory__card-icon" />
+          </>
+        ) : (
+          <>
+            <span className="armory__card-name">{sword.name}{sword.id === equippedId && eqTag('is-card')}</span>
+            <span className="armory__card-row">
+              <RadarChart base={baseStatsOf(sword)} shown={t} totals={t} className="armory__card-radar" />
+              {numbers}
+            </span>
+            <span className="armory__card-skill">
+              <SkillIcon hiltType={sword.hiltType} className="armory__card-icon" />
+              {hiltOf(sword.hiltType).skillName}
+            </span>
+          </>
+        )}
+      </div>
+    );
   };
 
-  // 画面遷移フック関数
-  const onCancel = () => {
-    if (transition !== "enter" && transition !== "idle") return;
-    setTransition("exit-back");
-    setTimeout(cancelList, 300);
-  };
+  const rack = (
+    <div className="armory__rack">
+      <div className="armory__rack-inner" ref={rackRef}>
+        <EnsoInk variant="rack" className="armory__enso" style={{ left: slotX(selectedIndex) }} />
+        {/* 並べ替えの置き先：番号の朱の輪に加えて、自分の元の場所以外に重ねたら、その場所の剣の後ろに薄い朱の円相 */}
+        {drag && drag.to !== drag.from && <EnsoInk variant="rack" className="armory__enso is-ghost" style={{ left: slotX(drag.to) }} />}
+        <span className="inkline armory__ground" aria-hidden="true" />
 
-  const onRecapture = (id) => {
-    if (transition !== "enter" && transition !== "idle") return;
-    setTransition("exit-forward");
-    setTimeout(() => startRecapture(id), 300);
-  };
+        {swordList.map((sword, index) => {
+          const on = sword.id === selected.id;
+          const dragging = drag?.id === sword.id;
+          const edit = on && editingPrivacy;
+          const press = () => {
+            if (suppressRef.current) return;
+            if (!on) choose(sword.id);
+            else if (!overview) spin(sword.id);
+          };
+          const size = overview ? 'var(--ov-scale)' : on ? 1 : 'var(--off-scale)';
+          return (
+            <div
+              key={sword.id}
+              className={`armory__item ${on ? 'is-on' : ''} ${dragging ? 'is-dragging' : ''} ${editingPrivacy ? '' : 'is-movable'}`}
+              style={{ left: slotX(index), transform: `${dragging ? `translateX(${drag.dx.toFixed(1)}px) ` : ''}scale(${size})` }}
+              onPointerDown={e => onMoveStart(e, sword, index)}
+              onPointerMove={onMoveDrag}
+              onPointerUp={onMoveEnd}
+              onPointerCancel={onMoveEnd}
+            >
+              <SwordStand
+                imageSrc={sword.imageSrc}
+                hiltType={sword.hiltType || '0'}
+                privacy={sword.privacy}
+                editable={edit}
+                onSpotStart={onSpotStart}
+                onSpotChange={onSpotChange}
+                onPress={press}
+                spin={spins[sword.id] ?? 0}
+                showGuide={edit && !guided}
+                label={on ? (overview ? sword.name : '剣を回す') : `${sword.name}を選ぶ`}
+                badge={sword.id === equippedId && !overview ? eqTag('') : null}
+              />
+            </div>
+          );
+        })}
+        {swordList.map((sword, index) => (
+          <span key={sword.id} className={`armory__item-name ${sword.id === selected.id ? 'is-on' : ''}`} style={{ left: slotX(index) }}>{sword.name}</span>
+        ))}
 
-  const onNewCrafting = () => {
-    if (transition !== "enter" && transition !== "idle") return;
-    setTransition("exit-forward");
-    setTimeout(startNewCrafting, 300);
-  };
+        {/* 地面に書く番号（空きの番号も出す）。選んでいる剣は朱の丸、並べ替えの置き先は朱の輪 */}
+        {[0, 1, 2].map(i => {
+          const sword = swordList[i];
+          const on = sword && sword.id === selected.id && !drag;
+          return (
+            <span key={i} aria-hidden="true" style={{ left: slotX(i) }}
+              className={`armory__num ${sword ? '' : 'is-empty'} ${on ? 'is-on' : ''} ${drag && drag.to === i ? 'is-target' : ''}`}>
+              {i + 1}
+            </span>
+          );
+        })}
+
+        {overview && swordList.map(card)}
+
+        {canCraft && (
+          <button type="button" className="armory__new" style={{ left: slotX(swordList.length) }} onClick={onNewCrafting} aria-label="新しい剣を錬成する">
+            <span className="armory__new-circle"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v14M3 10h14" /></svg></span>
+            新しく錬成する
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const header = (
+    <div className="armory__header">
+      <button type="button" className="forge-link armory__back" onClick={onCancel}>{returnStep === 'LOBBY' ? 'ロビーに戻る' : 'タイトルに戻る'}</button>
+      <h1>武器庫</h1>
+      <span className="armory__count">所持{portrait ? ' ' : '　'}<span>{swordList.length}</span>{portrait ? '/' : ' / '}3</span>
+    </div>
+  );
+
+  // 背景の自分の姿（プライバシーに関係なく元の写真）。左右反転は、見本の剣と一緒にすぐ映す
+  const figure = (
+    <div className="forge-figure armory__figure" aria-hidden="true">
+      <img src={selected.imageSrc} alt="" draggable={false} />
+    </div>
+  );
+
+  // 装備の札。「装備中」「控え」は同じ大きさ。控えのときは真下に下線付きの「装備する」。札かボタンを押すと装備する
+  const equip = !nameEditing && (
+    <div className="armory__equip">
+      {isEquipped
+        ? <span role="status" className={`armory__badge is-eq ${stampId === selected.id ? 'is-stamped' : ''}`}>装備中</span>
+        : (
+          <>
+            <button type="button" className="armory__badge is-spare" onClick={onEquip} aria-label="控え（押すとこの剣を装備します）">控え</button>
+            <button type="button" className="forge-link armory__equip-link" onClick={onEquip}>装備する</button>
+          </>
+        )}
+    </div>
+  );
+
+  const info = (
+    <div className="armory__info">
+      {!portrait && figure}
+      <div className="armory__info-body">
+        {equip}
+        <div className={`armory__name-row ${nameEditing ? 'is-editing' : ''}`}>
+          <NameEditor
+            key={selected.id}
+            name={selected.name}
+            onSave={name => updateSword(selected.id, { name })}
+            maxLen={NAME_MAX}
+            fitMax={portrait ? 40 : 52}
+            fitLines={portrait ? 2 : 1}
+            overlay={!portrait && scale < OVERLAY_SCALE}
+            className="armory__name"
+            compact
+            iconOnly={portrait}
+            onEditingChange={setNameEditing}
+          />
+        </div>
+        <div className="armory__stats">
+          <RadarChart base={base} shown={shown} totals={totals} />
+          <StatsList base={base} bonus={bonus} shown={shown} />
+        </div>
+        <SkillInfo hiltType={hiltType} className="armory__skill" />
+      </div>
+    </div>
+  );
+
+  const hiltSection = (
+    <section className="armory__section" onPointerDown={endPriv}>
+      <div className="forge-label">柄</div>
+      <HiltPicker hiltType={hiltType} onChange={onHilt} />
+    </section>
+  );
+  const privacySection = (
+    <section className="armory__section">
+      <div className="forge-label">プライバシー</div>
+      <PrivacyPicker privacy={selected.privacy} onChange={onPrivacy} thumbSrc={selected.imageSrc} />
+    </section>
+  );
 
   const animClass = transition === "exit-back" ? "page-exit-back" :
     transition === "exit-forward" ? "page-exit-forward" :
       transition === "idle" ? "" :
         (direction === "back" ? "page-enter-back" : "page-enter-forward");
+  const rootClass = `forge forge-quiet armory ${overview ? 'is-overview' : ''} ${animClass}`;
+
+  const sheet = confirmDelete && (
+    <ConfirmSheet title="剣を破棄しますか？" confirmLabel="破棄する" onConfirm={onDelete} onCancel={() => setConfirmDelete(false)}>
+      「<strong>{selected.name}</strong>」を破棄します。<br />この操作は取り消せません。
+    </ConfirmSheet>
+  );
+
+  if (portrait) {
+    return (
+      <div className={`${rootClass} armory--port`}>
+        {figure}
+        {header}
+        {rack}
+        <div className={`forge-scroll-wrap ${compactLevel ? `is-compact-${compactLevel}` : ''}`}>
+          <div className="forge-scroll" onScroll={onScroll}>
+            {info}
+            <div className="armory__settings">
+              <span className="inkline forge-ground" aria-hidden="true" />
+              {hiltSection}
+              {privacySection}
+            </div>
+          </div>
+          {/* 下へスクロールして大きな情報の欄が流れたら、隠れた所から順に、上端の小さな情報の帯へ出す（名前・ステータスの数字・必殺技のアイコン） */}
+          <CompactBar name={selected.name} shown={shown} hiltType={hiltType} level={compactLevel} />
+        </div>
+        {/* 手入れのボタンは画面の下に固定して、いつも出しておく */}
+        <div className="armory__care-bar forge-bottom-bar">{care(false)}</div>
+        {sheet}
+      </div>
+    );
+  }
 
   return (
-    <div className={animClass} style={{ ...styles.container, justifyContent: 'flex-start', paddingTop: '20px' }}>
-
-      {/* 👑 ヘッダー部分 */}
-      <div style={{ width: '100%', maxWidth: '1000px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', marginBottom: '20px', boxSizing: 'border-box' }}>
-        <button className="sumi-btn" onClick={onCancel}>
-          ◀ 戻る
-        </button>
-        <h2 style={{ margin: 0, fontSize: '32px', color: 'var(--sumi)', letterSpacing: '2px' }}>武 器 庫</h2>
-        <div style={{ width: '80px' }}></div>
-      </div>
-
-      {/* ▼ 変更：左右のカラム分けを廃止し、2×2のグリッド（マス目）に直接配置して高さを同期 */}
-      <div className="armory-grid" style={{ width: '100%', maxWidth: '1000px', display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '20px', padding: '0 20px', boxSizing: 'border-box' }}>
-
-        {/* ======================= 行1：左上（プレビュー） ======================= */}
-        {/* 高さを固定せず、右上のパネルと自動で高さが揃うようにしました */}
-        <div className="panel sumi-panel sumi-frame" style={{ minHeight: '280px', position: 'relative', display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '30px' }}>
-          {isEquipped && <span key={selectedSword.id} className="hanko hanko--kin hanko--lg hanko--stamp" title="装備中" style={{ position: 'absolute', top: 14, left: 14 }}>装</span>}
-
-          <div className="floating-sword" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
-            <div
-              className={isSpinning ? "spin-active" : ""}
-              onClick={handleSwordClick}
-              onAnimationEnd={() => setIsSpinning(false)}
-              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', transformOrigin: 'center center' }}
-              title="クリックで回転"
-            >
-              <img
-                src={selectedSword.imageSrc}
-                alt="Blade"
-                style={{ width: '150px', height: 'auto', zIndex: 1 }}
-              />
-              <img
-                src={currentHilt.imageSrc}
-                alt={currentHilt.name}
-                style={{ width: '150px', height: 'auto', marginTop: '-40px', zIndex: 2 }}
-              />
+    <Stage16x9>
+      <div className={`${rootClass} armory--land`}>
+        {header}
+        {rack}
+        <div className="armory__body">
+          {info}
+          <div className="armory__settings">
+            <div className="armory__settings-grid">
+              {hiltSection}
+              {privacySection}
             </div>
+            <div className="armory__care-grid forge-rule">{care(true)}</div>
           </div>
-        </div>
-
-        {/* ======================= 行1：右上（名前とステータス） ======================= */}
-        <div className="panel sumi-panel sumi-frame" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--kasure)', paddingBottom: '15px', marginBottom: '15px' }}>
-            {isEditingName ? (
-              <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
-                <input type="text" className="sumi-input" value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={15} style={{ flex: 1, minWidth: 0, fontSize: '24px', textAlign: 'left' }} />
-                <button className="sumi-btn" onClick={handleNameSave}>保存</button>
-              </div>
-            ) : (
-              <>
-                <h3 style={{ margin: 0, fontSize: '32px', color: 'var(--sumi)' }}>{selectedSword.name}</h3>
-                <button onClick={handleEditClick} className="sumi-btn sumi-btn--sm" style={{ flexShrink: 0 }}>編集</button>
-              </>
-            )}
-          </div>
-
-          <div>
-            <h4 style={{ margin: '0 0 15px 0', color: 'var(--usuzumi)' }}>総合ステータス</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '18px', fontWeight: 'bold' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 4px', borderBottom: '1px solid var(--kasure)' }}>
-                <span style={{ color: 'var(--usuzumi)' }}>HP</span>
-                <span>{totalHp} <span style={{ fontSize: '14px', color: 'var(--usuzumi)', fontWeight: 'normal' }}>({selectedSword.hp} {currentHilt.hpBonus >= 0 ? `+${currentHilt.hpBonus}` : currentHilt.hpBonus})</span></span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 4px', borderBottom: '1px solid var(--kasure)' }}>
-                <span style={{ color: 'var(--usuzumi)' }}>攻撃力</span>
-                <span>{totalAttack} <span style={{ fontSize: '14px', color: 'var(--usuzumi)', fontWeight: 'normal' }}>({selectedSword.attack} {currentHilt.attackBonus >= 0 ? `+${currentHilt.attackBonus}` : currentHilt.attackBonus})</span></span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 4px', borderBottom: '1px solid var(--kasure)' }}>
-                <span style={{ color: 'var(--usuzumi)' }}>重さ</span>
-                <span>{totalWeight} <span style={{ fontSize: '14px', color: 'var(--usuzumi)', fontWeight: 'normal' }}>({selectedSword.weight} {currentHilt.weightBonus >= 0 ? `+${currentHilt.weightBonus}` : currentHilt.weightBonus})</span></span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ======================= 行2：左下（アクションボタン） ======================= */}
-        {/* 高さを自動で右下のパネルと同期させます */}
-        <div className="panel sumi-panel sumi-frame" style={{ display: 'flex', flexDirection: 'column', gap: '10px', justifyContent: 'center' }}>
-          <InkButton fit variant="shu" onClick={() => equipSword(selectedSword)} disabled={isEquipped}>
-            {isEquipped ? "装備しています" : "これを装備する"}
-          </InkButton>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button className="sumi-btn" onClick={() => toggleSwordFlip(selectedSword.id)} style={{ flex: 1 }}>⇄ 左右反転</button>
-            <button className="sumi-btn" onClick={() => onRecapture(selectedSword.id)} style={{ flex: 1 }}>撮り直し</button>
-          </div>
-          <button
-            className="sumi-btn sumi-btn--shu"
-            onClick={() => setIsDeleteModalOpen(true)}
-            disabled={swordList.length === 1}
-          >
-            破棄する
-          </button>
-        </div>
-
-        {/* ======================= 行2：右下（現在の柄と必殺技） ======================= */}
-        <div className="panel sumi-panel sumi-frame" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-              {/* 🌟 柄のプレビュー画像を追加 */}
-              <div style={{ width: '50px', height: '50px', border: '1px solid var(--kasure)', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-                <img src={currentHilt.imageSrc} alt={currentHilt.name} style={{ width: '90%', height: 'auto', objectFit: 'contain' }} />
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', color: 'var(--usuzumi)', display: 'block' }}>現在の柄</span>
-                <h4 style={{ margin: 0, fontSize: '24px', color: 'var(--sumi)' }}>{currentHilt.name}</h4>
-              </div>
-            </div>
-            <button className="sumi-btn sumi-btn--sm" onClick={() => setIsHiltModalOpen(true)}>
-              柄を変更する
-            </button>
-          </div>
-          <div style={{ backgroundColor: 'var(--washi-deep)', padding: '15px' }}>
-            <span style={{ fontSize: '12px', color: 'var(--shu)', display: 'block', marginBottom: '5px' }}>必殺技</span>
-            <div style={{ fontWeight: 'bold', fontSize: '18px', marginBottom: '5px' }}>{currentHilt.skillName}</div>
-            <div style={{ fontSize: '14px', color: 'var(--usuzumi)' }}>{currentHilt.skillDescription}</div>
-          </div>
-        </div>
-
-      </div>
-
-      {/* ======================= 画面下部：所持スロット ======================= */}
-      <div style={{ width: '100%', maxWidth: '1000px', marginTop: '10px', padding: '20px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <p style={{ margin: '0 0 10px 0', fontWeight: 'bold', color: 'var(--usuzumi)', fontSize: '14px' }}>所持スロット ({swordList.length} / 3)</p>
-        <div style={{ display: 'flex', gap: '20px', justifyContent: 'center' }}>
-          {[0, 1, 2].map(index => {
-            const sword = swordList[index];
-            const isSelectedSlot = sword && selectedId === sword.id;
-            const isEquippedSlot = sword && mySwordData?.id === sword.id;
-
-            if (sword) {
-              const slotHilt = HILT_DATABASE[sword.hiltType || "0"] || HILT_DATABASE["0"];
-              return (
-                <div
-                  key={sword.id}
-                  onClick={() => setSelectedId(sword.id)}
-                  style={{
-                    position: 'relative',
-                    width: '80px',
-                    height: '80px',
-                    border: isSelectedSlot ? '3px solid var(--sumi)' : '1px solid var(--kasure)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    overflow: 'hidden',
-                    boxSizing: 'border-box'
-                  }}
-                >
-                  {/* 左上に番号を表示 */}
-                  <span style={{ position: 'absolute', top: 3, left: 5, fontSize: '11px', fontWeight: 'bold', color: isEquippedSlot ? 'var(--sumi)' : 'var(--usuzumi)', zIndex: 10 }}>
-                    {index + 1}
-                  </span>
-
-                  {/* 装備中バッジ */}
-                  {isEquippedSlot && (
-                    <span className="hanko hanko--kin hanko--sm" title="装備中" style={{ position: 'absolute', top: 3, right: 3, fontSize: '12px', zIndex: 12 }}>装</span>
-                  )}
-
-                  {/* 🌟 剣（刃＋柄）の中央配置表示 */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', paddingTop: '6px' }}>
-                    <img src={sword.imageSrc} alt="Blade" style={{ height: '32px', width: 'auto', objectFit: 'contain', zIndex: 1 }} />
-                    <img src={slotHilt.imageSrc} alt="Hilt" style={{ height: '32px', width: 'auto', marginTop: '-10px', zIndex: 2, objectFit: 'contain' }} />
-                  </div>
-                </div>
-              );
-            } else {
-              return (
-                <div
-                  key={`empty-${index}`}
-                  onClick={onNewCrafting}
-                  style={{
-                    position: 'relative',
-                    width: '80px',
-                    height: '80px',
-                    backgroundColor: 'transparent',
-                    border: '2px dashed var(--kasure)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    color: 'var(--kasure)',
-                    fontSize: '24px',
-                    transition: '0.2s'
-                  }}
-                >
-                  {/* 空きスロットにも左上に番号を表示 */}
-                  <span style={{ position: 'absolute', top: 3, left: 5, fontSize: '11px', fontWeight: 'bold', color: 'var(--kasure)' }}>
-                    {index + 1}
-                  </span>
-                  ＋
-                </div>
-              );
-            }
-          })}
         </div>
       </div>
-
-      {/* ⚠️ 破棄確認モーダル */}
-      {isDeleteModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(23, 20, 18, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 200 }}>
-          <div className="sumi-frame" style={{ backgroundColor: 'var(--washi)', padding: '25px 30px', width: '90%', maxWidth: '420px', textAlign: 'center', boxSizing: 'border-box' }}>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '22px', color: 'var(--sumi)' }}>剣を破棄しますか？</h3>
-            <p style={{ margin: '0 0 20px 0', fontSize: '14px', color: 'var(--usuzumi)', lineHeight: '1.5' }}>
-              「<strong style={{ color: 'var(--shu)' }}>{selectedSword.name}</strong>」を破棄します。<br />この操作は取り消せません。
-            </p>
-            <div style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
-              <button className="sumi-btn" onClick={() => setIsDeleteModalOpen(false)} style={{ flex: 1 }}>
-                キャンセル
-              </button>
-              <button className="sumi-btn sumi-btn--shu" onClick={ConfirmDeleteSword} style={{ flex: 1 }}>
-                破棄する
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 🛡️ 柄の変更モーダル */}
-      {isHiltModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(23, 20, 18, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 100 }}>
-          <div className="sumi-frame" style={{ backgroundColor: 'var(--washi)', padding: '30px', boxSizing: 'border-box', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <h2 style={{ margin: '0 0 20px 0', borderBottom: '2px solid var(--sumi)', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
-              <span>柄（つか）の変更</span>
-              <button onClick={() => setIsHiltModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--usuzumi)' }}>✖</button>
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', overflowY: 'auto', paddingRight: '10px' }}>
-              {Object.entries(HILT_DATABASE).map(([hiltId, hiltData]) => {
-                const isCurrentlySet = (selectedSword.hiltType || "0") === hiltId;
-                return (
-                  <div key={hiltId} style={{ display: 'flex', border: isCurrentlySet ? '2px solid var(--sumi)' : '1px solid var(--kasure)', padding: '15px', alignItems: 'center', gap: '20px', backgroundColor: isCurrentlySet ? 'var(--washi-deep)' : 'transparent', transition: '0.2s' }}>
-                    <div style={{ width: '60px', display: 'flex', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-                      <img src={hiltData.imageSrc} alt={hiltData.name} style={{ width: '100%', height: 'auto', objectFit: 'contain' }} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <h4 style={{ margin: '0 0 5px 0', fontSize: '20px' }}>
-                        {hiltData.name}
-                        {isCurrentlySet && <span className="hanko hanko--kin hanko--sm" title="装着中" style={{ marginLeft: '10px', verticalAlign: 'middle' }}>装</span>}
-                      </h4>
-                      <div style={{ fontSize: '14px', color: 'var(--usuzumi)', marginBottom: '5px' }}>
-                        <span>HP {hiltData.hpBonus > 0 ? `+${hiltData.hpBonus}` : hiltData.hpBonus}</span> |
-                        <span> 攻 {hiltData.attackBonus > 0 ? `+${hiltData.attackBonus}` : hiltData.attackBonus}</span> |
-                        <span> 重 {hiltData.weightBonus > 0 ? `+${hiltData.weightBonus}` : hiltData.weightBonus}</span>
-                      </div>
-                      <div style={{ fontSize: '12px', color: 'var(--shu)', display: 'inline-block' }}>
-                        技: {hiltData.skillName}
-                      </div>
-                    </div>
-                    <button
-                      className="sumi-btn"
-                      disabled={isCurrentlySet}
-                      onClick={() => handleHiltChange(hiltId)}
-                      style={{ flexShrink: 0 }}
-                    >
-                      {isCurrentlySet ? "装着中" : "変更する"}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 🌀 アニメーションCSS */}
-      <style>{`
-        .panel {
-          padding: 20px;
-          box-sizing: border-box;
-        }
-
-        @keyframes float {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-15px); }
-        }
-        .floating-sword {
-          animation: float 3s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        .spin-active {
-          animation: spin 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        @media (max-width: 800px) {
-          .armory-grid {
-            grid-template-columns: 1fr !important; /* スマホでは1列に自動で並び替わります */
-          }
-        }
-      `}</style>
-    </div>
+      {sheet}
+    </Stage16x9>
   );
 }

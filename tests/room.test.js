@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HostRoom, MAX_HP, MAX_ATTACK, MAX_WEIGHT } from '../src/network/HostRoom.js';
+import { HostRoom, MAX_HP, MAX_ATTACK, MAX_WEIGHT, swordForGameMode, validateSword } from '../src/network/HostRoom.js';
 
 const sword = { name: 'テスト剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
 function fullRoom(count = 4) {
@@ -335,6 +335,16 @@ test('solo mode and lives mode switch each other off instead of stacking', () =>
   assert.throws(() => new HostRoom({ roomEpoch: 'x', hostSword: sword, soloMode: true, livesMode: true }));
 });
 
+test('solo mode exists only in sword mode', () => {
+  const room = fullRoom();
+  room.setSoloMode(true);
+  room.setGameMode('1');
+  assert.equal(room.snapshot().soloMode, false, '1vs3 のまま独楽にしたら、特殊ルールはなしに戻る');
+  assert.equal(room.snapshot().bossPlayerId, null);
+  assert.throws(() => room.setSoloMode(true));
+  assert.throws(() => new HostRoom({ roomEpoch: 'x', hostSword: sword, gameMode: '1', soloMode: true }));
+});
+
 test('rules cannot be changed once the match has left the lobby', () => {
   const room = fullRoom();
   room.prepare();
@@ -359,4 +369,28 @@ test('the suppress input is accepted and keeps its own action name', () => {
   assert.ok(room.acceptInput('peer-1', { ...suppress, seq: 2 }, 1200));
   // 知らないアクションは従来どおり捨てる
   assert.equal(room.acceptInput('peer-1', { ...suppress, seq: 3, action: 'STUN' }, 1400), null);
+});
+
+test('独楽モードでは柄の補正を外した剣本体の値で戦う', () => {
+  const base = { hp: 300, attack: 5, weight: 5 };
+  // 重さ5に重さ-10の柄を付けると、補正込みの値は下限の1に張り付く。引き算では元の5に戻せない
+  const slot = { name: '予備', hp: 330, attack: 15, weight: 1, imageStr: 'aGVsbG8=', hiltType: '3', base };
+  const data = validateSword({ ...sword, hp: 330, attack: 15, weight: 1, hiltType: '3', base, swords: [slot, null, null] });
+  assert.deepEqual(data.base, base);
+
+  const koma = swordForGameMode(data, '1');
+  assert.deepEqual([koma.hp, koma.attack, koma.weight], [300, 5, 5]);
+  assert.deepEqual([koma.swords[0].hp, koma.swords[0].attack, koma.swords[0].weight], [300, 5, 5]);
+  assert.equal(koma.swords[1].isEmpty, true);
+  // 剣モードは補正込みのまま
+  assert.equal(swordForGameMode(data, '0'), data);
+});
+
+test('補正前の値が無い・おかしい剣は、独楽モードでも補正込みのまま戦う', () => {
+  const old = validateSword({ ...sword, hp: 330 });
+  assert.equal(old.base, null);
+  assert.equal(swordForGameMode(old, '1').hp, 330);
+  for (const base of [{ hp: 0, attack: 5, weight: 5 }, { hp: 300, attack: 101, weight: 5 }, { hp: 300, attack: 5 }]) {
+    assert.equal(validateSword({ ...sword, base }).base, null);
+  }
 });

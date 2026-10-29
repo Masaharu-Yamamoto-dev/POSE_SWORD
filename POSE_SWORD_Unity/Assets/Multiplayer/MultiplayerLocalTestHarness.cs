@@ -30,6 +30,10 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
     [Tooltip("\"0\"=剣モード, \"1\"=独楽モード")]
     public string gameMode = "0";
 
+    [Tooltip("空欄ならJSONのまま。\"0\"〜\"3\"を入れると、自分(P1)の剣の柄＝必殺技をその種類に差し替える" +
+        "(0=大回転斬 / 1=巨大回転斬 / 2=オレ達アタック / 3=オレ達シールド)。必殺技やアイコンを順に試す用")]
+    public string localHiltTypeOverride = "";
+
     [Header("残機・分身の見た目テスト")]
     [Range(1, 3)]
     [Tooltip("デバッグ用の剣データから、HPが異なる手持ちの剣を何本合成するか。2以上にすると分身系必殺技(オレ達" +
@@ -163,6 +167,16 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
                 team = soloMode && i != boss ? MultiplayerManager.TrioTeam : MultiplayerManager.BossTeam,
                 swordData = ownedSwordCount > 1 ? BuildOwnedSwordsTestData(sword, ownedSwordCount) : sword
             };
+        }
+        // 自分(P1="p0")の柄だけ差し替える。手持ちの剣(swords[])も揃えないと、残機モードの持ち替えで元の柄に戻る。
+        // 人数より剣データが少ないと同じオブジェクトを使い回すので、P1用は複製してから書き換える
+        if (!string.IsNullOrEmpty(localHiltTypeOverride))
+        {
+            var own = JsonUtility.FromJson<SwordData>(JsonUtility.ToJson(players[0].swordData));
+            own.hiltType = localHiltTypeOverride;
+            if (own.swords != null)
+                foreach (var slot in own.swords) if (slot != null) slot.hiltType = localHiltTypeOverride;
+            players[0].swordData = own;
         }
 
         var config = new MultiplayerConfig

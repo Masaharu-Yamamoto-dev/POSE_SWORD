@@ -1,347 +1,197 @@
-import { useState, useEffect } from 'react';
-import { styles } from '../styles';
-import { HILT_DATABASE } from './hiltDatabase.js';
+import { useState } from 'react';
 import InkButton from '../components/InkButton.jsx';
+import { EnsoInk } from '../components/SwordForgeParts.jsx';
+import ForgeHammer3D from '../components/ForgeHammer3D.jsx';
+import '../components/SwordForgeParts.css';
+import '../components/Stage16x9.css';
+import { usePortrait, useStageScale } from '../components/swordForge.js';
+import './CraftingScreens.css';
 
-// 🌟 共通：撮影画面と錬成中画面のサイズを完全に一致させるレスポンシブコンテナ
-const COMMON_CAMERA_STYLE = {
-  position: 'relative', 
-  width: '100%', 
-  maxWidth: '400px', 
-  aspectRatio: '4/3', 
-  backgroundColor: 'var(--sumi)', 
-  marginBottom: '20px', 
-  border: '2px solid var(--sumi)',
-  boxSizing: 'border-box',
-  display: 'flex', 
-  justifyContent: 'center', 
-  alignItems: 'center', 
-  overflow: 'hidden',
-  margin: '0 auto'
-};
+// カメラ枠の縦横比をCSSへ渡す（枠の大きさと並びは CraftingScreens.css）
+const cameraFrameVars = (aspect = 4 / 3) => ({ '--cam-aspect': aspect.toFixed(4) });
 
-// 枠の縦横比をカメラ映像に合わせる（スマホの縦持ちでは縦長になる）。
-// 写る範囲と見えている範囲を一致させ、縦長でも画面の高さに収まる幅にする
-const cameraFrameStyle = (aspect = 4 / 3) => ({
-  ...COMMON_CAMERA_STYLE,
-  aspectRatio: String(aspect),
-  width: `min(100%, calc(55vh * ${aspect.toFixed(4)}))`,
-});
+// 名前は、剣の名前の前後に付く言葉（前に最大2文字「紅蓮」など、後ろに最大4文字「ブレード」など）の分だけ短くする。
+// 剣の名前の上限（15文字）を超えないように
+const USER_NAME_MAX = 15 - 2 - 4;
+
+// ==========================================
+// 作成の画面の枠（名前の入力・ポーズ撮影・錬成中で共通）
+// ==========================================
+// 横長は16:9の舞台に収め、縦長は画面いっぱい。上に武器庫と同じ見出しの帯（見出し・手順）を置く。
+// 向きを変えても中の要素（カメラの映像）を作り直さないよう、縦横で同じ入れ子の形にして、見た目だけを切り替える
+function CraftFrame({ title, step, animClass = '', className = '', children }) {
+  const portrait = usePortrait();
+  const scale = useStageScale();
+  return (
+    <div className={portrait ? 'craft-shell' : 'stage169'}>
+      <div className={portrait ? 'craft-shell__inner' : 'stage169__canvas'} style={portrait ? undefined : { transform: `scale(${scale})` }}>
+        <div className={`forge craft ${portrait ? 'craft--port' : 'craft--land'} ${className} ${animClass}`}>
+          <header className="craft__header">
+            <span />
+            <h1>{title}</h1>
+            {step ? <span className="craft__step">手順 <span>{step}</span> / 2</span> : <span />}
+          </header>
+          <div className="craft__body">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 戻るときは、ほかの画面と同じく横へずれながら消えてから前の画面へ移る
+function useLeave(direction) {
+  const [leaving, setLeaving] = useState(false);
+  const animClass = leaving ? 'page-exit-back' : direction === 'back' ? 'page-enter-back' : 'page-enter-forward';
+  const leave = action => {
+    if (leaving) return;
+    setLeaving(true);
+    setTimeout(action, 300);
+  };
+  return [animClass, leave, leaving];
+}
+
+// ズームの「引き」「寄り」の虫眼鏡（－と＋）
+function ZoomIcon({ plus }) {
+  return (
+    <svg className="craft-zoom__icon" viewBox="0 0 24 24" role="img" aria-label={plus ? '寄り' : '引き'}>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d={plus ? 'M7.5 10.5 H13.5 M10.5 7.5 V13.5 M15.3 15.3 L20 20' : 'M7.5 10.5 H13.5 M15.3 15.3 L20 20'} />
+    </svg>
+  );
+}
 
 // ==========================================
 // 1. 名前入力画面
 // ==========================================
+// 入力欄は、錬成完了・武器庫の名前の書き換え欄と同じ形（朱の下線・右下に入れられる残りの文字数）
 export function NameInputScreen({ direction = "forward", userName, setUserName, setStep, handleCancel }) {
-  const animClass = direction === "back" ? "page-enter-back" : "page-enter-forward";
-
+  const [animClass, leave] = useLeave(direction);
+  const count = Array.from(userName).length;
+  const ready = userName.trim() !== '';
+  const next = () => { if (ready) setStep("CRAFT_POSE"); };
+  const onKeyDown = e => {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'Enter') next();
+  };
   return (
-    <div style={styles.container} className={animClass}>
-      <div style={styles.contentWrapper}>
-        <h2>名前の入力</h2>
-        <p style={{ color: 'var(--usuzumi)', marginBottom: '20px' }}>あなたの名前を教えてください</p>
-        <input
-          type="text"
-          value={userName}
-          onChange={(e) => setUserName(e.target.value)}
-          placeholder="名前を入力"
-          maxLength={10}
-          className="sumi-input"
-          style={{ width: '100%', maxWidth: '250px' }}
-        />
-
-        {/* ほかの画面と同じ縦並び：主役のボタンを上、やめる操作を下に置く */}
-        <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px', width: '100%', maxWidth: '300px' }}>
-          <InkButton variant="shu" onClick={() => setStep("CRAFT_POSE")} disabled={!userName.trim()}>ポーズを撮影する</InkButton>
-
-          <InkButton variant="usuzumi" onClick={handleCancel}>キャンセル</InkButton>
+    <CraftFrame title="名前の入力" step={1} animClass={animClass} className="craft--name">
+      <div className="craft-name">
+        <p className="craft-name__lead">あなたの名前を教えてください</p>
+        <span className="name-edit__field craft-name__field">
+          <input type="text" value={userName} aria-label="あなたの名前" placeholder="名前を入力" autoFocus
+            onChange={e => setUserName(Array.from(e.target.value).slice(0, USER_NAME_MAX).join(''))} onKeyDown={onKeyDown} />
+          <span className={`name-edit__count ${count >= USER_NAME_MAX ? 'is-full' : ''}`} aria-live="polite">{count} / {USER_NAME_MAX}</span>
+        </span>
+        <p className="craft-name__hint">名前は剣の名前に入ります（例：紅蓮〇〇ブレード）</p>
+        <div className="craft-name__go">
+          <div className="forge-primary is-plain">
+            <InkButton variant="shu" lit onClick={next} disabled={!ready}>ポーズを撮影する</InkButton>
+          </div>
+          <InkButton variant="usuzumi" onClick={() => leave(handleCancel)}>戻る</InkButton>
         </div>
       </div>
-    </div>
+    </CraftFrame>
   );
 }
 
 // ==========================================
 // 2. 姿勢撮影画面
 // ==========================================
-export function CraftPoseScreen({ camera, videoRef, canvasRef, captureCountdown, startCaptureCountdown, forceCapture, handleBack }) {
+// recapture：撮り直し（名前の入力を通らない）。手順の表示は出さない
+export function CraftPoseScreen({ direction = "forward", recapture = false, camera, videoRef, canvasRef, captureCountdown, startCaptureCountdown, forceCapture, handleBack }) {
+  const [animClass, leave, leaving] = useLeave(direction);
+  const portrait = usePortrait();
+  const counting = captureCountdown !== null;
+  // カウントダウン：毎秒、完成画面と同じ円相を一筆で描き、描き終わると消えて次の数字へ（1 の次はそのまま撮影）。
+  // 縦長はカメラ枠の上に重ね、横長は右の操作の空いた所（隠したカメラの操作の場所）に出す。
+  // 数字ごとに作り直して、描く動きを毎秒はじめから流す
+  const countdown = counting && captureCountdown > 0 && (
+    <div className="craft-count" key={captureCountdown} aria-live="assertive">
+      <EnsoInk variant="craft" className="craft-count__enso" />
+      <span className="craft-count__num">{captureCountdown}</span>
+    </div>
+  );
+  const zoom = camera.zoom;
+  const zoomFill = zoom ? ((zoom.value - zoom.min) / (zoom.max - zoom.min || 1)) * 100 : 0;
   return (
-    <div style={styles.container}>
-      <div style={styles.contentWrapper}>
-        <h2>ポーズ撮影</h2>
-        
-        {/* 🌟 共通サイズコンテナを適用 */}
-        <div style={cameraFrameStyle(camera.aspect)}>
+    <CraftFrame title="ポーズ撮影" step={recapture ? null : 2} animClass={animClass} className="craft--pose">
+      <div className="craft-split">
+        <div className="craft-camera" style={cameraFrameVars(camera.aspect)}>
           <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: camera.mirrored ? 'scaleX(-1)' : 'none' }} />
-          {captureCountdown !== null && (
-            <div style={styles.countdownOverlay}>
-              {captureCountdown > 0 ? captureCountdown : "📸"}
-            </div>
-          )}
+          {portrait && countdown}
         </div>
         <canvas ref={canvasRef} width="640" height="480" style={{ display: 'none' }} />
 
-        {/* カメラの操作：どの端末でも両方出し、使えない機能は押せない状態にする
-            （ズームできないカメラ・カメラが1台だけの端末）。
-            カウントダウン中は隠す。場所は取ったままにして、下のボタンが動かないようにする */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', width: '100%', maxWidth: '400px', margin: '12px auto 15px', visibility: captureCountdown !== null ? 'hidden' : 'visible' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', fontSize: '14px', color: 'var(--usuzumi)', opacity: camera.zoom ? 1 : 0.5 }}>
-            <span>引き</span>
-            <input
-              type="range"
-              aria-label="ズーム"
-              min={camera.zoom?.min ?? 1}
-              max={camera.zoom?.max ?? 2}
-              step={camera.zoom?.step ?? 0.1}
-              value={camera.zoom?.value ?? 1}
-              onChange={(e) => camera.changeZoom(Number(e.target.value))}
-              disabled={!camera.zoom}
-              style={{ flex: 1, accentColor: 'var(--shu)' }}
-            />
-            <span>寄り</span>
-          </label>
-          <button className="sumi-btn sumi-btn--sm" onClick={camera.switchCamera} disabled={!camera.canSwitch}>カメラを切り替える</button>
-          {camera.label && <p style={{ fontSize: '12px', color: 'var(--usuzumi)' }}>{camera.label}</p>}
-        </div>
+        <div className={`craft-side ${counting ? 'is-counting' : ''}`}>
+          {/* カメラの操作：どの端末でも両方出し、使えない機能は押せない状態にする
+              （ズームできないカメラ・カメラが1台だけの端末）。
+              カウントダウン中は隠す。場所は取ったままにして、下のボタンが動かないようにする */}
+          {!portrait && countdown}
+          <div className="craft-camera-controls" style={{ visibility: counting ? 'hidden' : 'visible' }}>
+            <label className={`craft-zoom ${zoom ? '' : 'is-off'}`}>
+              <ZoomIcon plus={false} />
+              {/* つまみは、ワンポイントの大きさと同じ筆跡の通り道 */}
+              <span className="privacy__track" style={{ '--fill': `${zoomFill.toFixed(1)}%` }}>
+                <input
+                  type="range"
+                  aria-label="ズーム"
+                  min={zoom?.min ?? 1}
+                  max={zoom?.max ?? 2}
+                  step={zoom?.step ?? 0.1}
+                  value={zoom?.value ?? 1}
+                  onChange={(e) => camera.changeZoom(Number(e.target.value))}
+                  disabled={!zoom}
+                />
+              </span>
+              <ZoomIcon plus />
+            </label>
+            <button type="button" className="forge-link craft-switch" onClick={camera.switchCamera} disabled={!camera.canSwitch}>カメラを切り替える</button>
+            {camera.label && <p className="craft-camera-label">{camera.label}</p>}
+          </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '300px', margin: '0 auto' }}>
-          <InkButton variant="shu" onClick={startCaptureCountdown} disabled={captureCountdown !== null}>{captureCountdown !== null ? "ポーズをとれ！" : "撮影する！"}</InkButton>
-
-          {captureCountdown !== null && captureCountdown > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'center', margin: '-5px 0' }}>
-              <button 
-                className="sumi-btn sumi-btn--sm sumi-btn--shu"
-                onClick={forceCapture}
-                style={{ animation: 'pulsePulse 1s infinite' }}
-              >
-                今すぐ撮影！
-              </button>
-              <style>{`
-                @keyframes pulsePulse {
-                  0% { transform: scale(1); }
-                  50% { transform: scale(1.05); }
-                  100% { transform: scale(1); }
-                }
-              `}</style>
+          <div className="craft-buttons">
+            <div className="forge-primary is-plain">
+              <InkButton variant="shu" lit onClick={startCaptureCountdown} disabled={counting}>{counting ? "ポーズをとれ！" : "撮影する！"}</InkButton>
             </div>
-          )}
-
-          <InkButton variant="usuzumi" onClick={handleBack} disabled={captureCountdown !== null}>{captureCountdown !== null ? "" : "戻る"}</InkButton>
+            {counting && captureCountdown > 0 && (
+              // 今すぐ撮る：カメラのシャッターの形を、筆で描いた墨の輪と朱の芯で作る（芯は1秒ごとに縮む）
+              <button type="button" className="craft-now" onClick={forceCapture}>
+                <svg viewBox="0 0 80 80" aria-hidden="true">
+                  <circle className="craft-now__ring" cx="40" cy="40" r="34" />
+                  <circle className="craft-now__core" cx="40" cy="40" r="22" />
+                </svg>
+                <span>今すぐ撮影</span>
+              </button>
+            )}
+            <InkButton variant="usuzumi" onClick={() => leave(handleBack)} disabled={counting || leaving}>{counting ? "" : "戻る"}</InkButton>
+          </div>
         </div>
       </div>
-    </div>
+    </CraftFrame>
   );
 }
 
 // ==========================================
 // 3. 錬成中画面
 // ==========================================
-export function CraftingApiScreen({ capturedImage, aspect }) {
+// leaving：錬成が終わったら、動かさずにその場でフェードアウトする（消えきったら錬成完了の画面へ移る）
+export function CraftingApiScreen({ capturedImage, aspect, leaving = false }) {
   return (
-    <div style={styles.container}>
-      <div style={styles.contentWrapper}>
-        <h2 style={{ fontFamily: "'Kurobara', serif", letterSpacing: '0.1em', marginBottom: '20px' }}>錬成中...</h2>
-        
+    <CraftFrame title="錬成中" animClass={leaving ? 'craft-fade-out' : ''}>
+      <div className="craft-split">
         {/* 🌟 撮影時と全く同じサイズの枠 */}
-        <div style={cameraFrameStyle(aspect)}>
+        <div className="craft-camera" style={cameraFrameVars(aspect)}>
           {capturedImage && (
             <img src={capturedImage} alt="Captured Pose" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           )}
         </div>
 
-        <div style={{ margin: '20px 0', fontSize: '60px', animation: 'spin 3s linear infinite' }}>⚙️</div>
-        
-        <p style={{ marginTop: '50px', fontSize: '24px', color: 'var(--sumi)', fontFamily: "'Kurobara', serif", letterSpacing: '0.05em' }}>
-          剣を錬成中...
-        </p>
-        
-        <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+        <div className="craft-side craft-side--wait">
+          <ForgeHammer3D imageSrc={capturedImage} aspect={aspect} />
+          <p className="craft-wait-text">剣を錬成中<i>.</i><i>.</i><i>.</i></p>
+          <p className="craft-wait-note">※剣の錬成には時間がかかる場合があります</p>
+        </div>
       </div>
-    </div>
-  );
-}
-
-// ==========================================
-// 4. 錬成完了画面
-// ==========================================
-export function CraftCompleteScreen({ mySwordData, setStep, startNewCrafting, craftReturnStep, swordListLength, isRecapture }) {
-  const [transition, setTransition] = useState("enter");
-  const [animPhase, setAnimPhase] = useState("INIT");
-  // 🌟 クリック回転用State
-  const [isSpinning, setIsSpinning] = useState(false);
-
-  useEffect(() => {
-    // 0.5秒後：柄が下から衝突
-    const t1 = setTimeout(() => setAnimPhase("CLASH"), 500); 
-    // 1.0秒後：衝突の瞬間にフラッシュ
-    const t2 = setTimeout(() => setAnimPhase("FLASH"), 1000);
-    // 1.1秒後：完成品の剣と既存UIを「ドンッ」と表示
-    const t3 = setTimeout(() => setAnimPhase("COMPLETE"), 1100);
-
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
-  }, []);
-
-  const handleSwordClick = () => {
-    if (!isSpinning) {
-      setIsSpinning(true);
-    }
-  };
-
-  const onReturnTitle = () => {
-    if (transition !== "enter") return;
-    setTransition("exit-back");
-    setTimeout(() => setStep(craftReturnStep), 300);
-  };
-
-  const onGoArmory = () => {
-    if (transition !== "enter") return;
-    setTransition("exit-forward"); 
-    setTimeout(() => setStep("SWORD_LIST"), 300);
-  };
-
-  const onCraftAnother = () => {
-    if (transition !== "enter") return;
-    setTransition("exit-forward"); 
-    setTimeout(startNewCrafting, 300);
-  };
-
-  const currentHilt = mySwordData ? (HILT_DATABASE[mySwordData.hiltType] || HILT_DATABASE["0"]) : null;
-  const exitClass = transition === "exit-back" ? "page-exit-back" : transition === "exit-forward" ? "page-exit-forward" : "";
-
-  return (
-    <div style={styles.container} className={exitClass}>
-      <div style={{ ...styles.contentWrapper, maxWidth: '900px' }}>
-        
-        {/* 🌟 衝突の瞬間の短い白フラッシュ */}
-        {animPhase === 'FLASH' && (
-          <div style={{ position: 'fixed', inset: 0, backgroundColor: '#fff', zIndex: 9999, pointerEvents: 'none' }} />
-        )}
-
-        {/* 🌟 演出途中の状態（シルエットと柄の衝突） */}
-        {animPhase !== 'COMPLETE' && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', position: 'relative' }}>
-            <img
-              src={mySwordData?.imageSrc}
-              alt="Blade Silhouette"
-              style={{ 
-                height: '250px', width: 'auto', objectFit: 'contain', zIndex: 2, 
-                filter: 'brightness(0)' // 黒シルエット化
-              }}
-            />
-            {currentHilt && (
-              <img
-                src={currentHilt.imageSrc}
-                alt="Hilt Silhouette"
-                style={{
-                  height: '200px', width: 'auto', objectFit: 'contain', marginTop: '-60px', zIndex: 1,
-                  filter: 'brightness(0)', // 黒シルエット化
-                  transform: animPhase === 'INIT' ? 'translateY(200px)' : 'translateY(0)',
-                  opacity: animPhase === 'INIT' ? 0 : 1,
-                  transition: animPhase === 'CLASH' ? 'transform 0.4s cubic-bezier(0.1, 0.9, 0.2, 1), opacity 0.2s' : 'none'
-                }}
-              />
-            )}
-          </div>
-        )}
-
-        {/* 🌟 演出完了後：UIを左右に分割（左：巨大剣、右：文字とボタン） */}
-        {animPhase === 'COMPLETE' && (
-          <div style={{ width: '100%', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '50px', marginTop: '20px' }}>
-            
-            {/* 左側：完成した剣（ふわふわ浮遊 ＆ クリックで回転） */}
-            {mySwordData && (
-              <div className="slam-left-anim" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', minHeight: '350px' }}>
-                <div 
-                  className={`floating-sword ${isSpinning ? "spin-active" : ""}`}
-                  onClick={handleSwordClick}
-                  onAnimationEnd={() => setIsSpinning(false)}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', transformOrigin: 'center center' }}
-                  title="クリックで回転"
-                >
-                  {mySwordData.imageSrc ? (
-                    <>
-                      <img src={mySwordData.imageSrc} alt="Blade" style={{ width: '250px', height: 'auto', zIndex: 1 }} />
-                      {currentHilt && (
-                        <img src={currentHilt.imageSrc} alt={currentHilt.name} style={{ width: '220px', height: 'auto', marginTop: '-60px', zIndex: 2 }} />
-                      )}
-                    </>
-                  ) : (
-                    <div style={styles.previewImage}>画像受信中...</div>
-                  )}
-                </div>
-              </div>
-            )}
-            
-            {/* 右側：文字・名前・ステータス・ボタン群 */}
-            <div className="pop-in-anim" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '320px' }}>
-              {/* 🌟 離すために margin-bottom を 35px に拡大 */}
-              <h1 style={{ fontSize: '48px', color: 'var(--sumi)', margin: '0 0 35px 0', letterSpacing: '0.05em', fontFamily: "'Kurobara', serif" }}>
-                錬成完了！
-              </h1>
-              
-              {mySwordData && (
-                <>
-                  <p style={{ ...styles.swordName, color: 'var(--sumi)', marginTop: '0', fontSize: '28px' }}>
-                    {mySwordData.name}
-                  </p>
-                  <div className="sumi-stats" style={{ marginBottom: '25px', width: '100%', fontSize: '20px' }}>
-                    <span><small>HP</small>{mySwordData.hp}</span>
-                    <span><small>攻撃</small>{mySwordData.attack}</span>
-                    <span><small>重さ</small>{mySwordData.weight}</span>
-                  </div>
-                </>
-              )}
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', width: '100%' }}>
-                
-                <InkButton variant="shu" onClick={onReturnTitle}>{craftReturnStep === "TITLE" ? "タイトルに戻って対戦！" : "ロビーに戻って対戦！"}</InkButton>
-
-                <InkButton onClick={onGoArmory}>武器庫へ進む</InkButton>
-
-                {!isRecapture && swordListLength < 3 && (
-                  <InkButton onClick={onCraftAnother}>もう1本錬成する</InkButton>
-                )}
-
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 🌀 演出＆アクション用CSS */}
-      <style>{`
-        @keyframes slamLeft {
-          0% { transform: translateX(50px) scale(1.3); opacity: 0; }
-          50% { transform: translateX(-10px) scale(0.95); opacity: 1; }
-          100% { transform: translateX(0) scale(1); opacity: 1; }
-        }
-        @keyframes popIn {
-          0% { transform: scale(0.8) translateY(20px); opacity: 0; }
-          100% { transform: scale(1) translateY(0); opacity: 1; }
-        }
-        .slam-left-anim {
-          animation: slamLeft 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-        }
-        .pop-in-anim {
-          animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-        }
-
-        /* 🌟 武器庫と同様の浮遊＆回転アニメーション */
-        @keyframes float {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-15px); }
-        }
-        .floating-sword {
-          animation: float 3s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        .spin-active {
-          animation: spin 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-      `}</style>
-    </div>
+    </CraftFrame>
   );
 }

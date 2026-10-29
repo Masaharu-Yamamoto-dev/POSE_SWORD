@@ -9,7 +9,8 @@ export const HILT_DATABASE = {
     attackBonus: 10,
     weightBonus: 5,
     skillName: "大回転斬",
-    skillDescription: "敵に目掛けて回転突進する、必殺の一撃!"
+    skillDescription: "敵に目掛けて回転突進する、必殺の一撃!",
+    skillIcon: "/skill-icons/spin.png"
   },
   "1": {
     name: "武骨な柄",
@@ -18,7 +19,8 @@ export const HILT_DATABASE = {
     attackBonus: 30,
     weightBonus: 20,
     skillName: "巨大回転斬",
-    skillDescription: "巨大化して周囲を薙ぎ払う。複数KOも狙えるロマン技!"
+    skillDescription: "巨大化して周囲を薙ぎ払う。複数KOも狙えるロマン技!",
+    skillIcon: "/skill-icons/giant.png"
   },
   "2": {
     name: "悪魔の柄",
@@ -27,7 +29,8 @@ export const HILT_DATABASE = {
     attackBonus: 15,
     weightBonus: 10,
     skillName: "オレ達アタック",
-    skillDescription: "自分の分身を飛ばして攻撃する、武士道皆無の珍技!"
+    skillDescription: "自分の分身を飛ばして攻撃する、武士道皆無の珍技!",
+    skillIcon: "/skill-icons/attack.png"
   },
   "3": {
     name: "大翼の柄",
@@ -36,6 +39,7 @@ export const HILT_DATABASE = {
     attackBonus: 10,
     weightBonus: -10,
     skillName: "オレ達シールド",
-    skillDescription: "自分の分身を周囲に展開する、攻防一体の妙技!"
+    skillDescription: "自分の分身を周囲に展開する、攻防一体の妙技!",
+    skillIcon: "/skill-icons/shield.png"
   }
 };

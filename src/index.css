@@ -15,7 +15,7 @@
   --sumi-stroke: url('/sumi_touka.png');
 
   /* フォント */
-  --font-brush: 'Kurobara', serif;
+  --font-brush: 'Kurobara', 'KurobaraUI', serif;
 
   /* レイアウト */
   --page-width: 1126px;
@@ -34,9 +34,25 @@
   }
 }
 
+/* 黒バラフォントは2段階で読み込む。字形はどちらも同じなので、差し替わっても見た目は変わらない。
+   1. KurobaraUI：画面で使っている文字だけに絞った版（約150KB）。先に届いて、すぐ黒バラで出す
+   2. Kurobara  ：全部の文字の版（1.0MB）。届いたらこちらに差し替わる。名前に入れた珍しい漢字などはこちらで出る
+   font-family は 'Kurobara', 'KurobaraUI' の順に並べる（--font-brush と src/styles.js）。
+   全部の版が届くまでは、次の候補の絞った版で描かれる。
+   絞った版は block：届くまでの一瞬は文字を出さずに待つ（別のフォントの文字が見えないように）。
+   画面に新しい文言を足したら npm run font:subset で絞った版を作り直す（漏れは npm test で分かる）。
+   index.html で先読み（preload）しているので、ここと同じ URL を保つこと */
+@font-face {
+  font-family: 'KurobaraUI';
+  src: url('/kurobara-gothic-heavy-ui.woff2') format('woff2');
+  font-display: block;
+}
+
+/* 全部の版。WOFF2 に対応していない古いブラウザだけ元の TTF を取りに行く */
 @font-face {
   font-family: 'Kurobara';
-  src: url('/kurobara-gothic-heavy.ttf') format('truetype');
+  src: url('/kurobara-gothic-heavy.woff2') format('woff2'),
+       url('/kurobara-gothic-heavy.ttf') format('truetype');
   font-display: swap;
 }
 

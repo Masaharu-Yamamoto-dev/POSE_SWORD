@@ -125,7 +125,7 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
               {headline}
             </h2>
 
-            <div className="sumi-panel sumi-frame" style={{ padding: '20px', width: '100%' }}>
+            <div className="sumi-panel" style={{ padding: '20px', width: '100%' }}>
               <h3 style={{ fontSize: '22px', color: 'var(--sumi)', margin: '0 0 15px 0', textAlign: 'center' }}>
                 {result.draw ? "引き分け" : "最終結果"}
               </h3>

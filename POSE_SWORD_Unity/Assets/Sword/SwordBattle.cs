@@ -633,20 +633,66 @@ public static bool matchEnded = false;
         // 制圧を受けている間はどの入力も通らないので、押せるように見せない
         bool suppressed = MultiplayerOwner != null && MultiplayerOwner.IsSuppressed(PlayerId);
         bool shouldShow = !isDashing && !suppressed && currentSp >= UltimateThreshold;
-        if (specialAttackButton.gameObject.activeSelf != shouldShow)
+        // ▼【新規追加】アイコン付きのボタン(SkillIconView)は、溜めている途中も出したままにして丸ゲージで
+        // 溜まり具合を見せる。押せるのは撃てる時だけ。アイコンが無いボタンは従来どおり撃てる時だけ出す
+        var iconView = SkillIconViewOfButton();
+        bool visible = iconView != null || shouldShow;
+        if (specialAttackButton.gameObject.activeSelf != visible)
         {
             // ▼【調査用ログ】ボタンの表示/非表示が切り替わるたびに、判断材料を全部出しておく。
             // 「でっぱなし」で困っている時は、最後にこのログが出た時の値と、それ以降ログが
             // 一切出ていない(=このメソッド自体が呼ばれなくなった)かどうかを見れば原因を絞り込める
             Debug.Log($"🔘 [調査用] 必殺技ボタンの表示切り替え: sword={gameObject.name}, " +
-                $"{specialAttackButton.gameObject.activeSelf}→{shouldShow}, currentSp={currentSp}, " +
+                $"{specialAttackButton.gameObject.activeSelf}→{visible}, currentSp={currentSp}, " +
                 $"UltimateThreshold={UltimateThreshold}, isDashing={isDashing}, suppressed={suppressed}, " +
                 $"isKomaMode={SwordController.isKomaMode}, isRoundStarted={isRoundStarted}");
-            specialAttackButton.gameObject.SetActive(shouldShow);
+            specialAttackButton.gameObject.SetActive(visible);
+        }
+        if (iconView != null)
+        {
+            if (specialAttackButton.interactable != shouldShow) specialAttackButton.interactable = shouldShow;
+            // 1vs3のボスだけ、通常必殺技のラインを越えた分を掌握斬までの2周目として重ねて見せる。
+            // 満タンで掌握に切り替わったらアイコン自体が掌握斬になるので、2周目は消す
+            bool overcharge = MultiplayerOwner != null && MultiplayerOwner.SoloModeActive &&
+                maxSp > ultimateSp && !SuppressReady;
+            float overFill = overcharge ? Mathf.Clamp01((currentSp - ultimateSp) / (maxSp - ultimateSp)) : 0f;
+            iconView.Show(SkillIconKey, Mathf.Clamp01(currentSp / UltimateThreshold), shouldShow,
+                overcharge ? "grasp" : null, overFill);
         }
         // ▼【新規追加】1vs3：ボタンは1つのまま、SPが満タンになったら掌握へ切り替わる。
         // どちらが出るのか分かるよう、表示も切り替える
         ApplySuppressButtonSkin(SuppressReady);
+    }
+
+    // ▼【新規追加】必殺技アイコンの種類(Assets/UI/SkillIcons のファイル名の頭)。
+    // 1vs3のボスがSP満タンで掌握に切り替わっている間は掌握斬、独楽モードは竜巻、それ以外は柄の種類で決まる
+    public string SkillIconKey
+    {
+        get
+        {
+            if (SuppressReady) return "grasp";
+            if (SwordController.isKomaMode) return "tornado";
+            switch (hiltType)
+            {
+                case "1": return "giant";
+                case "2": return "attack";
+                case "3": return "shield";
+                default: return "spin";
+            }
+        }
+    }
+
+    // 共有ボタンはMultiplayerManagerが試合ごとに差し替えるので、ボタンが変わった時だけ探し直す
+    Button iconViewButton;
+    SkillIconView iconViewCache;
+    SkillIconView SkillIconViewOfButton()
+    {
+        if (iconViewButton != specialAttackButton)
+        {
+            iconViewButton = specialAttackButton;
+            iconViewCache = specialAttackButton != null ? specialAttackButton.GetComponent<SkillIconView>() : null;
+        }
+        return iconViewCache;
     }
 
     // 掌握に切り替わっている間だけ、共有の必殺技ボタンの文字と色を差し替える。

@@ -1,0 +1,115 @@
+/* 錬成中の槌（3D）。中身は 540×520 の舞台として組み、--k で丸ごと縮めて置く */
+.forge3d {
+  --k: 0.56;
+  position: relative;
+  width: calc(540px * var(--k));
+  height: calc(520px * var(--k));
+  overflow: hidden;
+}
+
+.forge3d__stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 540px;
+  height: 520px;
+  transform: scale(var(--k));
+  transform-origin: 0 0;
+  perspective: 760px;
+  perspective-origin: 50% -20%;
+}
+
+/* 場面の基準点（地面の上の、写真の真ん中） */
+.forge3d__world {
+  position: absolute;
+  left: 50%;
+  top: 75%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+}
+
+.forge3d__world * {
+  position: absolute;
+  transform-style: preserve-3d;
+}
+
+/* 地面：和紙の色の上に、真ん中だけ少し沈んだ影 */
+.forge3d__floor {
+  left: -500px;
+  top: -500px;
+  width: 1000px;
+  height: 1000px;
+  transform: rotateX(90deg);
+  /* 場面の枠で切れて四角く見えないよう、陰りは内側で消す */
+  background: radial-gradient(closest-side, rgba(166, 157, 143, 0.3), rgba(166, 157, 143, 0.1) 22%, rgba(166, 157, 143, 0) 40%);
+}
+
+.forge3d__floor > * {
+  left: 500px;
+  top: 500px;
+}
+
+/* 撮った写真（白い縁付きのプリント） */
+.forge3d__photo {
+  padding: 6px;
+  box-sizing: border-box;
+  background: #f6f1e6;
+  box-shadow: 0 0 0 1px #cfc5b1, 0 6px 14px rgba(40, 30, 20, 0.25);
+  transform: translateZ(1px);
+}
+
+.forge3d__photo img {
+  position: static;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.forge3d__shadow {
+  width: 90px;
+  height: 70px;
+  margin: -35px 0 0 -45px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(23, 20, 18, 0.55), rgba(23, 20, 18, 0));
+  transform: translateZ(2px);
+}
+
+.forge3d__ring {
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 3px solid #d2382e;
+  opacity: 0;
+}
+
+.forge3d__face {
+  left: 0;
+  top: 0;
+  backface-visibility: hidden;
+}
+
+.forge3d__star {
+  left: 0;
+  top: 0;
+}
+
+.forge3d__pop {
+  left: -60px;
+  top: -60px;
+  width: 120px;
+  height: 120px;
+  opacity: 0;
+}
+
+.forge3d__star svg,
+.forge3d__pop svg {
+  position: static;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
