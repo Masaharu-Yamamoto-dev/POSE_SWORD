@@ -12,6 +12,8 @@ import SwordListScreen from './screens/SwordListScreen';
 import { HILT_DATABASE } from './screens/hiltDatabase.js';
 import MatchmakingScreen from './screens/MatchmakingScreen';
 import BattleArena from './components/BattleArena.jsx';
+import MatchIntro from './components/MatchIntro.jsx';
+import { useMatchIntro } from './components/useMatchIntro.js';
 import HowToPlayPanel from './components/HowToPlayPanel.jsx';
 import SumiFilters from './components/SumiFilters.jsx';
 import Stage16x9 from './components/Stage16x9.jsx';
@@ -194,6 +196,9 @@ export default function PoseSwordWeb() {
       const last = lastRoomRef.current;
       // 部屋に入る前（接続の失敗・満員など）と、ランダムマッチ（次の相手を探し直す）は、これまでどおりタイトルに理由を出す
       if (!last || last.auto) { resetToTitleRef.current?.(message || "ロビーとの接続が終了しました。"); return; }
+      // ID入力のメニューとIDを残したままにすると、タイトルが出直したときに同じIDへ自動で入り直してしまう。
+      // お知らせを閉じたあとはタイトルのはじめのメニューに戻す
+      setTitleMode("DEFAULT"); setTargetId("");
       const disbanded = message === HOST_CLOSED_MESSAGE;
       setRoomNotice({
         title: disbanded ? "ロビーが解散されました" : "通信エラー",
@@ -250,7 +255,21 @@ export default function PoseSwordWeb() {
     lastRoomRef.current = ROOM_STEPS.includes(screen) && view?.room
       ? { screen, view, roomId: room.roomId, isHost: view.isHost, auto: Boolean(view.room.autoStart) } : null;
   }, [screen, view, room.roomId]);
-  const shownView = frozen?.view ?? view;
+  // 対戦開始の演出（ロード画面を兼ねる）。読み込みが始まったら、ロビーの上に和紙をかぶせて消し、
+  // そのまま演出を出す。Unity の読み込みは演出の裏で進み、最低限の時間（MATCH_INTRO_MS）が経って全員そろったら演出ごと消える
+  const intro = useMatchIntro(view?.room?.matchId, view?.room?.phase);
+  const introOn = screen === "PLAYING" && Boolean(view?.room) && intro.matchId === view.room.matchId && intro.stage !== "done";
+  // 和紙をかぶせている間は、下にロビーを出したままにする（Unity の画面はまだ出さない）。
+  // 開始した時点で全員「ロビーにいない」扱いになるので、見た目はロビーにいたときのままにしておく
+  const lobbyLeaving = introOn && intro.stage === "fade";
+  const shownScreen = lobbyLeaving ? "LOBBY" : screen;
+  const shownView = frozen?.view ?? (lobbyLeaving
+    ? { ...view, room: { ...view.room, phase: "LOBBY", players: view.room.players.map(p => ({ ...p, inLobby: true })) } }
+    : view);
+  // 読み込みの失敗などで開始が取り消され、ロビーに戻ったときのお知らせ。閉じた試合は覚えておき、二度は出さない
+  const [seenAbortId, setSeenAbortId] = useState(null);
+  const abortNotice = screen === "LOBBY" && !roomNotice && view?.aborted && view.aborted.matchId !== seenAbortId
+    ? view.aborted : null;
 
   // 剣の情報を送り直すのはロビーにいる間だけ。ロビーから武器庫を開いて直している間は送らず、
   // ロビーに戻ったときにまとめて送る（直している途中の剣を相手に見せない）
@@ -561,7 +580,7 @@ export default function PoseSwordWeb() {
   };
 
   const renderScreen = () => {
-    switch (screen) {
+    switch (shownScreen) {
       // マッチング待ちはタイトル画面のメニューの場所に出す（ロゴなど他の要素はそのまま残る）
       case "TITLE":
       case "MATCHING":
@@ -609,11 +628,17 @@ export default function PoseSwordWeb() {
         </ConfirmSheet>
       )}
 
+      {abortNotice && (
+        <ConfirmSheet title="対戦を開始できませんでした" confirmLabel="閉じる" onConfirm={() => setSeenAbortId(abortNotice.matchId)}>
+          {abortNotice.reason}
+        </ConfirmSheet>
+      )}
+
       {/* 画面描画（遅延なしで瞬時に切り替わり、各画面のCSSアニメーションが発動します） */}
-      {screen !== "PLAYING" && (
+      {shownScreen !== "PLAYING" && (
         // ロビーと結果は16:9の舞台が自分で大きさを合わせる。それ以外は高さに収まるよう縮める。
         // 錬成完了と武器庫は、横長なら16:9の舞台、縦長なら画面いっぱいの縦の配置を自分で組む
-        ROOM_STEPS.includes(screen) || ["TITLE", "MATCHING", "SWORD_LIST", "CRAFT_COMPLETE", "NAME_INPUT", "CRAFT_POSE", "CRAFTING_API"].includes(screen) ? renderScreen() : <FitToHeight>{renderScreen()}</FitToHeight>
+        ROOM_STEPS.includes(shownScreen) || ["TITLE", "MATCHING", "SWORD_LIST", "CRAFT_COMPLETE", "NAME_INPUT", "CRAFT_POSE", "CRAFTING_API"].includes(shownScreen) ? renderScreen() : <FitToHeight>{renderScreen()}</FitToHeight>
       )}
 
       {/* 16:9固定の画面を、スマホを縦に持って見ているときの案内（かぶせるだけで、下の画面は動かし続ける） */}
@@ -624,13 +649,22 @@ export default function PoseSwordWeb() {
 
       {/* Unity側の描画 */}
       {room.hasArena && (
-        <div className="arena-stage" style={{ display: screen === "PLAYING" ? 'flex' : 'none' }}>
+        <div className="arena-stage" style={{ display: shownScreen === "PLAYING" ? 'flex' : 'none' }}>
           <BattleArena bridge={room.bridge} view={view} onLoadFailed={room.reportLoadFailure} />
         </div>
       )}
-      {screen === "PLAYING" && !room.hasArena && (
+      {shownScreen === "PLAYING" && !room.hasArena && (
         <div style={{ ...styles.container, justifyContent: 'center', minHeight: '100vh' }}>
           <p style={{ fontSize: '20px', fontWeight: 'bold' }}>対戦を準備しています…</p>
+        </div>
+      )}
+
+      {/* 対戦開始の演出。ロビーを和紙で覆ってから出し、最後は覆いごと高速フェードして Unity のカウントダウンを見せる */}
+      {introOn && (
+        <div className={`match-cover ${lobbyLeaving ? 'is-lobby-out' : ''} ${intro.stage === 'leave' ? 'is-leaving' : ''}`}>
+          {!lobbyLeaving && (
+            <Stage16x9><MatchIntro room={view.room} localPlayerId={view.localPlayerId} waiting={intro.waiting} /></Stage16x9>
+          )}
         </div>
       )}
     </div>

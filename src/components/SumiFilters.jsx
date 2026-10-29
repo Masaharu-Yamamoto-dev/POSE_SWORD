@@ -13,6 +13,11 @@ export default function SumiFilters() {
         <feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="2" seed="7" result="noise" />
         <feDisplacementMap in="SourceGraphic" in2="noise" scale="3.5" />
       </filter>
+      {/* 図形の輪郭を大きめに揺らして、筆で描いたように崩す（対戦開始の VS の菱形など） */}
+      <filter id="sumi-wobble" x="-10%" y="-10%" width="120%" height="120%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="3" seed="9" result="noise" />
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="9" />
+      </filter>
       {/* 落款用：縁を欠けさせ、朱肉のムラ（小さな抜け）を付ける */}
       <filter id="sumi-hanko" x="-10%" y="-10%" width="120%" height="120%">
         <feTurbulence type="fractalNoise" baseFrequency="0.6" numOctaves="2" seed="11" result="noise" />

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ASSETS_READY_DELAY, AUTO_START_DELAY, FILL_TIMEOUT, RoomSession } from '../src/network/RoomSession.js';
+import { ASSETS_READY_DELAY, AUTO_START_DELAY, FILL_TIMEOUT, LOBBY_FADE_MS, MATCH_INTRO_MS, RoomSession } from '../src/network/RoomSession.js';
 import { PROTOCOL_VERSION } from '../src/network/HostRoom.js';
 
 const sword = { name: '剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
@@ -77,9 +77,40 @@ test('four sessions receive the same roster and wait for every Unity instance', 
   assert.equal(s.host.view().room.phase, 'LOADING');
   s.guests[2].unityEvent('INITIALIZED', { matchId: id }); s.net.flush();
   assert.equal(s.host.view().room.phase, 'COUNTDOWN');
-  assert.equal(s.commands[0].filter(c => c.method === 'BeginMultiplayer').length, 1);
+  // 全員そろっても、開始の演出を見せ終わるまではカウントダウンを始めない
+  const begins = () => s.commands[0].filter(c => c.method === 'BeginMultiplayer').length;
+  assert.equal(begins(), 0);
+  s.advance(LOBBY_FADE_MS + MATCH_INTRO_MS - 1); s.host.pump();
+  assert.equal(begins(), 0);
+  s.advance(1); s.host.pump();
+  assert.equal(begins(), 1);
+  s.guests[2].unityEvent('INITIALIZED', { matchId: id }); s.net.flush(); s.host.pump();
+  assert.equal(begins(), 1);
+});
+
+test('loading that outlasts the intro starts the countdown as soon as the last player loads', () => {
+  const s = setup();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
+  s.host.prepare(); s.net.flush();
+  const id = s.host.view().room.matchId;
+  [s.host, ...s.guests.slice(0, 2)].forEach(p => p.unityEvent('INITIALIZED', { matchId: id })); s.net.flush();
+  tick(s, Math.ceil((LOBBY_FADE_MS + MATCH_INTRO_MS) / 1000) + 1);
+  assert.equal(s.commands[0].filter(c => c.method === 'BeginMultiplayer').length, 0);
   s.guests[2].unityEvent('INITIALIZED', { matchId: id }); s.net.flush();
   assert.equal(s.commands[0].filter(c => c.method === 'BeginMultiplayer').length, 1);
+});
+
+test('an aborted start never begins the countdown afterwards', () => {
+  const s = setup();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
+  s.host.prepare(); s.net.flush();
+  const id = s.host.view().room.matchId;
+  [s.host, ...s.guests].forEach(p => p.unityEvent('INITIALIZED', { matchId: id })); s.net.flush();
+  s.host.abort('テスト');
+  s.advance(LOBBY_FADE_MS + MATCH_INTRO_MS); s.host.pump();
+  assert.equal(s.commands[0].filter(c => c.method === 'BeginMultiplayer').length, 0);
 });
 
 test('guest input goes once to its own sword on the host; guest sync is ignored', () => {
@@ -540,4 +571,49 @@ test('a player back in the lobby can ready up while others are still on the resu
   assert.equal(s.host.view().room.phase, 'LOBBY');
   assert.equal(ready('p0'), true);
   assert.equal(ready(g0), true);
+});
+
+test('PREPARE carries no sword images; guests fill them in from the roster they already acknowledged', () => {
+  const s = setup();
+  start(s);
+  const prepare = s.links[0][0].sent.find(m => m.type === 'PREPARE');
+  assert.ok(!JSON.stringify(prepare).includes('imageStr'));
+  s.guests.forEach((g, i) => {
+    const config = s.commands[i + 1].find(c => c.method === 'InitializeMultiplayer').data;
+    assert.ok(config.players.every(p => p.swordData.imageStr === sword.imageStr));
+  });
+});
+
+test('a guest missing a roster image reports a load failure instead of starting without it', () => {
+  const s = setup();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
+  s.guests[0].room.players.forEach(p => { delete p.swordData.imageStr; });
+  s.host.prepare(); s.net.flush();
+  assert.ok(!s.commands[1].some(c => c.method === 'InitializeMultiplayer'));
+  assert.equal(s.host.view().room.phase, 'LOBBY');
+  assert.equal(s.host.view().error, 'ゲームの初期化に失敗しました。');
+});
+
+test('guests see that everyone is ready but the swords are still loading', () => {
+  const s = setup();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  s.host.pump(); s.net.flush();
+  assert.equal(s.guests[0].view().room.swordsLoading, true);
+  s.advance(ASSETS_READY_DELAY); s.host.pump(); s.net.flush();
+  assert.equal(s.host.view().canStart, true);
+  assert.equal(s.guests[0].view().room.swordsLoading, false);
+});
+
+test('an aborted start tells every player why they are back in the lobby', () => {
+  const s = setup();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
+  s.host.prepare(); s.net.flush();
+  const matchId = s.host.view().room.matchId;
+  s.guests[1].unityEvent('LOAD_FAILED', { matchId }); s.net.flush();
+  for (const p of [s.host, ...s.guests]) {
+    assert.deepEqual(p.view().aborted, { matchId, reason: 'ゲームの初期化に失敗しました。' });
+    assert.equal(p.view().room.phase, 'LOBBY');
+  }
 });

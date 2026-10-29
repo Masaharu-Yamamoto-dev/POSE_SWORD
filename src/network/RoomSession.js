@@ -11,6 +11,11 @@ export const ASSETS_READY_DELAY = 3000;
 export const SPIN_INTERVAL = 500;
 // 自分の画面で次に回せるまでの時間。回転1回の長さと同じにして、回っている途中に重ねて回せないようにする。
 export const SPIN_DURATION = 600;
+// 対戦開始の演出（ロード画面を兼ねる）。ロビーを LOBBY_FADE_MS で消してから演出を出し、
+// 演出を最低 MATCH_INTRO_MS 見せてから Unity のカウントダウンに入る。全員の読み込みが遅ければ、それを待つ。
+// 画面側（MatchIntro）も同じ値で数える。
+export const LOBBY_FADE_MS = 250;
+export const MATCH_INTRO_MS = 4500;
 // 剣画像は ROSTER でしか配らない。STATE は同じ形のまま imageStr だけを落とす。
 // 残機モードの swords[] は3本それぞれが画像を持つので、そこまで潜って削る。
 // ここを浅く削ると STATE 1通が数MBになり、心拍が詰まって接続が切れる。
@@ -79,6 +84,11 @@ export class RoomSession {
     // ロビーで誰かが剣を回した回数（playerId → 回数）。部屋の状態ではなく演出の合図なので、
     // HostRoom には持たせず、revision も進めない。画面は回数が増えたのを見て剣を回す。
     this.spins = {};
+    // 直近に開始を取り消した試合とその理由。画面はこれを見て、ロビーに戻った理由をお知らせする
+    this.aborted = null;
+    // 全員の読み込みが済んだが、開始の演出がまだ終わっていないので、カウントダウンを待たせている試合
+    this.pendingBegin = null;
+    this.beginAt = 0;
   }
 
   // 全員の武器データ(画像込み)がReact側に届いたという事実(assetAck)だけでは、
@@ -100,7 +110,7 @@ export class RoomSession {
   view() {
     return { room: this.room, localPlayerId: this.localPlayerId, isHost: this.isHost,
       result: this.result, resultPlayers: this.resultPlayers, sync: this.sync, closed: this.closed, error: this.error,
-      spins: this.spins,
+      spins: this.spins, aborted: this.aborted,
       canStart: this.assetsBaseReady() && this.readyAt != null && this.now() - this.readyAt >= ASSETS_READY_DELAY };
   }
   notify() { this.onChange(this.view()); }
@@ -133,12 +143,20 @@ export class RoomSession {
     }
   }
 
+  // 全員が準備完了なのに、剣の受け渡し（と受け取ってからの猶予）が済まず開始できない間。
+  // ゲストの画面にも出すので、部屋の状態に載せて配る。
+  swordsLoading() {
+    return !!this.host?.canStart() && !this.view().canStart;
+  }
+
   publish(withAssets = false) {
-    this.room = { ...this.host.snapshot(),
-      startsInMs: this.autoStartAt === null ? null : Math.max(0, this.autoStartAt - this.now()) };
     if (withAssets) {
       this.assetVersion++;
       this.readyAt = null; // 配り直したので、届き直してから猶予を数え直す
+    }
+    this.room = { ...this.host.snapshot(), swordsLoading: this.swordsLoading(),
+      startsInMs: this.autoStartAt === null ? null : Math.max(0, this.autoStartAt - this.now()) };
+    if (withAssets) {
       this.broadcast('ROSTER', { room: this.room, assetVersion: this.assetVersion });
     } else this.broadcast('STATE', { room: withoutImages(this.room) });
     this.notify();
@@ -226,9 +244,18 @@ export class RoomSession {
         }
         break;
       }
-      case 'PREPARE':
+      case 'PREPARE': {
         if (!this.room || m.matchId !== this.room.matchId || this.room.phase !== 'LOADING' || this.initializing === m.matchId) return;
-        this.initialize(m); break;
+        // PREPARE は剣画像を載せずに届く。画像は ROSTER で受け取り済みのものを重ねる。
+        // ホストは全員が最新の ROSTER を受け取ったと確かめてから開始するので、ここで欠けることはないはずだが、
+        // もし欠けていたら画像なしで始めず、読み込み失敗としてホストに開始を取り消してもらう。
+        const config = this.withRosterImages(m);
+        if (!config) {
+          this.error = 'ゲームの初期化に失敗しました。';
+          this.sendToHost('LOAD_FAILED', { matchId: m.matchId }); break;
+        }
+        this.initialize(config); break;
+      }
       case 'SYNC':
         if (m.matchId !== this.room?.matchId || !['COUNTDOWN', 'PLAYING'].includes(this.room.phase) ||
             !Number.isSafeInteger(m.tick) || m.tick <= (this.sync?.tick ?? -1)) return;
@@ -242,7 +269,7 @@ export class RoomSession {
         this.send(link, 'RESULT_ACK', { matchId: m.matchId }); break;
       case 'ABORT':
         if (m.matchId !== this.room?.matchId) return;
-        this.error = m.reason; this.initializing = null;
+        this.error = m.reason; this.initializing = null; this.aborted = { matchId: m.matchId, reason: m.reason };
         this.command('StopMultiplayer', { matchId: m.matchId }); break;
       case 'SPIN': if (!this.markSpin(m.playerId)) return; break;
       case 'PING': this.send(link, 'PONG'); break;
@@ -250,6 +277,18 @@ export class RoomSession {
       default: break;
     }
     this.notify();
+  }
+
+  withRosterImages(config) {
+    try {
+      return { ...config, players: config.players.map(p => {
+        const known = this.room.players.find(old => old.playerId === p.playerId);
+        if (!known) throw new Error('missing player');
+        const swordData = mergeSword(known.swordData, p.swordData);
+        validateSword(swordData);
+        return { ...p, swordData };
+      }) };
+    } catch { return null; }
   }
 
   payload(message) {
@@ -295,7 +334,11 @@ export class RoomSession {
       soloMode: this.room.soloMode, soloBuff: this.room.soloMode ? { ...SOLO_BUFF } : null,
       players: this.assignRoles(this.room.players) };
     this.loadDeadline = this.now() + 60000;
-    this.broadcast('PREPARE', config); this.initialize(config);
+    this.beginAt = this.now() + LOBBY_FADE_MS + MATCH_INTRO_MS; this.pendingBegin = null;
+    // 剣画像は ROSTER で配り済み（canStart が全員の受け取りを確かめている）。開始時に数MBを送り直すと、
+    // 回線の細い端末では後ろに詰まった PING が10秒以上届かず、切断扱いになっていた。
+    this.broadcast('PREPARE', { ...config, players: config.players.map(p => ({ ...p, swordData: stripImages(p.swordData) })) });
+    this.initialize(config);
   }
 
   // Fisher-Yates。乱数は注入されたものを使うので、テストから並びを固定できる。
@@ -340,8 +383,16 @@ export class RoomSession {
     this.publish();
     if (this.room.phase === 'COUNTDOWN') {
       this.loadDeadline = Infinity;
-      this.command('BeginMultiplayer', { matchId });
+      this.pendingBegin = matchId; this.beginIfDue();
     }
+  }
+
+  // 開始の演出を見せ終わってから、Unity のカウントダウンを始める（演出の裏でカウントダウンが進まないように）
+  beginIfDue() {
+    if (this.pendingBegin === null || this.now() < this.beginAt) return;
+    const matchId = this.pendingBegin;
+    this.pendingBegin = null;
+    if (matchId === this.room?.matchId && this.room.phase === 'COUNTDOWN') this.command('BeginMultiplayer', { matchId });
   }
 
   unityEvent(type, data) {
@@ -415,7 +466,8 @@ export class RoomSession {
     const matchId = this.room.matchId;
     this.broadcast('ABORT', { matchId, reason });
     this.command('StopMultiplayer', { matchId });
-    this.error = reason; this.initializing = null; this.loadDeadline = Infinity;
+    this.error = reason; this.initializing = null; this.loadDeadline = Infinity; this.aborted = { matchId, reason };
+    this.pendingBegin = null;
     this.host.abort(); this.publish();
   }
 
@@ -449,9 +501,11 @@ export class RoomSession {
       if (this.assetsDelivered()) this.readyAt ??= now; else this.readyAt = null;
       // 手動の部屋はpublish()が呼ばれた瞬間にしかReact側のviewを更新しないため、これが
       // ないとASSETS_READY_DELAY経過後もStartボタンが押せないままになってしまう。
-      if (this.room.phase === 'LOBBY') this.notify();
+      // 剣の受け渡し待ちが始まった・終わったときは、ゲストにも知らせる
+      if (this.room.phase === 'LOBBY') { if (this.swordsLoading() !== this.room.swordsLoading) this.publish(); else this.notify(); }
     }
     if (this.isHost && this.room.phase === 'LOADING' && now >= this.loadDeadline) this.abort('読み込みが時間内に完了しませんでした。');
+    if (this.isHost) this.beginIfDue();
     for (const link of [...this.links.values()]) {
       if (now - link.lastSeen >= 10000 || (!link.playerId && now - link.attachedAt >= 10000)) {
         this.disconnected(link); link.conn.close(); continue;
