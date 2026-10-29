@@ -1,0 +1,511 @@
+/* ===== 対戦開始の演出（ロード画面を兼ねる） =====
+   和紙の地に、墨と朱とプレイヤー色の筆。プレイヤー色の斜めのパネルを並べる。
+   0.0s 和紙色の閃光 → 0.05s〜 パネルが上下から交互に落ちる（境目は墨の斜線）
+   → 0.25s〜 プレイヤー色の筆が走り、剣が飛び込む → 0.45s〜 名札
+   → （1vs3 だけ）0.95s ボスと3人の間に VS
+   → 0〜4.5s 下の墨の線（長さは MATCH_INTRO_MS を --intro で受け取る） → 全員の読み込みが済んでいれば高速フェードして Unity のカウントダウンへ */
+
+/* 画面全体を覆う層。ロビーの上にかぶせて消し（is-lobby-out）、最後は層ごと消して Unity を見せる（is-leaving） */
+.match-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--washi);
+}
+.match-cover.is-lobby-out { animation: mi-fade-in 0.25s ease-in both; }
+.match-cover.is-leaving { animation: mi-fade-out 0.25s ease-in both; pointer-events: none; }
+
+.match-intro {
+  --sk: -10deg;
+  --k: 1.75;
+  position: relative;
+  width: 1280px;
+  height: 720px;
+  overflow: hidden;
+  isolation: isolate;
+  color: var(--sumi);
+  background: var(--washi);
+  font-family: var(--font-brush);
+  text-align: left;
+}
+/* 和紙の陰り（アプリの背景と同じ） */
+.match-intro::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 50%, var(--kage) 100%);
+}
+.mi-n3 { --k: 1.5; }
+.mi-n4 { --k: 1.3; }
+.match-intro.is-solo .mi-panel { --k: 1.05; }
+.match-intro.is-solo .mi-panel.is-boss { --k: 1.7; }
+
+.mi-stage { position: absolute; inset: 0; }
+.match-intro.is-solo .mi-stage { animation: mi-shake 0.3s linear 0.98s both; }
+
+/* ---------- 背景の動き ---------- */
+.mi-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; animation: mi-fade-in 0.6s ease-out 0.2s both; }
+
+/* 剣：鍛冶場の火の粉が下から舞い上がる */
+.mi-bg--sparks { background: radial-gradient(ellipse 70% 40% at 50% 105%, rgba(224, 88, 42, 0.16), transparent 70%); }
+.mi-bg--sparks i {
+  --dx: 40px;
+  position: absolute;
+  bottom: -12px;
+  width: var(--w, 5px);
+  height: var(--w, 5px);
+  border-radius: 50%;
+  color: #e0582a;
+  background: currentColor;
+  box-shadow: 0 0 8px 1px currentColor;
+  animation: mi-rise var(--t, 3.4s) linear var(--dl, 0s) infinite;
+}
+.mi-bg--sparks i:nth-child(even) { --dx: -34px; color: #d9a43a; }
+.mi-bg--sparks i:nth-child(1) { left: 4%; --t: 3.4s; --dl: -0.2s; --w: 6px; }
+.mi-bg--sparks i:nth-child(2) { left: 11%; --t: 2.8s; --dl: -1.5s; --w: 4px; }
+.mi-bg--sparks i:nth-child(3) { left: 17%; --t: 3.9s; --dl: -2.6s; --w: 5px; }
+.mi-bg--sparks i:nth-child(4) { left: 24%; --t: 3.1s; --dl: -0.9s; --w: 3px; }
+.mi-bg--sparks i:nth-child(5) { left: 31%; --t: 4.2s; --dl: -3.1s; --w: 6px; }
+.mi-bg--sparks i:nth-child(6) { left: 38%; --t: 2.6s; --dl: -1.9s; --w: 4px; }
+.mi-bg--sparks i:nth-child(7) { left: 45%; --t: 3.6s; --dl: -0.5s; --w: 5px; }
+.mi-bg--sparks i:nth-child(8) { left: 52%; --t: 3s; --dl: -2.2s; --w: 3px; }
+.mi-bg--sparks i:nth-child(9) { left: 59%; --t: 4s; --dl: -1.2s; --w: 6px; }
+.mi-bg--sparks i:nth-child(10) { left: 66%; --t: 2.9s; --dl: -3.4s; --w: 4px; }
+.mi-bg--sparks i:nth-child(11) { left: 72%; --t: 3.7s; --dl: -0.7s; --w: 5px; }
+.mi-bg--sparks i:nth-child(12) { left: 79%; --t: 3.2s; --dl: -2.8s; --w: 3px; }
+.mi-bg--sparks i:nth-child(13) { left: 85%; --t: 4.1s; --dl: -1.6s; --w: 6px; }
+.mi-bg--sparks i:nth-child(14) { left: 91%; --t: 2.7s; --dl: -0.3s; --w: 4px; }
+.mi-bg--sparks i:nth-child(15) { left: 96%; --t: 3.5s; --dl: -2s; --w: 5px; }
+.mi-bg--sparks i:nth-child(16) { left: 49%; --t: 3.3s; --dl: -3.6s; --w: 4px; }
+.mi-bg--sparks i:nth-child(17) { left: 8%; --t: 4.4s; --dl: -2.4s; --w: 3px; }
+.mi-bg--sparks i:nth-child(18) { left: 63%; --t: 3.8s; --dl: -0.1s; --w: 5px; }
+.mi-bg--sparks i:nth-child(19) { left: 35%; --t: 2.5s; --dl: -1.1s; --w: 3px; }
+.mi-bg--sparks i:nth-child(20) { left: 88%; --t: 3.9s; --dl: -3s; --w: 4px; }
+
+/* 独楽：薄墨の速度線が右から左へ走り抜ける */
+.mi-bg--speed i {
+  position: absolute;
+  right: 0;
+  height: var(--h, 2px);
+  width: var(--len, 360px);
+  background: linear-gradient(to right, rgba(23, 20, 18, 0.28), transparent);
+  animation: mi-streak var(--t, 1.1s) linear var(--dl, 0s) infinite;
+}
+.mi-bg--speed i:nth-child(1) { top: 9%; --len: 420px; --t: 1.1s; --dl: -0.2s; --h: 3px; }
+.mi-bg--speed i:nth-child(2) { top: 16%; --len: 260px; --t: 0.9s; --dl: -0.7s; }
+.mi-bg--speed i:nth-child(3) { top: 24%; --len: 520px; --t: 1.3s; --dl: -0.4s; --h: 4px; }
+.mi-bg--speed i:nth-child(4) { top: 31%; --len: 300px; --t: 1s; --dl: -0.9s; }
+.mi-bg--speed i:nth-child(5) { top: 39%; --len: 460px; --t: 1.2s; --dl: -0.1s; --h: 3px; }
+.mi-bg--speed i:nth-child(6) { top: 47%; --len: 220px; --t: 0.85s; --dl: -0.5s; }
+.mi-bg--speed i:nth-child(7) { top: 55%; --len: 500px; --t: 1.25s; --dl: -1s; --h: 4px; }
+.mi-bg--speed i:nth-child(8) { top: 62%; --len: 280px; --t: 0.95s; --dl: -0.3s; }
+.mi-bg--speed i:nth-child(9) { top: 70%; --len: 440px; --t: 1.15s; --dl: -0.8s; --h: 3px; }
+.mi-bg--speed i:nth-child(10) { top: 78%; --len: 320px; --t: 1s; --dl: -0.6s; }
+.mi-bg--speed i:nth-child(11) { top: 86%; --len: 480px; --t: 1.3s; --dl: -0.15s; --h: 4px; }
+.mi-bg--speed i:nth-child(12) { top: 93%; --len: 240px; --t: 0.9s; --dl: -1.05s; }
+
+/* ---------- プレイヤーのパネル（地は和紙のまま、境目を墨の斜線で切る） ---------- */
+.mi-panels {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -14px;
+  right: -14px;
+  display: flex;
+}
+.mi-panel {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  transform: skewX(var(--sk));
+  animation: mi-drop 0.5s cubic-bezier(0.2, 0.9, 0.2, 1) calc(var(--d) + 0.05s) both;
+}
+.mi-panel.from-below { animation-name: mi-rise-in; }
+.match-intro.is-solo .mi-panel.is-boss { flex: 1.6 1 0; }
+
+/* その人の姿を大きく薄く（パネルの傾きを打ち消して、まっすぐ立てる） */
+.mi-panel__figure {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: 108%;
+  width: auto;
+  max-width: none;
+  translate: -50% -50%;
+  transform: skewX(10deg);
+  opacity: 0.08;
+  pointer-events: none;
+  animation: mi-fade-in 0.8s ease-out calc(var(--d) + 0.3s) both;
+}
+
+/* 境目の墨の斜線：上下の端は細く消える。真ん中より少し下に朱の菱 */
+.mi-panel__edge {
+  position: absolute;
+  z-index: 4;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: var(--sumi);
+  -webkit-mask: linear-gradient(transparent, #000 14%, #000 86%, transparent);
+          mask: linear-gradient(transparent, #000 14%, #000 86%, transparent);
+  filter: url(#sumi-rough);
+  transform-origin: top;
+  animation: mi-grow-y 0.45s ease-out calc(var(--d) + 0.15s) both;
+}
+.match-intro.is-solo .mi-panel:nth-child(2) .mi-panel__edge { width: 10px; }
+.mi-panel__mark {
+  position: absolute;
+  z-index: 5;
+  left: 3px;
+  top: 62%;
+  width: 12px;
+  height: 12px;
+  background: var(--shu);
+  transform: translate(-50%, -50%) rotate(45deg) skewX(10deg);
+  animation: mi-fade-in 0.3s ease-out calc(var(--d) + 0.6s) both;
+}
+
+/* 透かし文字（1P・BOSS）はプレイヤー色でうっすら */
+.mi-panel__ghost {
+  position: absolute;
+  top: 96px;
+  left: 26px;
+  font-size: 230px;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+  color: var(--pc);
+  opacity: 0.13;
+  pointer-events: none;
+  animation: mi-fade-in 0.4s ease-out calc(var(--d) + 0.35s) both;
+}
+.mi-n4 .mi-panel__ghost, .match-intro.is-solo .mi-panel:not(.is-boss) .mi-panel__ghost { font-size: 160px; }
+.match-intro.is-solo .mi-panel.is-boss .mi-panel__ghost { font-size: 150px; letter-spacing: 0; }
+
+/* プレイヤー色の大きな筆が剣の後ろを斜めに走り、その下に細い墨の筆 */
+.mi-panel__brush,
+.mi-panel__brush2 {
+  position: absolute;
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+}
+.mi-panel__brush {
+  left: -40%;
+  right: -40%;
+  top: 38%;
+  height: 260px;
+  background: var(--pc);
+  opacity: 0.92;
+  transform: rotate(-24deg);
+  animation: mi-wipe 0.4s ease-out calc(var(--d) + 0.25s) both;
+}
+.mi-n4 .mi-panel__brush, .match-intro.is-solo .mi-panel:not(.is-boss) .mi-panel__brush { height: 200px; }
+.mi-panel__brush2 {
+  left: -30%;
+  right: -30%;
+  top: 60%;
+  height: 46px;
+  background: var(--sumi);
+  opacity: 0.8;
+  transform: rotate(-24deg) scaleX(-1);
+  animation: mi-wipe 0.35s ease-out calc(var(--d) + 0.4s) both;
+}
+
+/* 剣の舞台（パネルの傾きを打ち消して、まっすぐ立てる） */
+.mi-panel__art {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 112px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  transform: skewX(10deg);
+  transform-origin: 50% 100%;
+}
+.match-intro.is-lives .mi-panel__art { bottom: 128px; }
+.match-intro.is-koma .mi-panel__art { bottom: 136px; }
+.mi-panel__shadow {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  bottom: -10px;
+  width: calc(150px * var(--k));
+  height: 22px;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(23, 20, 18, 0.35), transparent);
+  animation: mi-fade-in 0.4s ease-out calc(var(--d) + 0.5s) both;
+}
+.match-intro.is-koma .mi-panel__shadow { display: none; }
+
+/* 剣（刀身＋柄）。組み方と比率はロビーの剣と同じで、--k 倍する */
+.mi-sword {
+  --s: var(--k);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+.mi-sword img { display: block; width: auto; max-width: none; pointer-events: none; }
+.mi-sword__blade { height: calc(156px * var(--s)); max-width: calc(200px * var(--s)); object-fit: contain; }
+.mi-sword__hilt { height: calc(132px * var(--s)); margin-top: calc(-41px * var(--s)); object-fit: contain; }
+
+/* 装備中の剣：墨の落ち影。大きく飛び込む */
+.mi-sword--main {
+  position: relative;
+  z-index: 2;
+  transform-origin: 50% 95%;
+  filter: drop-shadow(12px 12px 0 rgba(23, 20, 18, 0.22));
+  animation: mi-swing-in 0.6s cubic-bezier(0.2, 0.9, 0.2, 1) calc(var(--d) + 0.3s) both;
+}
+.mi-n2:not(.is-koma) .mi-panel:nth-child(1) .mi-sword--main { rotate: 7deg; }
+.mi-n2:not(.is-koma) .mi-panel:nth-child(2) .mi-sword--main { rotate: -7deg; }
+
+/* 残機制：控えの剣は後ろに薄く（空きの枠は出さない） */
+.mi-sword--reserve {
+  --s: calc(var(--k) * 0.55);
+  position: absolute;
+  z-index: 1;
+  bottom: 30px;
+  opacity: 0.38;
+  filter: grayscale(1);
+  animation: mi-reserve-in 0.45s ease-out calc(var(--d) + 0.6s) both;
+}
+.mi-sword--r0 { right: calc(50% + 46px * var(--k)); }
+.mi-sword--r1 { left: calc(50% + 46px * var(--k)); }
+
+/* 独楽：柄を外した刀身だけが、見下ろしで反時計回りに回る */
+.mi-koma {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  width: calc(210px * var(--k));
+  height: calc(210px * var(--k));
+  animation: mi-koma-in 0.7s cubic-bezier(0.2, 0.9, 0.2, 1) calc(var(--d) + 0.3s) both;
+}
+.mi-koma__spin { position: absolute; inset: 0; animation: mi-spin 1.6s linear infinite reverse; }
+.mi-koma .mi-sword {
+  --s: calc(var(--k) * 1.1);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+}
+
+/* ---------- 名札（和紙の上に墨の文字。名前の下にプレイヤー色の筆） ---------- */
+.mi-plate {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 40px;
+  box-sizing: border-box;
+  padding: 0 24px 0 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: mi-slide-in 0.4s cubic-bezier(0.2, 0.9, 0.2, 1) calc(var(--d) + 0.45s) both;
+}
+.mi-panel:first-child .mi-plate { padding-left: 84px; }
+.mi-plate__top { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; padding-bottom: 10px; }
+.mi-plate__top::after {
+  content: '';
+  position: absolute;
+  left: -8px;
+  right: 10%;
+  bottom: -2px;
+  height: 14px;
+  background: var(--pc);
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+  animation: mi-wipe 0.4s ease-out calc(var(--d) + 0.65s) both;
+}
+/* 「1P」は墨札（右下の角を落とした札）をプレイヤー色で */
+.mi-plate__badge {
+  flex-shrink: 0;
+  padding: 4px 16px 3px 11px;
+  font-size: 22px;
+  line-height: 1.15;
+  color: var(--washi);
+  background: var(--pc);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
+}
+.mi-plate__name {
+  min-width: 0;
+  font-size: 38px;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 0 6px var(--washi), 0 0 2px var(--washi);
+}
+.mi-n4 .mi-plate__name, .match-intro.is-solo .mi-panel:not(.is-boss) .mi-plate__name { font-size: 27px; }
+.mi-plate__tag {
+  flex-shrink: 0;
+  padding: 3px 12px 2px 8px;
+  font-size: 13px;
+  color: var(--washi);
+  background: var(--sumi);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%);
+}
+.mi-plate__tag--boss { font-size: 15px; background: var(--shu); }
+.mi-plate__stock { display: flex; align-items: center; gap: 6px; font-size: 15px; color: var(--usuzumi); }
+.mi-plate__stock i { width: 10px; height: 10px; background: var(--sumi); transform: rotate(45deg); }
+.mi-plate__stock i.is-off { box-sizing: border-box; background: transparent; border: 2px solid var(--kasure); }
+
+/* 1vs3 だけ：ボスと3人の境目に「VS」。墨の菱形に和紙色の文字、外側に和紙色と墨の細い輪。
+   菱形と輪だけを筆で描いたように少し崩す（文字は崩さない） */
+.mi-vs {
+  position: absolute;
+  z-index: 6;
+  left: 444px;
+  top: 47%;
+  width: 112px;
+  height: 112px;
+  translate: -50% -50%;
+  display: grid;
+  place-items: center;
+  animation: mi-vs-in 0.36s cubic-bezier(0.2, 1.6, 0.4, 1) 0.95s both;
+}
+.mi-vs::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--sumi);
+  rotate: 43deg;
+  box-shadow: 0 0 0 4px var(--washi), 0 0 0 7px var(--sumi);
+  filter: url(#sumi-wobble);
+}
+.mi-vs span { position: relative; font-size: 50px; line-height: 1; letter-spacing: 0.02em; color: var(--washi); }
+
+/* ---------- 左上：ルールの墨札 ---------- */
+.mi-rule {
+  position: absolute;
+  z-index: 7;
+  top: 18px;
+  left: -40px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 46px 12px 68px;
+  color: var(--washi);
+  background: var(--sumi);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%);
+  transform: skewX(var(--sk));
+  animation: mi-banner-in 0.45s cubic-bezier(0.2, 0.9, 0.2, 1) 0.15s both;
+}
+/* 戦い方は朱の落款 */
+.mi-rule__mode {
+  display: grid;
+  place-items: center;
+  min-width: 64px;
+  height: 64px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  font-size: 44px;
+  line-height: 1;
+  color: var(--washi);
+  background: var(--shu);
+  filter: url(#sumi-rough);
+  rotate: -5deg;
+  animation: mi-stamp 0.32s cubic-bezier(0.2, 1.6, 0.4, 1) 0.5s both;
+}
+.match-intro.is-koma .mi-rule__mode { font-size: 30px; }
+.mi-rule__text { display: flex; flex-direction: column; gap: 5px; }
+.mi-rule__name { margin: 0; font-size: 36px; font-weight: normal; line-height: 1.1; white-space: nowrap; color: var(--washi); }
+.mi-rule__desc { margin: 0; font-size: 13px; letter-spacing: 0.04em; white-space: nowrap; color: rgba(239, 233, 220, 0.72); }
+
+/* ---------- 下：最低限の表示時間を刻む墨の線 ---------- */
+.mi-timer { position: absolute; z-index: 8; left: 40px; right: 40px; bottom: 8px; height: 22px; }
+.mi-timer::before,
+.mi-timer__ink {
+  content: '';
+  position: absolute;
+  inset: 0;
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+}
+.mi-timer::before { background: var(--kasure); opacity: 0.28; }
+.mi-timer__ink { background: var(--sumi); animation: mi-wipe var(--intro, 5s) linear both; }
+.mi-timer__tip {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  background: var(--shu);
+  transform: translate(-50%, -50%) rotate(45deg);
+  animation: mi-tip var(--intro, 5s) linear both;
+}
+/* 時間が経っても誰かが読み込み中：線の端で朱の菱が明滅し、「準備中」とだけ出す */
+.match-intro.is-waiting .mi-timer__tip { animation: mi-tip var(--intro, 5s) linear both, mi-blink 1s ease-in-out infinite; }
+.mi-waiting {
+  position: absolute;
+  z-index: 8;
+  right: 46px;
+  bottom: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  letter-spacing: 0.12em;
+  color: var(--usuzumi);
+  text-shadow: 0 0 6px var(--washi);
+  animation: mi-fade-in 0.3s ease-out both;
+}
+.mi-dots { display: inline-flex; gap: 4px; }
+.mi-dots i { width: 5px; height: 5px; background: var(--usuzumi); animation: mi-blink 1.1s ease-in-out infinite; }
+.mi-dots i:nth-child(2) { animation-delay: 0.18s; }
+.mi-dots i:nth-child(3) { animation-delay: 0.36s; }
+
+/* 入りの閃光（和紙色） */
+.mi-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  background: rgb(255, 253, 246);
+  animation: mi-fade-out 0.45s ease-out both;
+}
+
+/* ---------- 動き ---------- */
+@keyframes mi-drop { from { translate: 0 -105%; } }
+@keyframes mi-rise-in { from { translate: 0 105%; } }
+@keyframes mi-swing-in { from { opacity: 0; scale: 1.4; translate: -70px 0; } }
+@keyframes mi-reserve-in { from { opacity: 0; translate: 0 30px; } }
+@keyframes mi-koma-in { from { opacity: 0; scale: 0.3; } }
+@keyframes mi-slide-in { from { opacity: 0; translate: -60px 0; } }
+@keyframes mi-banner-in { from { translate: -110% 0; } }
+@keyframes mi-fade-in { from { opacity: 0; } }
+@keyframes mi-fade-out { to { opacity: 0; } }
+@keyframes mi-grow-y { from { transform: scaleY(0); } }
+@keyframes mi-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes mi-tip { from { left: 0; } to { left: 100%; } }
+@keyframes mi-spin { to { rotate: 360deg; } }
+@keyframes mi-blink { 0%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+@keyframes mi-stamp { from { opacity: 0; scale: 2.2; } }
+@keyframes mi-vs-in { from { opacity: 0; scale: 2.6; } }
+@keyframes mi-rise {
+  0% { opacity: 0; translate: 0 0; }
+  10% { opacity: 1; }
+  80% { opacity: 0.8; }
+  100% { opacity: 0; translate: var(--dx) -760px; }
+}
+@keyframes mi-streak { from { translate: 1400px 0; } to { translate: -1800px 0; } }
+@keyframes mi-shake {
+  0%, 100% { translate: 0 0; }
+  25% { translate: -8px 5px; }
+  50% { translate: 7px -5px; }
+  75% { translate: -4px 3px; }
+}
+
+/* 動きを減らす設定のときは、入りの動きと背景の動きを止める（表示時間の線だけは進める） */
+@media (prefers-reduced-motion: reduce) {
+  .match-intro *:not(.mi-timer__ink):not(.mi-timer__tip),
+  .match-intro .mi-stage { animation: none !important; }
+  .mi-flash { display: none; }
+}

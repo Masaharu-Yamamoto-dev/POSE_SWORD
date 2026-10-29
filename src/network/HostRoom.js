@@ -1,4 +1,5 @@
-export const PROTOCOL_VERSION = 5;
+// 6: PREPARE から剣画像を抜いた（ゲストは ROSTER で受け取った画像を使う）
+export const PROTOCOL_VERSION = 6;
 export const MAX_IMAGE_LENGTH = 4 * 1024 * 1024;
 // 剣本体のステータス上限(image-process/stats.pyでの生成上限: hp 100〜1000 / attack・weight 1〜100)に、
 // 柄(SwordListScreenのHILT_DATABASE)が乗せうる最大の補正値を足した、正規のプレイで届きうる本当の上限。

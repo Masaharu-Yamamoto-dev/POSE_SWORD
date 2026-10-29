@@ -322,6 +322,7 @@ export default function LobbyScreen({
     : soloMode && !bossPlayerId ? 'ボスを指名してください'
     : playerCount < MIN_PLAYERS ? `参加者を待っています（最低${MIN_PLAYERS}人・最大${seatLimit}人）`
     : readyCount < playerCount ? `準備完了 ${readyCount} / ${playerCount}人`
+    : room.swordsLoading ? 'メンバーの剣の情報を読み込んでいます'
     : isHost ? `${playerCount}人全員の準備が完了。対戦を開始できます`
     : `${playerCount}人全員の準備が完了。ホストの開始を待っています`;
 
