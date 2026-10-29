@@ -1,0 +1,36 @@
+/* 画面の右上の隅に小さく置く。縦向きの案内（500）より下、ルール設定の暗幕（200）より上 */
+.fullscreen-btn {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  z-index: 300;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  /* 和紙の色を透かして、下の画面の邪魔をしない */
+  background: rgba(239, 233, 220, 0.72);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fullscreen-btn:active { background: rgba(228, 220, 203, 0.9); }
+
+/* 四隅の鉤（かぎ）で「広げる」を表す。墨の細い線だけで描く */
+.fullscreen-btn__mark {
+  position: absolute;
+  inset: 11px;
+  --hook: 7px;
+  --line: 2px;
+  background:
+    linear-gradient(var(--sumi), var(--sumi)) top left / var(--hook) var(--line),
+    linear-gradient(var(--sumi), var(--sumi)) top left / var(--line) var(--hook),
+    linear-gradient(var(--sumi), var(--sumi)) top right / var(--hook) var(--line),
+    linear-gradient(var(--sumi), var(--sumi)) top right / var(--line) var(--hook),
+    linear-gradient(var(--sumi), var(--sumi)) bottom left / var(--hook) var(--line),
+    linear-gradient(var(--sumi), var(--sumi)) bottom left / var(--line) var(--hook),
+    linear-gradient(var(--sumi), var(--sumi)) bottom right / var(--hook) var(--line),
+    linear-gradient(var(--sumi), var(--sumi)) bottom right / var(--line) var(--hook);
+  background-repeat: no-repeat;
+}

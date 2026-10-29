@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { styles } from '../styles';
 import InkButton from '../components/InkButton.jsx';
+import { EnsoInk } from '../components/SwordForgeParts.jsx';
 
 const MESSAGES = {
   ENTERING: '待合所に接続しています…',
@@ -11,74 +11,55 @@ const MESSAGES = {
   UNAVAILABLE: 'ランダムマッチを利用できません',
 };
 
-export default function MatchmakingScreen({ view, mySwordData, gameMode = '0', onCancel }) {
-  const [elapsed, setElapsed] = useState(0);
+// ランダムマッチの待ち表示。タイトル画面のメニューの場所に差し込んで使う
+// （ロゴ・背景の剣・「遊び方」はタイトル画面のものがそのまま残る）。
+// 探している間は、完成画面と同じ円相を描いては消し、その真ん中に経過時間を出す
+// startedAt：待ち始めた時刻（App が持つ）。表示が作り直されても、経過時間はそこから数える
+export default function MatchmakingScreen({ view, gameMode = '0', startedAt = 0, onCancel }) {
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const startedAt = Date.now();
-    const interval = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
+  const elapsed = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
 
   const phase = view?.phase ?? 'ENTERING';
   const waiting = view?.waiting ?? null;
   const targetSize = view?.targetSize ?? 2;
   const stopped = ['FULL', 'UNAVAILABLE'].includes(phase);
+  const time = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`;
 
   return (
-    <div style={styles.container}>
-      {mySwordData?.imageSrc && (
-        <img src={mySwordData.imageSrc} alt="" style={{ ...styles.bgImageCenter, transform: 'translate(-50%, -50%)' }} />
-      )}
+    <div className="title-panel title-matching">
+      <p className="title-panel__title">{targetSize}人でランダムマッチ</p>
+      <p className="title-panel__sub">希望ルール：{gameMode === '1' ? '独楽' : '剣'}</p>
 
-      <div style={styles.contentWrapper}>
-        <h2 style={{ fontSize: 'clamp(24px, 6vw, 40px)', margin: '0 0 10px 0' }}>
-          {targetSize}人でランダムマッチ
-        </h2>
-        <p style={{ margin: '0 0 20px 0', color: 'var(--usuzumi)', fontSize: '14px' }}>
-          希望ルール：{gameMode === '1' ? '独楽' : '剣'}
-        </p>
-
-        <div className="sumi-panel sumi-frame" style={{ width: '100%', maxWidth: '440px', padding: '30px', margin: '20px 0' }}>
-          {!stopped && (
-            <div style={{ width: '60px', height: '60px', margin: '0 auto 20px', borderRadius: '50%',
-              border: '6px solid var(--washi-deep)', borderTopColor: 'var(--sumi)', animation: 'mm-spin 1s linear infinite' }} />
-          )}
-
-          <p style={{ fontSize: '18px', fontWeight: 'bold', margin: '0 0 10px 0', color: stopped ? 'var(--shu)' : 'var(--sumi)' }}>
-            {MESSAGES[phase] ?? MESSAGES.SEARCHING}
-          </p>
-
-          {view?.error && (
-            <p style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--shu)' }}>{view.error}</p>
-          )}
-
-          {!stopped && (
-            <p style={{ margin: '0 0 6px 0', fontSize: '32px', color: 'var(--sumi)' }}>
-              {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
-            </p>
-          )}
-
-          {waiting && (
-            <p style={{ margin: 0, fontSize: '14px', color: 'var(--usuzumi)' }}>
-              いま待っている人：{waiting.total}人
-              {waiting[targetSize] != null && `（うち${targetSize}人戦 ${waiting[targetSize]}人）`}
-            </p>
-          )}
-
-          {phase === 'FULL' && (
-            <p style={{ margin: '10px 0 0 0', fontSize: '13px', color: 'var(--usuzumi)' }}>
-              空きが出しだい自動で再開します。ロビーIDを共有すれば、待たずに対戦できます。
-            </p>
-          )}
-        </div>
-
-        <div style={{ marginTop: '40px', width: '100%', maxWidth: '260px' }}>
-          <InkButton variant="usuzumi" onClick={onCancel}>やめる</InkButton>
-        </div>
+      <div className={`title-matching__ring ${stopped ? 'is-stopped' : ''}`}>
+        {!stopped && <EnsoInk variant="craft" className="title-matching__enso" />}
+        <span className="title-matching__time">{stopped ? '' : time}</span>
       </div>
 
-      <style>{`@keyframes mm-spin { to { transform: rotate(360deg); } }`}</style>
+      <p className={`title-matching__status ${stopped ? 'is-stopped' : ''}`}>{MESSAGES[phase] ?? MESSAGES.SEARCHING}</p>
+      {view?.error && <p className="title-matching__error">{view.error}</p>}
+
+      {/* 人数は、届く前から場所を取っておく（届いたときに下の「やめる」が動かないように） */}
+      <div className="title-matching__meta">
+        {waiting && (
+          <>
+            <span>マッチング待機中<b>{waiting.total}</b>人</span>
+            {waiting[targetSize] != null && <span>うち{targetSize}人戦<b>{waiting[targetSize]}</b>人</span>}
+          </>
+        )}
+      </div>
+
+      {phase === 'FULL' && (
+        <p className="title-panel__note">空きが出しだい自動で再開します。ロビーIDを共有すれば、待たずに対戦できます。</p>
+      )}
+
+      <div className="title-panel__back">
+        <InkButton variant="usuzumi" onClick={onCancel}>やめる</InkButton>
+      </div>
     </div>
   );
 }

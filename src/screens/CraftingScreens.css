@@ -1,0 +1,439 @@
+/* 作成の画面（名前の入力・ポーズ撮影・錬成中）。
+   横長は16:9の舞台（1280×720）に収め、縦長は画面いっぱいに組む。上の見出しの帯は武器庫と同じ形 */
+
+/* 縦長の外枠。横長の舞台（.stage169）と同じ入れ子の形にしてある（向きを変えてもカメラの映像を作り直さないため） */
+.craft-shell,
+.craft-shell__inner {
+  position: fixed;
+  inset: 0;
+}
+
+.craft {
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.craft--land {
+  width: 1280px;
+  height: 720px;
+  padding: 18px 40px 20px;
+}
+
+.craft--port {
+  position: fixed;
+  inset: 0;
+  max-width: 560px;
+  margin: 0 auto;
+  height: 100vh;
+  height: 100dvh;
+  padding: max(8px, env(safe-area-inset-top)) 18px max(12px, env(safe-area-inset-bottom));
+}
+
+/* ==========================================
+   見出しの帯（武器庫と同じ：左に戻る、真ん中に見出し、右に手順）
+   ========================================== */
+.craft__header {
+  --bar-top: 18px;
+  --bar-side: 40px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  flex-shrink: 0;
+  height: 60px;
+}
+
+/* 帯の地：画面の上端と左右の端まで、下のボタンの帯と同じ少し沈んだ紙の色を敷く */
+.craft__header::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: calc(var(--bar-top) * -1) calc(var(--bar-side) * -1) 0;
+  background: linear-gradient(to bottom, rgba(198, 188, 171, 0.96), rgba(206, 197, 181, 0.94));
+  box-shadow: 0 10px 18px -12px rgba(60, 45, 30, 0.4);
+}
+
+.craft__header h1 {
+  margin: 0;
+  font-size: 38px;
+  font-weight: normal;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.craft__step {
+  justify-self: end;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: var(--f-mute);
+}
+
+.craft__step span {
+  font-size: 24px;
+  color: var(--sumi);
+}
+
+.craft--port .craft__header { --bar-top: max(8px, env(safe-area-inset-top)); --bar-side: 18px; height: 48px; }
+.craft--port .craft__header h1 { font-size: 24px; letter-spacing: 0.2em; text-indent: 0.2em; }
+.craft--port .craft__step { font-size: 12px; letter-spacing: 0.06em; }
+.craft--port .craft__step span { font-size: 19px; }
+
+.craft__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* ==========================================
+   名前の入力（入力欄は錬成完了・武器庫の名前の書き換え欄と同じ形）
+   ========================================== */
+.craft-name {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.craft-name__lead {
+  margin: 0 0 18px;
+  font-size: 18px;
+  letter-spacing: 0.06em;
+  text-align: center;
+  color: var(--f-mute);
+}
+
+.craft-name__field {
+  flex: none;
+}
+
+.craft-name__field input {
+  height: 64px;
+  padding-right: 64px;
+  font-size: 34px;
+  text-align: left;
+}
+
+.craft-name__field input::placeholder {
+  color: var(--kasure);
+}
+
+.craft-name .name-edit__count {
+  bottom: 10px;
+  font-size: 14px;
+}
+
+.craft-name__hint {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  letter-spacing: 0.04em;
+  color: var(--f-mute);
+}
+
+.craft-name__hint span {
+  color: var(--sumi);
+}
+
+.craft-name__go {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+  width: 320px;
+  max-width: 100%;
+  margin: 56px auto 0;
+}
+
+.craft-name__go .forge-primary { width: 100%; }
+
+.craft--port .craft-name { max-width: 360px; }
+.craft--port .craft-name__lead { font-size: 15px; margin-bottom: 12px; }
+.craft--port .craft-name__field input { height: 52px; padding-right: 54px; font-size: 26px; }
+.craft--port .craft-name .name-edit__count { bottom: 8px; font-size: 12px; }
+.craft--port .craft-name__hint { font-size: 12px; }
+.craft--port .craft-name__go { width: 270px; margin-top: 48px; }
+
+/* ==========================================
+   ポーズ撮影・錬成中
+   横長：カメラ枠を左、操作を右に並べる。縦長：カメラ枠の下に操作を積む
+   ========================================== */
+.craft-split {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+  min-height: 0;
+}
+
+.craft--port .craft-split {
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* カメラ枠。撮影画面と錬成中画面で大きさを完全に一致させる。
+   縦横比はカメラ映像に合わせる（--cam-aspect。スマホの縦持ちでは縦長になる）。
+   写る範囲と見えている範囲を一致させ、見出しの帯の下に収まる大きさにする */
+.craft-camera {
+  position: relative;
+  flex: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  aspect-ratio: var(--cam-aspect);
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 2px solid var(--sumi);
+  background-color: var(--sumi);
+}
+
+.craft--land .craft-camera {
+  width: min(820px, calc(580px * var(--cam-aspect)));
+}
+
+.craft--port .craft-camera {
+  width: min(100%, calc((100dvh - 390px) * var(--cam-aspect)));
+}
+
+.craft-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 300px;
+}
+
+.craft--port .craft-side { width: 100%; max-width: 340px; }
+
+.craft-camera-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  /* 下の朱のボタンの筆跡（切らずに全体を打つので上に広がる）が、カメラの名前にかからない間 */
+  margin-bottom: 34px;
+}
+
+.craft--port .craft-camera-controls { margin-bottom: 28px; }
+
+.craft-zoom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  font-size: 14px;
+  color: var(--f-mute);
+}
+
+.craft-zoom.is-off { opacity: 0.45; }
+
+.craft-zoom__icon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--sumi);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* カウントダウン：円相を0.7秒で一筆に描き、1秒の終わりに消える。真ん中に数字。
+   縦長はカメラ枠の上（映像の上なので墨を和紙の色にする）、横長は右の操作の上の空き */
+.craft-count {
+  --count: 190px;
+  position: absolute;
+  z-index: 10;
+  width: var(--count);
+  height: var(--count);
+  pointer-events: none;
+  animation: craft-count-out 1s linear both;
+}
+
+.craft-count__enso {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.craft-count .enso__reveal { animation: forge-enso-draw 0.7s cubic-bezier(0.35, 0.1, 0.25, 1) both; }
+.craft-count .enso__drops { animation: forge-fade-in 0.15s ease-out 0.62s both; }
+
+.craft-count__num {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding-bottom: 6%;
+  font-family: var(--font-brush);
+  font-size: calc(var(--count) * 0.42);
+  line-height: 1;
+  color: var(--sumi);
+  animation: craft-count-pop 0.38s cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+
+@keyframes craft-count-pop {
+  from { transform: scale(1.5); opacity: 0; }
+}
+
+@keyframes craft-count-out {
+  0%, 86% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.craft--land .craft-side { position: relative; }
+
+.craft--land .craft-count {
+  left: 50%;
+  top: -60px;
+  margin-left: calc(var(--count) / -2);
+}
+
+.craft--port .craft-count {
+  --count: 150px;
+  left: 50%;
+  top: 14px;
+  margin-left: calc(var(--count) / -2);
+}
+
+/* カメラ映像の上では、墨を和紙の色にし、かすれは映像の色に近い暗さにする */
+.craft--port .craft-count .enso__main,
+.craft--port .craft-count .enso__hair,
+.craft--port .craft-count .enso__drops { fill: var(--washi); }
+.craft--port .craft-count .enso__dry { fill: #1f1b18; opacity: 0.55; }
+.craft--port .craft-count__num { color: var(--washi); text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5); }
+
+.craft-switch { font-size: 14px; }
+
+.craft-camera-label {
+  margin: 0;
+  font-size: 12px;
+  color: var(--f-mute);
+}
+
+.craft-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+  width: 100%;
+}
+
+.craft-buttons .forge-primary { width: 260px; max-width: 100%; }
+.craft-buttons > .ink-btn { width: 260px; max-width: 100%; }
+.craft-buttons .ink-btn__label,
+.craft-name__go .ink-btn__label { min-height: 52px; font-size: 21px; }
+
+/* 今すぐ撮影：墨のシャッター */
+.craft-now {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-brush);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--sumi);
+  cursor: pointer;
+}
+
+.craft-now svg {
+  display: block;
+  width: 72px;
+  height: 72px;
+  overflow: visible;
+}
+
+.craft-now__ring {
+  fill: none;
+  stroke: var(--sumi);
+  stroke-width: 7;
+  stroke-linecap: round;
+  filter: url(#sumi-rough);
+}
+
+.craft-now__core {
+  fill: var(--shu);
+  transform-origin: 40px 40px;
+  animation: craft-now-pulse 1s ease-in-out infinite;
+  transition: fill 0.15s;
+}
+
+.craft-now:hover .craft-now__core,
+.craft-now:focus-visible .craft-now__core { fill: #d2382e; }
+
+.craft-now:focus-visible { outline: 2px solid var(--shu); outline-offset: 4px; }
+
+@keyframes craft-now-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.86); }
+}
+
+/* カウントダウン中の並び。
+   横長：下が空くので、数字の円相・「ポーズをとれ！」・今すぐ撮影を一回り大きくする。
+   縦長：カメラの操作（隠している）と下のボタンの順を入れ替え、「ポーズをとれ！」と今すぐ撮影をカメラ枠の真下に寄せる
+   （隠した操作の場所はそのまま残すので、カメラ枠は動かない） */
+/* 横長は、数えている間はカメラの操作と空の「戻る」を消し、数字の円相も並びに入れて、右の列の上下中央にまとめる
+   （右の列の高さが変わっても、カメラ枠は動かない） */
+.craft--land .craft-side.is-counting .craft-camera-controls,
+.craft--land .craft-side.is-counting .craft-buttons > .ink-btn { display: none; }
+.craft--land .craft-side.is-counting .craft-count { --count: 290px; position: relative; left: auto; top: auto; margin: 0 0 6px; }
+.craft--land .craft-side.is-counting .craft-buttons { gap: 34px; }
+.craft--land .craft-side.is-counting .craft-buttons .ink-btn__label { font-size: 32px; }
+.craft--land .craft-side.is-counting .craft-now { gap: 6px; font-size: 18px; }
+.craft--land .craft-side.is-counting .craft-now svg { width: 124px; height: 124px; }
+
+/* 「ポーズをとれ！」は押せないボタンの形のまま、文字は墨色ではっきり出す（縦横とも） */
+.craft-side.is-counting .craft-buttons .forge-primary .ink-btn__label { color: var(--sumi); }
+
+.craft--port.craft--pose .craft__body { justify-content: flex-start; padding-top: 14px; }
+.craft--port.craft--pose .craft-split { flex-shrink: 0; justify-content: flex-start; }
+.craft--port .craft-side.is-counting .craft-camera-controls { order: 2; margin: 0; }
+.craft--port .craft-side.is-counting .craft-buttons { order: 1; margin-bottom: 28px; }
+
+/* 錬成が終わったら、動かさずにその場で消す */
+.craft-fade-out { animation: craft-fade-out 0.35s ease-out forwards; }
+
+@keyframes craft-fade-out {
+  to { opacity: 0; }
+}
+
+/* 錬成中：撮った写真を槌で叩き続ける3Dの場面（ForgeHammer3D）。縦長は一回り小さく */
+.craft-side--wait { gap: 0; }
+.craft--port .forge3d { --k: 0.46; }
+
+.craft-wait-text { margin: 0; font-size: 22px; letter-spacing: 0.12em; }
+
+/* 待ち時間の断り書き（小さく薄く） */
+.craft-wait-note { margin: 6px 0 0; font-size: 12px; letter-spacing: 0.04em; color: var(--kasure); }
+.craft--port .craft-wait-note { font-size: 11px; }
+
+/* 三つの点を順に灯す */
+.craft-wait-text i { font-style: normal; animation: craft-dots 1.2s steps(1) infinite; }
+.craft-wait-text i:nth-child(2) { animation-delay: 0.2s; }
+.craft-wait-text i:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes craft-dots {
+  0%, 30% { opacity: 0.15; }
+  31%, 100% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .craft-now__core,
+  .craft-wait-text i,
+  .craft-count,
+  .craft-count__num,
+  .craft-count .enso__reveal,
+  .craft-count .enso__drops { animation: none; }
+}

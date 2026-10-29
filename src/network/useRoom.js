@@ -176,6 +176,8 @@ export function useRoom({ peerOptions, onClosed }) {
       teardown(true);
       setView(null); setRoomId(''); setError(''); setConnecting(false); setHasArena(false);
     }, [teardown]),
+    // 前の部屋が終わった理由（「ホストとの接続が切れました。」など）を消す。次の操作を始めるときに使う
+    clearError: useCallback(() => setError(''), []),
     setReady: useCallback(ready => act(s => s.setReady(ready)), [act]),
     setGameMode: useCallback(mode => act(s => s.setGameMode(mode)), [act]),
     setLivesMode: useCallback(enabled => act(s => s.setLivesMode(enabled)), [act]),

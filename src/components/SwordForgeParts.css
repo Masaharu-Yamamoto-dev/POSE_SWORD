@@ -1,0 +1,1406 @@
+/* 錬成完了・武器庫の部品。大きさは各画面の CSS が変数や上書きで決める */
+
+/* 画面の地と、部品で使う色。画面の外に出す札（名前の書き換え欄・確認のシート）にも付ける */
+.forge,
+.forge-portal {
+  --f-mute: #5c554c;   /* 補足の文字 */
+  --f-empty: #8f8676;  /* 空きの枠 */
+  --f-rule: #d6cdbb;   /* 手入れの区切り線 */
+  --f-kin: #7d6220;    /* 装備中の札 */
+  font-family: var(--font-brush);
+  color: var(--sumi);
+  text-align: left;
+}
+
+.forge {
+  box-sizing: border-box;
+  overflow: hidden;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(80, 62, 40, 0.4) 100%), var(--washi);
+}
+
+:where(.forge, .forge-portal) button {
+  font-family: inherit;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 墨の筆跡を細長く引き伸ばした線（名前の下線・選んでいる札の印） */
+.forge .inkline,
+.forge-portal .inkline {
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+}
+
+/* 下線つきの文字のボタン（戻る・武器庫へ など）。ロビーの筆の下線ボタン（.brush-link）と同じく、
+   文字の下に太い墨の筆跡を引き、乗せると文字と線が朱になって線が太くなる */
+.forge-link {
+  position: relative;
+  min-height: 44px;
+  padding: 5px 5px 13px;
+  border: 0;
+  background: none;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.forge-link::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  bottom: var(--under-y, 5px);
+  height: 9px;
+  background: var(--sumi);
+  -webkit-mask: var(--sumi-stroke) center / cover no-repeat;
+          mask: var(--sumi-stroke) center / cover no-repeat;
+  transition: background-color 0.15s, height 0.15s;
+  pointer-events: none;
+}
+
+.forge-link:hover:not(:disabled),
+.forge-brush-under:hover:not(:disabled) {
+  color: var(--shu);
+}
+
+.forge-link:hover:not(:disabled)::after {
+  background: var(--shu);
+  height: 12px;
+}
+
+/* 細い筆の下線（円相のまわりの「左右反転」「撮り直す」）。文字の色で引き、乗せると少し濃く太くなる */
+.forge-brush-under::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: var(--under-y, 6px);
+  height: 6px;
+  background: currentColor;
+  opacity: 0.8;
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+  transition: height 0.15s, opacity 0.15s;
+  pointer-events: none;
+}
+
+.forge-brush-under:hover:not(:disabled)::after {
+  height: 8px;
+  opacity: 1;
+}
+
+.forge-link:focus-visible {
+  outline: 2px solid var(--shu);
+  outline-offset: 2px;
+}
+
+.forge-link:disabled {
+  color: var(--kasure);
+  cursor: not-allowed;
+}
+
+.forge-link:disabled::after {
+  background: var(--kasure);
+  height: 5px;
+}
+
+/* 主役のボタン（ロビーの対戦開始と同じ、墨を出したまま脈打つ朱。錬成完了・作成の画面で使う）。
+   墨はボタンより一回り大きい枠に収め、上の設定の文字にかからないようにする。
+   筆跡の画像は真ん中の帯（高さの3割ほど）だけが濃いので、そこを拡大して文字の後ろに当てる
+   （画像全体を枠に合わせると、帯が細くなるか、横に伸びてかすれ、白い文字が読めなくなる） */
+.forge-primary .ink-btn__stroke {
+  left: -30px;
+  right: -30px;
+  top: -14px;
+  bottom: -14px;
+  width: auto;
+  height: auto;
+  transform: none;
+  /* 筆跡の上側は、枠で切れて見えないよう薄く消す（筆跡の型抜きに、上から濃くなる型抜きを重ねる）。
+     濃さはなめらかな曲線になるよう、細かく段階を分けている */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.1) 4%, rgba(0, 0, 0, 0.32) 8%, rgba(0, 0, 0, 0.58) 12%, rgba(0, 0, 0, 0.8) 16%, rgba(0, 0, 0, 0.94) 20%, #000 24%), var(--sumi-stroke);
+          mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.1) 4%, rgba(0, 0, 0, 0.32) 8%, rgba(0, 0, 0, 0.58) 12%, rgba(0, 0, 0, 0.8) 16%, rgba(0, 0, 0, 0.94) 20%, #000 24%), var(--sumi-stroke);
+  -webkit-mask-size: 100% 100%, 123% 270%;
+          mask-size: 100% 100%, 123% 270%;
+  -webkit-mask-position: 0 0, 50% 50%;
+          mask-position: 0 0, 50% 50%;
+  -webkit-mask-repeat: no-repeat;
+          mask-repeat: no-repeat;
+  -webkit-mask-composite: source-in;
+          mask-composite: intersect;
+}
+
+/* is-plain：上に文字が無く、墨が何かに掛かる心配のない所では、筆跡を切らずに画像の全体をそのまま打つ
+   （縦横比は画像のまま。濃い帯がボタンの文字の後ろに来るよう、ボタンの縦の真ん中にそろえる） */
+.forge-primary.is-plain .ink-btn__stroke {
+  left: -44px;
+  right: -44px;
+  top: 50%;
+  bottom: auto;
+  height: auto;
+  aspect-ratio: 628 / 342;
+  transform: translateY(-50%);
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+}
+
+.forge-primary .ink-btn__label {
+  font-size: 19px;
+  padding: 9px 24px;
+  letter-spacing: 0.1em;
+}
+
+/* 小さな見出し（プライバシー・柄） */
+.forge-label {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--f-mute);
+}
+
+/* ==========================================
+   背景の自分の姿・区切りの筆跡・控えめな設定（錬成完了と武器庫で共通）
+   ========================================== */
+/* 自分の姿を大きく薄く。少し沈んだ和紙色を同じ形でにじませ、縁を作らずに外へ消す（型抜きの形は横・縦で決める） */
+.forge-figure {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.forge-figure::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--figure-field);
+}
+
+.forge-figure img {
+  position: absolute;
+  left: 60%;
+  width: 600px;
+  height: auto;
+  max-width: none;
+  margin-left: -300px;
+  filter: grayscale(0.7) contrast(1.05);
+  -webkit-user-drag: none;
+}
+
+/* 境目の墨の筆跡。ここから下が設定とボタン */
+.forge-ground {
+  position: absolute;
+  left: 6px;
+  right: -8px;
+  top: -7px;
+  height: 14px;
+  background: var(--sumi);
+  opacity: 0.88;
+  pointer-events: none;
+}
+
+/* 設定は控えめに：見出し・札・説明・柄を一回り小さく薄くし、朱は選んだ札の下線とマイナスの値だけに残す */
+.forge-quiet .forge-label { font-size: 12px; color: #6f675d; }
+.forge-quiet .privacy__modes { gap: 8px; }
+.forge-quiet .privacy__mode {
+  --frame: #cfc5b1;
+  padding: 6px 0 12px;
+  color: #6f675d;
+  transition: background-color 0.15s, color 0.15s;
+}
+.forge-quiet .privacy__mode.is-on {
+  --frame: #7d7466;
+  --frame-w: 1.5px;
+  color: var(--sumi);
+  background: var(--washi-deep);
+}
+.forge-quiet .privacy__icon { opacity: 0.35; }
+.forge-quiet .privacy__mode.is-on .privacy__icon { opacity: 0.85; }
+.forge-quiet .privacy__hint { font-size: 12px; color: #5c554c; }
+.forge-quiet .hilt-pick { --hilt-img: 52px; }
+.forge-quiet .hilt-pick__arrow svg { width: 10px; height: 17px; stroke: #6f675d; }
+.forge-quiet .hilt-pick__img img { opacity: 0.9; }
+.forge-quiet .hilt-pick__name { font-size: 16px; color: #3d3833; }
+.forge-quiet .hilt-pick__mods { font-size: 12px; }
+.forge-quiet .hilt-pick__mod-label { color: #6f675d; }
+.forge-quiet .hilt-pick__mod > span:last-child { color: #5c554c; }
+.forge-quiet .hilt-pick__mod > .is-minus { color: var(--shu); }
+.forge-quiet .forge-link { font-size: 13px; color: #5c554c; }
+
+/* 縦長：上の見本（刀掛け）の下を、下のボタンの上までスクロールさせる */
+.forge-scroll-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin: 0 -18px;
+  /* 上端に重ねる小さな情報の帯の高さ。元の表示が隠れた所から順に帯へ出すので、段階ごとに伸ばす
+     （段階と高さは swordForge.js の COMPACT_BAR_H と同じ） */
+  --compact-h: 0px;
+  transition: --compact-h 0.2s ease-out, --compact-k 0.2s;
+}
+
+.forge-scroll-wrap.is-compact-1 { --compact-h: 36px; --compact-k: 1; }
+.forge-scroll-wrap.is-compact-2,
+.forge-scroll-wrap.is-compact-3 { --compact-h: 68px; --compact-k: 1; }
+
+/* 帯の高さと、スクロールする中身の消し具合（0：消さない → 1：帯の後ろで消す）。なめらかに切り替えるため型を登録する */
+@property --compact-h {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --compact-k {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+.forge-scroll {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  padding: 0 18px 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  /* 帯の後ろに来た中身は見えなくし、帯の下から短くふわっと現す（帯に板を敷かず、地の色のまま重ねるため） */
+  --compact-veil: rgba(0, 0, 0, calc(1 - var(--compact-k)));
+  --compact-fade-1: rgba(0, 0, 0, calc(1 - var(--compact-k) * 0.85));
+  --compact-fade-2: rgba(0, 0, 0, calc(1 - var(--compact-k) * 0.45));
+  -webkit-mask-image: linear-gradient(to bottom, var(--compact-veil) 0, var(--compact-veil) var(--compact-h), var(--compact-fade-1) calc(var(--compact-h) + 10px), var(--compact-fade-2) calc(var(--compact-h) + 20px), #000 calc(var(--compact-h) + 32px));
+          mask-image: linear-gradient(to bottom, var(--compact-veil) 0, var(--compact-veil) var(--compact-h), var(--compact-fade-1) calc(var(--compact-h) + 10px), var(--compact-fade-2) calc(var(--compact-h) + 20px), #000 calc(var(--compact-h) + 32px));
+}
+
+/* 下へスクロールしたときに上端に重ねる、小さな情報の帯 */
+.forge-compact {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 3;
+  box-sizing: border-box;
+  height: var(--compact-h);
+  padding: 8px 74px 0 18px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.forge-compact.is-shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 帯の下端に引く、細い墨の筆跡（帯が伸びると一緒に下がる） */
+.forge-compact::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 8px;
+  bottom: -3px;
+  height: 7px;
+  background: var(--sumi);
+  opacity: 0.55;
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+}
+
+/* 帯の中身は、出す段階になったものから、少し下からすっと現す */
+.forge-compact__name,
+.forge-compact__stats,
+.forge-compact .forge-compact__icon {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s, transform 0.2s ease-out;
+}
+
+.forge-compact__name.is-on,
+.forge-compact__stats.is-on,
+.forge-compact .forge-compact__icon.is-on {
+  opacity: 1;
+  transform: none;
+}
+
+/* 帯の高さを決めておくため、名前は1行（15文字まで入る大きさ） */
+.forge-compact__name {
+  display: block;
+  font-size: 15px;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forge-compact__stats {
+  display: flex;
+  gap: 14px;
+  margin-top: 2px;
+}
+
+.forge-compact__stats > span {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.forge-compact__label { font-size: 11px; letter-spacing: 0.06em; color: var(--f-mute); }
+.forge-compact__total { font-size: 21px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+
+/* 必殺技のアイコンの基本の並び（.skill__icon）より強く指定して、伸びきった帯の右端の真ん中に置く */
+.forge-compact .forge-compact__icon {
+  --skill-box: 44px;
+  position: absolute;
+  right: 16px;
+  top: 12px;
+}
+
+/* ==========================================
+   剣の見本
+   ========================================== */
+.stand {
+  /* 基本の大きさ --P0。刀身の見えている上端から一番長い柄の先まで（--reach）が --standH に収まらないときは小さくする */
+  --P: min(var(--P0, 100px), calc(var(--standH, 10000px) / var(--reach, 3.5)));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 回る・揺れるときの中心は、見た目の真ん中（--cx・--cy は SwordStand が測った、箱の真ん中からのずれ） */
+.stand__float {
+  position: relative;
+}
+
+.stand__float,
+.stand__spin {
+  transform-origin: calc(50% + var(--P) * var(--cx, 0)) calc(50% + var(--P) * var(--cy, 0));
+}
+
+.stand__float.is-floating {
+  animation: forge-float 3s ease-in-out infinite;
+}
+
+@keyframes forge-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(var(--float, -9px)); }
+}
+
+.stand__spin {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stand__blade,
+.stand__hilt {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.stand__blade {
+  width: calc(var(--P) * 1.5);
+  height: calc(var(--P) * 1.5 * var(--aspect));
+}
+
+.stand__blade.is-editing {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.stand__blade img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+
+.stand__blade img.is-silhouette {
+  filter: brightness(0);
+}
+
+/* 柄は刀身より手前 */
+.stand__hilt {
+  z-index: 2;
+  margin-top: calc(var(--P) * (0.4 - var(--hh) / 2));
+}
+
+.stand__hilt img {
+  display: block;
+  width: calc(var(--P) * 1.435);
+  height: calc(var(--P) * var(--hh));
+  pointer-events: none;
+  -webkit-user-drag: none;
+}
+
+/* ワンポイントの黒丸。写真の形で型抜きするので、人の写っていない所には塗られない（送る画像と同じ見え方） */
+.stand__mask {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  -webkit-mask-size: 100% 100%;
+          mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+          mask-repeat: no-repeat;
+}
+
+.stand__spot,
+.stand__guide {
+  position: absolute;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.stand__spot {
+  width: var(--spot-d);
+  background: #000;
+  animation: forge-spot-in 0.3s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
+}
+
+/* 丸が出るとき（ワンポイントにしたとき・錬成完了の演出が終わったとき）は、小さい所から広がる */
+@keyframes forge-spot-in {
+  from { transform: translate(-50%, -50%) scale(0); }
+  to { transform: translate(-50%, -50%) scale(1); }
+}
+
+/* 丸を動かせることを知らせる、脈打つ朱の点線。点線と指は柄より手前に出す（黒丸は刀身と同じく柄の奥） */
+.stand__guide {
+  z-index: 3;
+  width: calc(var(--spot-d) + 12px);
+  box-sizing: border-box;
+  border: 2px dashed var(--shu);
+  animation: forge-ring 1.3s ease-out infinite;
+}
+
+/* 点線の丸に添える指。押すように小さく動かす（大きさは --hand、指先が丸の真ん中に来るよう位置をずらす） */
+.stand__hand {
+  position: absolute;
+  z-index: 3;
+  width: var(--hand, 24px);
+  height: var(--hand, 24px);
+  margin-left: calc(var(--hand, 24px) * -0.4375);
+  margin-top: calc(var(--hand, 24px) * -0.125);
+  pointer-events: none;
+  animation: forge-tap 1.3s ease-in-out infinite;
+}
+
+.stand__hand svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke: var(--shu);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stand__hand svg .stand__hand-fill {
+  fill: var(--washi);
+  stroke: none;
+}
+
+@keyframes forge-tap {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(2px, 5px); }
+}
+
+@keyframes forge-ring {
+  0% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1.45); opacity: 0; }
+}
+
+/* 刀身と柄にかぶせる黒い影 */
+.stand__shadow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  filter: brightness(0);
+  pointer-events: none;
+}
+
+/* ==========================================
+   墨の円相・しぶき
+   ========================================== */
+.enso {
+  overflow: visible;
+  pointer-events: none;
+}
+
+.enso--craft .enso__main { fill: var(--sumi); opacity: 0.93; }
+.enso--craft .enso__dry { fill: var(--washi); opacity: 0.92; }
+.enso--craft .enso__hair { fill: var(--sumi); opacity: 0.8; }
+.enso--craft .enso__drops { fill: var(--sumi); opacity: 0.85; }
+
+.enso--rack .enso__main { fill: var(--shu); opacity: 0.9; }
+.enso--rack .enso__dry { fill: var(--washi-deep); opacity: 0.95; }
+.enso--rack .enso__hair { fill: var(--shu); opacity: 0.8; }
+.enso--rack .enso__drops { fill: var(--shu); opacity: 0.85; }
+
+.enso__reveal {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 96;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.enso.is-drawing .enso__reveal {
+  animation: forge-enso-draw 0.7s cubic-bezier(0.35, 0.1, 0.25, 1) 0.56s both;
+}
+
+.enso.is-drawing .enso__drops {
+  animation: forge-fade-in 0.15s ease-out 0.56s both;
+}
+
+@keyframes forge-enso-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes forge-fade-in {
+  from { opacity: 0; }
+}
+
+/* しぶきは見本の外まで飛ぶので、周りに余白を取って描く */
+.ink-burst {
+  position: absolute;
+  left: -160px;
+  top: -160px;
+  z-index: 3;
+  width: calc(100% + 320px);
+  height: calc(100% + 320px);
+  pointer-events: none;
+}
+
+/* ==========================================
+   ステータス
+   ========================================== */
+.radar {
+  flex-shrink: 0;
+  overflow: visible;
+  font-family: var(--font-brush);
+}
+
+.radar__ring { fill: none; stroke: var(--kasure); stroke-width: 1; }
+.radar__base { fill: none; stroke: var(--f-mute); stroke-width: 1.1; stroke-dasharray: 3 2; }
+.radar__total { fill: var(--shu); fill-opacity: 0.26; stroke: var(--sumi); stroke-width: 2.2; }
+
+.radar text {
+  text-anchor: middle;
+  font-size: var(--radar-font, 10px);
+  fill: var(--f-mute);
+}
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 数字は一の位をそろえる（右寄せの決まった幅） */
+.stats__row {
+  display: flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.stats__label {
+  flex-shrink: 0;
+  width: 2.8em;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--f-mute);
+}
+
+.stats__total {
+  flex-shrink: 0;
+  width: 2.3em;
+  font-size: 38px;
+  line-height: 1.1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats__breakdown {
+  margin-left: 10px;
+  font-size: 14px;
+  color: var(--f-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================
+   柄・必殺技
+   ========================================== */
+.hilt-pick {
+  --hilt-img: 60px;
+  --hilt-arrow: 40px;
+  --hilt-dot-hit: 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.hilt-pick__chooser {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.hilt-pick__row {
+  display: flex;
+  align-items: center;
+}
+
+.hilt-pick__arrow {
+  width: var(--hilt-arrow);
+  height: var(--hilt-img);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.hilt-pick__arrow svg {
+  width: 15px;
+  height: 25px;
+  fill: none;
+  stroke: var(--sumi);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 柄の絵は、どの柄でも同じ大きさの枠に収める（縦長の柄が下の点に被らないように） */
+.hilt-pick__img {
+  flex-shrink: 0;
+  width: var(--hilt-img);
+  height: var(--hilt-img);
+}
+
+.hilt-pick__img img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.hilt-pick__dots {
+  display: flex;
+}
+
+.hilt-pick__dots button {
+  width: var(--hilt-dot-hit);
+  height: var(--hilt-dot-hit);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* 柄の点は、筆先で打った墨の点のように少しいびつにする。選んでいる柄は少し大きな朱の点 */
+.hilt-pick__dots span {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 55% 45% 52% 48% / 48% 56% 44% 52%;
+  background: var(--kasure);
+  transition: transform 0.15s;
+}
+
+.hilt-pick__dots button:nth-child(2n) span { border-radius: 46% 54% 47% 53% / 55% 45% 55% 45%; }
+.hilt-pick__dots button:nth-child(3n) span { border-radius: 52% 48% 58% 42% / 45% 52% 48% 55%; }
+
+.hilt-pick__dots span.is-on {
+  background: var(--shu);
+  transform: scale(1.3);
+}
+
+.hilt-pick__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hilt-pick__name {
+  font-size: 19px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+/* 補正は縦に3行（--inline で横に1行） */
+.hilt-pick__mods {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.hilt-pick__mod-label {
+  display: inline-block;
+  width: 2.8em;
+  color: var(--f-mute);
+}
+
+.hilt-pick__mod .is-minus {
+  color: var(--shu);
+}
+
+.hilt-pick--inline .hilt-pick__mods {
+  flex-direction: row;
+  gap: 12px;
+}
+
+.hilt-pick--inline .hilt-pick__mod-label {
+  width: auto;
+  margin-right: 0.3em;
+}
+
+/* アイコンの絵は 672×784 で、丸（直径 523）が真ん中にある。枠（--skill-box）より大きく描き、
+   丸が枠からはみ出すぶん少し大きく見せる。位置は --skill-* で決める */
+.skill {
+  --skill-box: 52px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.skill__icon {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  width: var(--skill-box);
+  height: var(--skill-box);
+}
+
+.skill__icon img {
+  position: absolute;
+  left: calc(var(--skill-box) * -0.24);
+  top: calc(var(--skill-box) * -0.413);
+  width: calc(var(--skill-box) * 1.483);
+  height: calc(var(--skill-box) * 1.729);
+  max-width: none;
+}
+
+.skill__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.skill__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.skill__tag {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  color: var(--shu);
+}
+
+.skill__name {
+  font-size: 19px;
+  line-height: 1.3;
+}
+
+.skill__desc {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--f-mute);
+}
+
+/* ==========================================
+   プライバシー
+   ========================================== */
+.privacy__modes {
+  display: flex;
+}
+
+.privacy__mode {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--kasure);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.privacy__mode.is-on {
+  background: var(--washi-deep);
+  color: var(--sumi);
+}
+
+.privacy__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  opacity: 0.3;
+}
+
+.privacy__mode.is-on .privacy__icon {
+  opacity: 1;
+}
+
+.privacy__icon svg {
+  width: 30px;
+  height: 30px;
+}
+
+.privacy__thumb {
+  display: block;
+  width: 23px;
+  height: 35px;
+  object-fit: contain;
+  filter: brightness(0);
+}
+
+.privacy__label {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.privacy__line,
+.tabs__line {
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  bottom: 2px;
+  height: 7px;
+  background: var(--shu);
+  opacity: 0;
+}
+
+.privacy__mode.is-on .privacy__line,
+.tabs__tab.is-on .tabs__line {
+  opacity: 1;
+}
+
+/* 丸の大きさ。ワンポイント以外では押せず、薄く残す（場所は取ったまま） */
+.privacy__size {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  padding: 0 16px;
+  transition: opacity 0.2s;
+}
+
+.privacy__size.is-off {
+  opacity: 0.35;
+}
+
+/* 丸の大きさのつまみ。通り道は薄い筆跡、つまみまでは墨の筆跡。つまみは、両端の黒丸や剣の黒丸と紛れないよう、
+   黒い縁の白い丸の真ん中に朱の点を置く */
+.privacy__track {
+  --thumb: 20px;
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+}
+
+.privacy__track::before,
+.privacy__track::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 9px;
+  margin-top: -4.5px;
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+  pointer-events: none;
+}
+
+.privacy__track::before {
+  background: var(--kasure);
+  opacity: 0.4;
+}
+
+.privacy__track::after {
+  background: var(--sumi);
+  opacity: 0.75;
+  clip-path: inset(0 calc(100% - var(--fill, 50%)) 0 0);
+}
+
+.privacy__track input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  -webkit-appearance: none;
+          appearance: none;
+  cursor: pointer;
+}
+
+.privacy__track input:disabled { cursor: default; }
+
+.privacy__track input::-webkit-slider-runnable-track { height: 100%; background: transparent; }
+.privacy__track input::-moz-range-track { height: 100%; background: transparent; }
+
+.privacy__track input::-webkit-slider-thumb {
+  box-sizing: border-box;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: calc((28px - var(--thumb)) / 2);
+  border: 2px solid var(--sumi);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--shu) 0, var(--shu) 3.5px, #fff 4.5px);
+  box-shadow: 0 1px 2px rgba(23, 20, 18, 0.25);
+  -webkit-appearance: none;
+          appearance: none;
+}
+
+.privacy__track input::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 2px solid var(--sumi);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--shu) 0, var(--shu) 3.5px, #fff 4.5px);
+  box-shadow: 0 1px 2px rgba(23, 20, 18, 0.25);
+}
+
+.privacy__track input:focus-visible { outline: none; }
+.privacy__track input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--washi), 0 0 0 4px var(--shu); }
+.privacy__track input:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--washi), 0 0 0 4px var(--shu); }
+
+.privacy__dot {
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--sumi);
+}
+
+.privacy__dot--sm { width: 7px; height: 7px; }
+.privacy__dot--lg { width: 20px; height: 20px; }
+
+.privacy__hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.privacy__how {
+  margin: 2px 0 0;
+  min-height: 1.5em;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--shu);
+}
+
+/* ==========================================
+   タブ
+   ========================================== */
+.tabs {
+  display: flex;
+}
+
+.tabs__tab {
+  position: relative;
+  flex: 1;
+  min-height: 44px;
+  padding: 6px 0 12px;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--kasure);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.tabs__tab.is-on {
+  background: var(--washi-deep);
+  color: var(--sumi);
+}
+
+.tabs__line {
+  left: 22%;
+  right: 22%;
+  bottom: 3px;
+  height: 8px;
+}
+
+/* ==========================================
+   名前
+   ========================================== */
+.name-edit {
+  --name-h: 64px;
+  height: var(--name-h);
+}
+
+.name-edit__viewing,
+.name-edit__editing {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: var(--name-h);
+}
+
+.name-edit__name {
+  position: relative;
+  min-width: 0;
+  padding-bottom: 6px;
+}
+
+.name-edit__text {
+  display: block;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.name-edit__line {
+  position: absolute;
+  left: -6px;
+  right: -10px;
+  bottom: -2px;
+  height: 12px;
+  background: var(--shu);
+}
+
+.name-edit__start {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  padding: 6px 2px;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--f-mute);
+  cursor: pointer;
+}
+
+.name-edit__start svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+/* 入力欄。文字数は欄の右端に重ねる */
+.name-edit__field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.name-edit__field input {
+  display: block;
+  width: 100%;
+  height: 48px;
+  box-sizing: border-box;
+  padding: 0 56px 0 2px;
+  font-family: inherit;
+  font-size: 26px;
+  letter-spacing: 0.03em;
+  color: var(--sumi);
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid var(--shu);
+  border-radius: 0;
+  outline: none;
+}
+
+.name-edit__count {
+  position: absolute;
+  right: 0;
+  bottom: 7px;
+  font-size: 12px;
+  color: var(--f-mute);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.name-edit__count.is-full {
+  color: var(--shu);
+}
+
+.name-edit__save {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 6px 15px 6px 12px;
+  font-size: 14px;
+  color: var(--washi);
+  background: var(--sumi);
+  border: 0;
+  cursor: pointer;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+}
+
+.name-edit__save:disabled {
+  background: var(--kasure);
+  cursor: not-allowed;
+}
+
+.name-edit__cancel {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 6px 2px;
+  border: 0;
+  background: none;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+
+.name-edit__save.is-compact {
+  min-height: 40px;
+  padding: 5px 11px 5px 9px;
+  font-size: 13px;
+}
+
+.name-edit__cancel.is-icon,
+.name-edit__start.is-icon {
+  width: 36px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  text-decoration: none;
+  color: var(--f-mute);
+}
+
+.name-edit__cancel.is-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.name-edit__start.is-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* 画面の上端に出す書き換え欄（16:9 の舞台が小さく縮んでいるとき） */
+.name-bar-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(23, 20, 18, 0.35);
+}
+
+.name-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+  background: var(--washi);
+  border-bottom: 2px solid var(--sumi);
+}
+
+.name-bar input {
+  height: 44px;
+  font-size: 20px;
+}
+
+.name-bar button {
+  font-family: inherit;
+}
+
+/* ==========================================
+   確認のシート
+   ========================================== */
+.confirm-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(23, 20, 18, 0.6);
+}
+
+.confirm-sheet {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 400px;
+  padding: 24px 24px 18px;
+  background: var(--washi);
+  border-top: 4px solid var(--shu);
+  text-align: center;
+}
+
+.confirm-sheet h3 {
+  margin: 0 0 10px;
+  font-size: 22px;
+  font-weight: normal;
+}
+
+.confirm-sheet__body {
+  margin: 0 0 18px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--f-mute);
+}
+
+.confirm-sheet__body strong {
+  font-weight: normal;
+  color: var(--shu);
+}
+
+.confirm-sheet__buttons {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+}
+
+.confirm-sheet__cancel,
+.confirm-sheet__ok {
+  min-height: 44px;
+  padding: 8px 18px;
+  font-family: inherit;
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.confirm-sheet__cancel {
+  border: 0;
+  background: none;
+  color: var(--sumi);
+  text-decoration: underline;
+  text-underline-offset: 6px;
+}
+
+.confirm-sheet__ok {
+  border: 0;
+  color: var(--washi);
+  background: var(--shu);
+}
+
+/* 待っているあいだのお知らせ：周りを暗くせず、シートだけを浮かせる */
+.confirm-veil.is-clear {
+  background: none;
+  pointer-events: none;
+}
+
+.confirm-sheet.is-busy {
+  pointer-events: auto;
+  box-shadow: 0 12px 32px -10px rgba(60, 45, 30, 0.45);
+}
+
+.confirm-sheet.is-busy .confirm-sheet__body { margin-bottom: 8px; }
+
+.confirm-sheet__dots i { font-style: normal; animation: confirm-dots 1.2s steps(1) infinite; }
+.confirm-sheet__dots i:nth-child(2) { animation-delay: 0.2s; }
+.confirm-sheet__dots i:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes confirm-dots {
+  0%, 30% { opacity: 0.15; }
+  31%, 100% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stand__float.is-floating,
+  .stand__guide,
+  .stand__hand,
+  .stand__spot,
+  .confirm-sheet__dots i {
+    animation: none;
+  }
+}
+
+/* ==========================================
+   墨の仕上げ（ロビーと同じ、筆の揺れ・かすれ）
+   ========================================== */
+/* 筆で引いたように少し揺れる細い枠。--frame で色、--frame-w で太さ（札・手入れのボタン） */
+.forge-frame,
+.forge-quiet .privacy__mode {
+  position: relative;
+}
+
+.forge-frame::before,
+.forge-quiet .privacy__mode::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: var(--frame-w, 1px) solid var(--frame, #cfc5b1);
+  filter: url(#sumi-rough);
+  pointer-events: none;
+  transition: border-color 0.15s;
+}
+
+/* 区切りのかすれ線（.forge-rule を付けた所の上端） */
+.forge-rule {
+  position: relative;
+}
+
+.forge-rule::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  top: -4px;
+  height: 8px;
+  background: var(--sumi);
+  opacity: 0.4;
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+  pointer-events: none;
+}
+
+/* 縦長の画面の下に固定するボタンの帯。少し沈んだ紙の色を敷き、上に薄い影を落として少し浮かせる。
+   画面の左右と下の余白（--bar-pb）まで広げて、下端の帯に見せる */
+.forge-bottom-bar {
+  position: relative;
+  margin: 0 -18px calc(var(--bar-pb, 12px) * -1);
+  padding-left: 18px;
+  padding-right: 18px;
+  padding-bottom: var(--bar-pb, 12px);
+  /* 武器庫の刀掛けの帯と同じ、透けない一段沈んだ和紙の色（後ろの姿や陰りが透けて濁らないように） */
+  background: var(--washi-deep);
+  box-shadow: 0 -8px 16px -10px rgba(60, 45, 30, 0.35);
+}

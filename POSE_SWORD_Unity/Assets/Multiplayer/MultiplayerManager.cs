@@ -105,7 +105,8 @@ public class MultiplayerManager : MonoBehaviour
     [Tooltip("画面下端からトリオパネルまでの距離")]
     [SerializeField] float trioPanelBottom = 16f;
     [SerializeField] Color trioPanelColor = new Color(.07f, .09f, .14f, .82f);
-    [Tooltip("1vs3の間だけ必殺技ボタンを上へ逃がす時に、トリオパネルの上端との間に空ける余白(ボタンが乗っているCanvasの単位)")]
+    [Tooltip("1vs3の間だけ必殺技ボタンをトリオパネルの右隣へ移す時の、パネルとの間・画面の右端との間の余白" +
+        "(右隣に収まらず上へ逃がす時は、パネルの上端との間の余白)。ボタンが乗っているCanvasの単位")]
     [SerializeField] float soloUltimateButtonMargin = 12f;
 
     [Header("1vs3 HUD の文字サイズ")]
@@ -121,7 +122,7 @@ public class MultiplayerManager : MonoBehaviour
     [SerializeField] float trioValueFontSize = 16f;
 
     private GameObject soloHudRoot;
-    // 1vs3の間だけ持ち上げる必殺技ボタンと、その元の位置。StopCurrent()で必ず戻す。
+    // 1vs3の間だけ動かす必殺技ボタンと、その元の位置。StopCurrent()で必ず戻す。
     private RectTransform ultimateButtonRect;
     private Vector2 ultimateButtonHome;
     private Sprite slantSprite;
@@ -486,7 +487,7 @@ public class MultiplayerManager : MonoBehaviour
         var panels = new List<RectTransform>();
         for (int i = 0; i < trio.Length; i++)
             panels.Add(BuildTrioPanel(swords[trio[i].playerId], trio[i].slotIndex, i, trio.Length, font));
-        LiftUltimateButton(panels);
+        PlaceUltimateButtonForSolo(panels);
     }
 
     // トリオのHPパネルは画面下端に3枚並ぶので、真ん中の1枚が画面下中央の必殺技ボタンへ重なる。
@@ -495,9 +496,12 @@ public class MultiplayerManager : MonoBehaviour
     // しかもGraphicRaycasterを持たない(=押せるのにパネルの裏で見えないだけ)ため、隠れた下端を
     // 狙った指がボタンの外へ落ち、通常タップ(ジャンプ/小ダッシュ)としてSPを消費→必殺技のラインを
     // 割ってボタンごと消える、という形で「押しても必殺技が出ない」ように見えていた。
-    // パネルの上端より上へ逃がす。必要な量は縦横比で変わるので実寸から出し、
-    // 試合が終わったら必ず元の位置へ戻す。
-    void LiftUltimateButton(IEnumerable<RectTransform> trioPanels)
+    // ▼【修正】以前はパネルの上端より上へ逃がしていたが、それだとボタンが画面の中ほどまで上がり、
+    // 指が届きにくく戦場の見通しも塞いでいた。パネルの並びの右隣(パネルの下端と同じ高さ)へ移す。
+    // 右下は右手の親指の定位置で、必殺技ボタンの置き場として馴染みもある。
+    // 縦横比によって右隣に収まらない時だけ、従来どおりパネルの上へ逃がす。
+    // 必要な量は縦横比で変わるので実寸から出し、試合が終わったら必ず元の位置へ戻す。
+    void PlaceUltimateButtonForSolo(IEnumerable<RectTransform> trioPanels)
     {
         if (ultimateButtonRect != null || hudCanvas == null) return;
         var button = hudCanvas.transform.Find("SpecialAttackButtonPL1") as RectTransform;
@@ -506,21 +510,35 @@ public class MultiplayerManager : MonoBehaviour
         Canvas.ForceUpdateCanvases();
         // ScreenSpaceOverlayのCanvasでは、RectTransformのワールド座標がそのまま画面ピクセル
         var corners = new Vector3[4];
-        float panelTop = float.NegativeInfinity;
+        float panelTop = float.NegativeInfinity, panelRight = float.NegativeInfinity;
+        float panelBottom = float.PositiveInfinity;
         foreach (var panel in trioPanels)
         {
             if (panel == null) continue;
             panel.GetWorldCorners(corners);
             panelTop = Mathf.Max(panelTop, corners[1].y);
+            panelRight = Mathf.Max(panelRight, corners[2].x);
+            panelBottom = Mathf.Min(panelBottom, corners[0].y);
         }
         if (float.IsNegativeInfinity(panelTop)) return;
         float scale = Mathf.Max(hudCanvas.scaleFactor, .0001f);
+        float margin = soloUltimateButtonMargin * scale;
         button.GetWorldCorners(corners);
-        float overlap = panelTop + soloUltimateButtonMargin * scale - corners[0].y;
-        if (overlap <= 0f) return;
+        float width = corners[2].x - corners[0].x;
+
+        Vector2 shift;
+        if (panelRight + margin + width + margin <= Screen.width)
+            // 右隣へ。下端をパネルの下端に揃える
+            shift = new Vector2(panelRight + margin - corners[0].x, panelBottom - corners[0].y);
+        else
+        {
+            float overlap = panelTop + margin - corners[0].y;
+            if (overlap <= 0f) return;
+            shift = new Vector2(0f, overlap);
+        }
         ultimateButtonRect = button;
         ultimateButtonHome = button.anchoredPosition;
-        button.anchoredPosition = ultimateButtonHome + new Vector2(0f, overlap / scale);
+        button.anchoredPosition = ultimateButtonHome + shift / scale;
     }
 
     // ボタンはシーンに1つしか無く次の対戦へ持ち越されるので、1vs3以外へ戻る時に位置も必ず復帰させる。

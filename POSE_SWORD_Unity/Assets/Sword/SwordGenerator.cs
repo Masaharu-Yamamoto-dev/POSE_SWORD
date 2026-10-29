@@ -46,6 +46,10 @@ public class SwordGenerator : MonoBehaviour
         }
     }
 
+    // 受け付ける攻撃・重さの上限。React側(HostRoom.js)の MAX_ATTACK / MAX_WEIGHT と合わせる
+    const float MaxAttack = 130f;
+    const float MaxWeight = 120f;
+
     public void GenerateSwordFromJson(string jsonString)
     {
         LastGenerationSucceeded = false;
@@ -73,19 +77,24 @@ public class SwordGenerator : MonoBehaviour
         
         if (swordBattle != null)
         {
-            // Webから来た 1〜100 の値を安全に制限（1未満や100オーバーのバグを防ぐ）
-            float rawAttack = Mathf.Clamp(data.attack, 1f, 100f);
-            float rawWeight = Mathf.Clamp(data.weight, 1f, 100f);
+            // ▼【修正】Webから来る値は柄の補正込みの最終値で、剣本体の上限100に柄の補正が乗って
+            // 攻撃は最大130、重さは最大120まで来る(React側 HostRoom.js の MAX_ATTACK / MAX_WEIGHT)。
+            // 以前は1〜100で切っていたため、100を超えた分の柄の補正が消えていた
+            // (攻撃100の剣に武骨な柄を付けると、攻撃は増えずにHPの-50だけが効いていた)。
+            // 上限をReact側に合わせ、変換は1〜100の範囲と同じ傾きのまま100より上へ伸ばす。
+            // こうすると100以下の剣の強さは今までと変わらない
+            float rawAttack = Mathf.Clamp(data.attack, 1f, MaxAttack);
+            float rawWeight = Mathf.Clamp(data.weight, 1f, MaxWeight);
 
-            // 1〜100の数値を「0.0 〜 1.0 の割合（パーセンテージ）」に直す
+            // 1〜100の数値を「0.0 〜 1.0 の割合（パーセンテージ）」に直す（100を超えた分は1.0より大きくなる）
             float attackRatio = (rawAttack - 1f) / 99f;
             float weightRatio = (rawWeight - 1f) / 99f;
 
-            // 攻撃力：割合に応じて 10 〜 90 の間に変換
-            int actualAttack = Mathf.RoundToInt(Mathf.Lerp(10f, 90f, attackRatio));
-            
-            // 重さ：割合に応じて 7.0 〜 25.0 の間に変換
-            float actualWeight = Mathf.Lerp(7f, 25f, weightRatio);
+            // 攻撃力：1〜100 を 10〜90 に変換（130なら約113）
+            int actualAttack = Mathf.RoundToInt(Mathf.LerpUnclamped(10f, 90f, attackRatio));
+
+            // 重さ：1〜100 を 7.0〜25.0 に変換（120なら約28.6）
+            float actualWeight = Mathf.LerpUnclamped(7f, 25f, weightRatio);
             
             // HPはそのまま、攻撃力は変換した値をセット
             swordBattle.SetupStatus(data.name, data.hp, actualAttack, data.hiltType);

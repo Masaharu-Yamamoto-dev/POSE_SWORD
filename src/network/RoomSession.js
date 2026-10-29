@@ -1,4 +1,4 @@
-import { HostRoom, MAX_PLAYERS, PROTOCOL_VERSION, SOLO_BUFF, validateSword } from './HostRoom.js';
+import { HostRoom, MAX_PLAYERS, PROTOCOL_VERSION, SOLO_BUFF, swordForGameMode, validateSword } from './HostRoom.js';
 
 const ACTIVE = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 // 自動開始の部屋のタイミング。席が埋まれば少し待って開始し、埋まらなければ人数を切り上げる。
@@ -39,6 +39,9 @@ const mergeSword = (previous, next) => {
 
 // Transport adapter for PeerJS DataConnection. Time is injected so barriers,
 // disconnects and retransmission can be tested without browser timers.
+// ホストがロビーを解散したときにゲストへ残す理由。画面側はこれを見て「解散されました」のお知らせを出す
+export const HOST_CLOSED_MESSAGE = 'ホストがロビーを解散しました。';
+
 export class RoomSession {
   constructor({ isHost = false, roomEpoch = '', seatLimit, autoStart = false, gameMode = '0', livesMode = false,
     soloMode = false, sword,
@@ -243,7 +246,7 @@ export class RoomSession {
         this.command('StopMultiplayer', { matchId: m.matchId }); break;
       case 'SPIN': if (!this.markSpin(m.playerId)) return; break;
       case 'PING': this.send(link, 'PONG'); break;
-      case 'CLOSED': this.error = 'ホストが部屋を終了しました。'; this.close(false); return;
+      case 'CLOSED': this.error = HOST_CLOSED_MESSAGE; this.close(false); return;
       default: break;
     }
     this.notify();
@@ -308,8 +311,9 @@ export class RoomSession {
   // 1vs3 ではホストが指名したボスを spawnIndex 0 に固定し、トリオだけを残りの席で
   // シャッフルする。こうしないと陣営が入り混じった配置で試合が始まってしまう。
   assignRoles(players) {
+    // 独楽モードでは柄の補正を外した値で戦う（swordForGameMode）
     const describe = (player, team, spawnIndex) => ({ playerId: player.playerId,
-      slotIndex: player.slotIndex, spawnIndex, team, swordData: player.swordData });
+      slotIndex: player.slotIndex, spawnIndex, team, swordData: swordForGameMode(player.swordData, this.room.gameMode) });
     if (!this.room.soloMode) {
       const spawnSlots = this.shuffle(players.map((_, i) => i));
       return players.map((player, i) => describe(player, 0, spawnSlots[i]));

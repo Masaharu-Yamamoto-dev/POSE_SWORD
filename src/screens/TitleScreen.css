@@ -1,0 +1,363 @@
+/* タイトル画面の並び。ロゴとメニューは置き場所を分け、メニューの中身が変わってもロゴは動かない。
+   横長：16:9の舞台（1280×720）の左にロゴ、右にメニュー。メニューは右の列の中で上下中央。
+   縦長：上の決まった高さの場所にロゴ、その下にメニューを上から並べる。 */
+.title {
+  position: relative;
+  box-sizing: border-box;
+  font-family: var(--font-brush);
+  color: var(--sumi);
+}
+
+/* 背景に薄く出す自分の剣（プライバシーの設定を反映した画像） */
+.title-bg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 0;
+  height: 100%;
+  transform: translate(-50%, -50%);
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.title-logo-area,
+.title-side {
+  position: relative;
+  z-index: 1;
+}
+
+.title-logo-area {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.title-logo {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* メニューと、その下に出るメッセージ */
+.title-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* 縦長で入りきらないときに縮める単位（TitleScreen.jsx の useFitMenu）。並べ方は .title-side と同じにする */
+.title-fit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.title-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 300px;
+}
+
+/* メニューの中身の切り替え：前の中身と次の中身を同じ場所に重ね、前を消しながら次を出す（SWAP_MS と同じ長さ） */
+.title-swap {
+  position: relative;
+  display: grid;
+  align-items: center; /* 高さの違う中身どうしは、上下の真ん中で重ねる */
+  width: 100%;
+}
+
+.title-swap__layer {
+  grid-area: 1 / 1;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.title-swap__layer.is-in { animation: title-swap-in 0.28s ease-out both; }
+.title-swap__layer.is-out { animation: title-swap-out 0.28s ease-in both; pointer-events: none; }
+
+/* 消えていく前のパネルは浮かせて重ね、高さに数えない。数えると、重ねている間だけ場所が
+   前のパネルの高さまで伸び、消え終わった瞬間に縮んで新しいパネルがかくっと動く。
+   前のパネルは、消え終わるまで元の場所に置いておく（横長は上下の真ん中、縦長は上詰め） */
+.title-swap__layer.is-out {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.title--port .title-swap__layer.is-out { top: 0; transform: none; }
+
+@keyframes title-swap-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes title-swap-out { from { opacity: 1; } to { opacity: 0; } }
+
+/* ランダムマッチ・ロビーに入る・待ち表示の欄。枠で囲まず、見出し・墨札・朱のボタンで組む（錬成完了・武器庫・ロビーと同じ部品） */
+/* 武器庫を開くの下の所持数。0本のときも出す（高さがいつも同じなので、ボタンの並びが動かない） */
+.title-count {
+  min-height: 1.6em;
+  margin: -8px 0 0;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--usuzumi);
+}
+
+.title-count b { font-weight: normal; font-size: 19px; color: var(--sumi); }
+
+/* 0本のときは、押せない「武器庫を開く」と同じ薄い色 */
+.title-count.is-empty,
+.title-count.is-empty b { color: var(--kasure); }
+
+.title-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 380px;
+}
+
+.title-panel__title { margin: 0; font-size: 24px; letter-spacing: 0.12em; }
+.title-panel__sub { margin: 6px 0 0; font-size: 13px; line-height: 1.6; letter-spacing: 0.04em; color: var(--usuzumi); }
+.title-panel__note { margin: 10px 0 0; font-size: 12px; line-height: 1.6; color: var(--usuzumi); }
+
+/* 決める操作（朱のボタン）と、戻る（今まで通りの薄墨のボタン） */
+.title-panel__go { width: 250px; margin-top: 50px; }
+.title-panel__go .ink-btn__label { min-height: 52px; font-size: 21px; }
+.title-panel__back { width: 200px; margin-top: 18px; }
+.title-join .title-panel__back { margin-top: 30px; }
+
+/* 希望ルール・希望人数：ロビーのルール設定と同じ「見出し｜墨札」の行 */
+.title-choices {
+  align-self: stretch;
+  margin-top: 20px;
+  padding-top: 6px;
+  border-top: 1px solid var(--kasure);
+}
+
+.title-choices__group {
+  display: grid;
+  grid-template-columns: 6em 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  text-align: left;
+}
+
+.title-choices__group > b { font-size: 14px; font-weight: normal; letter-spacing: 0.1em; color: var(--usuzumi); }
+.title-choices__row { display: flex; flex-wrap: wrap; gap: 8px; }
+.title-choices__row .fuda-btn { min-width: 5.2em; text-align: center; }
+
+/* ロビーID：1桁ずつの枠。入力欄は枠の上に透明に重ねる */
+.title-digits {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  margin-top: 22px;
+  cursor: text;
+}
+
+.title-digits input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  font-size: 16px;
+  outline: none;
+}
+
+.title-digits__box {
+  --frame: #7d7466;
+  position: relative;
+  width: 46px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  font-size: 32px;
+  color: var(--sumi);
+}
+
+.title-digits__box::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: var(--frame-w, 1px) solid var(--frame);
+  filter: url(#sumi-rough);
+  pointer-events: none;
+}
+
+/* 次に入る枠だけ朱にし、入力中は細い縦線を点滅させる */
+.title-digits:focus-within .title-digits__box.is-cur { --frame: var(--shu); --frame-w: 2px; }
+.title-digits:focus-within .title-digits__box.is-cur:not(.is-filled)::after {
+  content: '';
+  width: 2px;
+  height: 28px;
+  background: var(--shu);
+  animation: title-caret 1s steps(1) infinite;
+}
+
+@keyframes title-caret { 50% { opacity: 0; } }
+
+/* ランダムマッチの待ち表示 */
+.title-matching__ring {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  margin-top: 18px;
+}
+
+.title-matching__ring.is-stopped { height: 40px; }
+
+.title-matching__enso {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  animation: title-enso-fade 2.4s linear infinite;
+}
+
+/* 円相を1.3秒で描き、少し置いて薄れ、また描く */
+.title-matching__enso .enso__reveal { animation: title-enso-draw 2.4s cubic-bezier(0.35, 0.1, 0.25, 1) infinite; }
+.title-matching__enso .enso__drops { opacity: 0; }
+
+@keyframes title-enso-draw {
+  0% { stroke-dashoffset: 1; }
+  55%, 100% { stroke-dashoffset: 0; }
+}
+
+@keyframes title-enso-fade {
+  0%, 80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.title-matching__time {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding-bottom: 6%;
+  font-size: 36px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.title-matching__status { margin: 8px 0 0; font-size: 17px; letter-spacing: 0.06em; }
+.title-matching__status.is-stopped { color: var(--shu); }
+.title-matching__error { margin: 6px 0 0; font-size: 13px; color: var(--shu); }
+
+.title-matching__meta {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  min-height: 2em;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--usuzumi);
+}
+
+.title-matching__meta b { margin-left: 4px; font-weight: normal; font-size: 20px; color: var(--sumi); }
+
+/* メッセージの場所はいつも取っておく（出たときにメニューが動かないように） */
+.title-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  margin-top: 18px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.title-message__text {
+  width: 100%;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  font-size: 15px;
+  color: var(--shu);
+  border-bottom: 2px solid var(--shu);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .title-matching__enso,
+  .title-matching__enso .enso__reveal,
+  .title-digits__box.is-cur::after { animation: none; }
+}
+
+/* ==========================================
+   横長（16:9 の舞台）
+   ========================================== */
+.title--land {
+  width: 1280px;
+  height: 720px;
+  padding: 60px 80px 50px 70px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  column-gap: 60px;
+  align-items: center;
+}
+
+.title--land .title-logo-area {
+  height: 100%;
+  align-items: center;
+}
+
+.title--land .title-logo { max-width: 680px; max-height: 560px; }
+
+/* 右の列の中で上下中央。中身が変わっても、動くのはこの列だけ */
+.title--land .title-side { align-self: center; }
+
+/* ==========================================
+   縦長
+   ========================================== */
+.title--port {
+  position: fixed;
+  inset: 0;
+  max-width: 560px;
+  margin: 0 auto;
+  height: 100vh;
+  height: 100dvh;
+  padding: max(16px, env(safe-area-inset-top)) 20px max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ロゴの場所は高さを決めておく（右上の「遊び方」の下から） */
+.title--port .title-logo-area {
+  flex: none;
+  height: clamp(150px, 32dvh, 300px);
+  padding-top: 44px;
+  box-sizing: border-box;
+  align-items: flex-end;
+}
+
+.title--port .title-logo { width: 92%; }
+
+/* 背の低い画面（iPhone SE など）では、ロゴの場所を少し詰めて、メニューを縮めすぎないようにする */
+@media (max-height: 600px) {
+  .title--port .title-logo-area { height: clamp(110px, 24dvh, 300px); }
+}
+
+/* メニューはロゴの下から上詰めで並べる。入りきらないときは中身ごと縮めて収める（useFitMenu）。
+   下限まで縮めても入りきらないときだけスクロールさせるが、スクロールバーは出さない */
+.title--port .title-side {
+  flex: 1;
+  min-height: 0;
+  padding-top: 28px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.title--port .title-side::-webkit-scrollbar { display: none; }
+
+.title--port .title-menu { gap: 16px; }

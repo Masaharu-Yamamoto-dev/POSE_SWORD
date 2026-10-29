@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 黒バラフォントを、画面を組み立てるJSと並行して最初から取りに行く（src/index.css の @font-face と同じURL）。
+         絞った版（約150KB）を先に、全部の版（1.0MB）は後回しにして、絞った版が早く届くようにする -->
+    <link rel="preload" href="/kurobara-gothic-heavy-ui.woff2" as="font" type="font/woff2" crossorigin fetchpriority="high" />
+    <link rel="preload" href="/kurobara-gothic-heavy.woff2" as="font" type="font/woff2" crossorigin fetchpriority="low" />
     <title>pose-sword</title>
   </head>
   <body>
