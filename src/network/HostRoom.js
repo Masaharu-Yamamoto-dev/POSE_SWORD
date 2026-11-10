@@ -17,13 +17,13 @@ export const SOLO_MODE_PLAYERS = 4;
 // ボス側の強化。全クライアントが同じ値を使う必要があるため、ここで決めて試合設定に載せて配る。
 // 数値はすべて調整中。ここだけを直せば全員に反映される。
 export const SOLO_BUFF = Object.freeze({
-  hpMultiplier: 3.0,        // MatchRules へ渡すHPと Unity 側の maxHp に掛ける
+  hpMultiplier: 2.5,        // MatchRules へ渡すHPと Unity 側の maxHp に掛ける
   // 攻撃力に掛ける。ボスの通常攻撃・必殺技・薙ぎ払いのすべてに効く。
   // 3人を相手にするので、通常攻撃1発でトリオの一撃を上回るくらいを狙っている。
-  attackMultiplier: 2.0,
-  spGainMultiplier: 1.5,    // 時間経過・被弾によるSP獲得量に掛ける
+  attackMultiplier: 3.5,
+  spGainMultiplier: 2.5,    // 時間経過・被弾によるSP獲得量に掛ける
   // 見た目の大きさに掛ける。剣の当たり判定も一緒に大きくなるので、間合いにも効く。
-  scaleMultiplier: 1.5,
+  scaleMultiplier: 2.5,
   maxSp: 200,               // ボスだけSPゲージが2段階（100=通常必殺 / 200=制圧）
   suppressRadius: 12.0,      // 掌握が届く半径
   // 操作不能になる秒数。溜め1秒＋薙ぎ払いの後、ボスが自由に殴れる時間がここから引いた分になる。
