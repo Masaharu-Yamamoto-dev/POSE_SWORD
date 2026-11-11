@@ -325,15 +325,104 @@ public static bool matchEnded = false;
     }
 
     // ▼【新規追加】剣本体以外（分身・リーフシールドなど）からも、TakeDamage/QueueHitへの正しい経路で
-    // ダメージを与えられるようにする共通口。ローカルではTakeDamageへ、オンラインではHost権威のQueueHitへ回す
-    public void DealDamageTo(SwordBattle target, int damage, Vector2 hitPoint, bool isCrit = false, bool isWeakPoint = false)
+    // ダメージを与えられるようにする共通口。ローカルではTakeDamageへ、オンラインではHost権威のQueueHitへ回す。
+    // byBody：剣の本体で当てたか（巨大回転斬は本体、分身・リーフシールドは本体ではない）
+    public void DealDamageTo(SwordBattle target, int damage, Vector2 hitPoint, bool isCrit = false, bool isWeakPoint = false, bool byBody = false)
     {
         if (target == null || target == this || !target.IsAlive) return;
-        if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, isCrit || isWeakPoint);
+        if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, hitPoint, isCrit || isWeakPoint, byBody);
         else target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
     }
 
-    // ▼【新規追加】残機モード：現在の剣が破壊された際、「倒された」状態だけを解除して次の剣に持ち替えさせる。
+    // ▼【新規追加】オンライン対戦のダメージ1件ぶんの見た目（当たった場所の火花とダメージ数字）。
+    // HostとゲストのどちらもMultiplayerManagerのダメージ記録から呼ぶ。音・ヒットストップ・揺れは
+    // これまでどおりPlayClientDamageEffect（HPの減り）側で鳴らす
+    // persist：決着の一撃。数字と撃破演出の印を消さずに残す。出した数字を返す（決着のカメラが寄る先に使う）
+    public DamagePopup PlayHitVisual(Vector2 point, int damage, bool isCrit, bool lethal, bool persist, DamagePopup.Relation relation, Color attackerColor)
+    {
+        // 撃破の一撃は専用のヒットエフェクト（DefeatEffects）を出す。用意できなかった時は、
+        // 通常かクリティカルかに関わらず一番大きいヒットエフェクト（クリティカルの物）を出す
+        // ほかのヒットエフェクトと同じく、やられた剣より手前・撃破の数字と墨の印より後ろに出す
+        bool killHitPlayed = lethal && DefeatEffects.Current.PlayKillHit(point, DefeatGhost.HitEffectSortingOrder);
+        ParticleSystem effect = isCrit || lethal ? critEffectPrefab : normalEffectPrehub;
+        if (effect != null && !killHitPlayed)
+        {
+            // ダメージのヒットエフェクトは、手前に出したやられた剣より、さらに手前に出す
+            var spawned = Instantiate(effect, point, Quaternion.identity);
+            foreach (var r in spawned.GetComponentsInChildren<ParticleSystemRenderer>(true))
+                r.sortingOrder = DefeatGhost.HitEffectSortingOrder + r.sortingOrder;
+        }
+        if (damagePopupPrefab == null) return null;
+        return DamagePopup.Spawn(damagePopupPrefab, point, this, damage, isCrit, lethal, relation, attackerColor, PlayerId, persist);
+    }
+
+    // ▼【新規追加】撃破の見た目（オンライン対戦）。剣（刀身と柄）を撃破の見た目に変え、吹き飛んでから少しして
+    // 薄れながら消す。見た目そのもの（標準は墨）は DefeatEffects が担当し、ここはタイミングと後始末だけを持つ。
+    // 消え切るまではカメラの画角に含める。決着の時は FinishMultiplayer が StopAllCoroutines するので、消えずに残る
+    // 流れ：やられた瞬間に震え（デュクシ）→ とどめの印（墨の帯→一閃→飛沫）を書き終えて余韻が過ぎるまで、元の見た目のまま
+    // その場で止まる → 色が抜けて跳ね上がる → 少しして薄れながら消える。当たり判定はやられた時点で消えている。
+    // 止める・跳ね上げるのは物理を持つホストだけで、ゲストは位置の同期で同じ動きになる
+    bool defeatedSortingRaised;
+
+    void BeginDefeatVisual()
+    {
+        var renderers = GetComponentsInChildren<SpriteRenderer>();
+        // やられた剣は、撃破した側の剣に隠れないよう手前に出す（ヒットエフェクト・数字・墨よりは奥）
+        if (!defeatedSortingRaised)
+        {
+            defeatedSortingRaised = true;
+            foreach (var r in renderers) r.sortingOrder += DefeatGhost.DefeatedSortingOffset;
+        }
+        DefeatJitter.Play(gameObject, renderers);
+        if (MultiplayerOwner != null) MultiplayerOwner.AddCameraTarget(transform);
+        if (rb != null) { rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0f; rb.gravityScale = 0f; }
+        StartCoroutine(VanishRoutine(renderers));
+    }
+
+    IEnumerator VanishRoutine(SpriteRenderer[] renderers)
+    {
+        yield return new WaitForSeconds(DefeatEffects.Current.KillMarkDuration);
+        // 跳ね上がる瞬間に、倒された見た目（色が抜ける）にする
+        DefeatEffects.Current.ApplyDefeatedLook(renderers);
+        // 吹き飛ばす：質量に関係なく同じ速さで跳ね上げ、回転は控えめに（抜け殻 DefeatGhost も同じ値）
+        if (rb != null && (MultiplayerOwner == null || MultiplayerOwner.IsHost))
+        {
+            rb.gravityScale = DefeatGhost.GravityScale;
+            rb.linearVelocity = new Vector2(Random.Range(-DefeatGhost.KnockSide, DefeatGhost.KnockSide), DefeatGhost.KnockUp);
+            rb.angularVelocity = Random.value < .5f ? -DefeatGhost.Spin : DefeatGhost.Spin;
+        }
+        yield return new WaitForSeconds(DefeatGhost.VanishDelay);
+        var bounds = new Bounds(transform.position, Vector3.zero);
+        foreach (var r in renderers) if (r != null) bounds.Encapsulate(r.bounds);
+        DefeatEffects.Current.PlayVanish(bounds.center, 1f);
+        Vector3 start = transform.localScale;
+        var startAlpha = new float[renderers.Length];
+        for (int i = 0; i < renderers.Length; i++) startAlpha[i] = renderers[i] != null ? renderers[i].color.a : 0f;
+        float t = 0f;
+        while (t < DefeatGhost.VanishTime)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / DefeatGhost.VanishTime);
+            transform.localScale = new Vector3(start.x * (1f + .12f * k), start.y * (1f + .12f * k), start.z);
+            for (int i = 0; i < renderers.Length; i++)
+                if (renderers[i] != null) { var c = renderers[i].color; c.a = startAlpha[i] * (1f - k); renderers[i].color = c; }
+            DefeatEffects.Current.UpdateVanish(renderers, k);
+            yield return null;
+        }
+        foreach (var r in renderers) if (r != null) r.enabled = false;
+        DefeatEffects.Current.UpdateVanish(renderers, 1f);
+        if (MultiplayerOwner != null) MultiplayerOwner.RemoveCameraTarget(transform);
+    }
+
+    // ▼【新規追加】残機制で剣が1本壊れたとき、次に使うはずだった残機アイコンを墨の線で消してから、並びを更新する
+    public void CrossOutReserveIcon(System.Action updateIcons)
+    {
+        var icon = reserveSwordIcons != null && reserveSwordIcons.Length > 0 ? reserveSwordIcons[0] : null;
+        InkCrossOut.Play(icon, updateIcons);
+    }
+
+    // ▼【新規追加】残機モード：現在の剣が破壊され、待ち時間が明けた時に、「倒された」状態だけを解除して次の剣に持ち替えさせる。
+    // 壊れた剣は待っている間に撃破と同じやられ演出（ApplyMultiplayerHealth→BeginDefeatVisual）を済ませている。
     // ステータス(hp/maxHp/attack/hiltType)と見た目の刀身自体はMultiplayerManager側がこの直後に
     // SwordGenerator.GenerateSwordFromJsonを呼び直すことで更新するので、ここでは死亡時に無効化した
     // 見た目・当たり判定・操作を元に戻すだけでよい(ConfigureMultiplayerの死亡状態リセット部分と同等)
@@ -346,7 +435,15 @@ public static bool matchEnded = false;
         StopAllCoroutines();
         controller.enabled = true;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = true;
-        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+        // 撃破演出で変えた見た目（色・非表示・描画順）を、刀身と柄の両方とも元に戻す。にじみ用の写しは消す
+        foreach (var r in GetComponentsInChildren<SpriteRenderer>(true))
+        {
+            if (r.name.StartsWith(InkDefeatEffect.BleedName)) { Destroy(r.gameObject); continue; }
+            r.enabled = true; r.color = Color.white;
+            if (defeatedSortingRaised) r.sortingOrder -= DefeatGhost.DefeatedSortingOffset;
+        }
+        defeatedSortingRaised = false;
+        if (MultiplayerOwner != null) MultiplayerOwner.RemoveCameraTarget(transform);
         // ▼【修正】Vector3.oneへ決め打ちで戻すと、テンプレート自体が1以外のスケールで作られている場合に
         // 本来の見た目より小さく(または大きく)なってしまっていた。ConfigureMultiplayerで記録した
         // このテンプレート本来のスケールへ戻す
@@ -376,21 +473,22 @@ public static bool matchEnded = false;
         // 試合自体が終わった場合はMatchEndCinematicが改めてtimeScaleを制御するのでmatchEndedの時は触らない
         StopAllCoroutines();
         if (!matchEnded) Time.timeScale = 1f;
+        // ▼【新規追加】倒された後はUpdate()が止まり、必殺技ボタンが更新されなくなる。SPが溜まったまま倒されると
+        // 撃てる見た目で固まるので、操作を外す前に一度だけ「撃てない」状態にしておく
+        // （残機制では次の剣が出るまで数秒あるので特に目立つ。次の剣が出ればUpdate()がまた更新する）
+        UpdateSpecialAttackButton();
         controller.enabled = false; controller.isLocalControlled = false;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = false;
-        if (spriteRenderer != null) spriteRenderer.color = new Color(.2f, .2f, .2f);
+        // ▼【変更】灰色にする代わりに撃破演出の見た目にし、少しして消す（刀身だけでなく柄も）
+        BeginDefeatVisual();
         if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
         // ▼【修正】ローカルのDefeatRoutineと同じく、その場で静止させず天高く吹き飛ばして回転させる
         // (以前はrb.simulated=falseで即座に静止させていたため、脱落の派手さがマルチプレイだけ失われていた)。
         // またローカルは脱落後も剣を消さず、倒れたままの姿を残して他の生存者の試合を続けるため、
         // 以前あった0.8秒後に非表示にする処理(HideEliminatedSword)も削除した
-        if (rb != null)
-        {
-            rb.gravityScale = 2f;
-            rb.linearVelocity = Vector2.zero;
-            rb.AddForce(new Vector2(Random.Range(-500f, 500f), 2000f), ForceMode2D.Impulse);
-            rb.AddTorque(5000f, ForceMode2D.Impulse);
-        }
+        // ▼【変更】以前はここで質量に関係なく同じ力で弾いていたため、軽い剣ほど天高く飛び、長い距離を落ちてきて、
+        // 生きている剣と見分けにくかった。今は BeginDefeatVisual がいったんその場に止め、とどめの印を書き終えてから
+        // 質量に関係なく同じ速さで跳ね上げる（VanishRoutine）
     }
 
     // ▼【修正】dashType 4(巨大化一回転)・5(分身突進)・6(リーフシールド発動)の色分けと、
@@ -632,7 +730,8 @@ public static bool matchEnded = false;
         wasLocalControlledForButton = true;
         // 制圧を受けている間はどの入力も通らないので、押せるように見せない
         bool suppressed = MultiplayerOwner != null && MultiplayerOwner.IsSuppressed(PlayerId);
-        bool shouldShow = !isDashing && !suppressed && currentSp >= UltimateThreshold;
+        // 倒された剣は撃てない（残機制で次の剣を待っている間も、ボタンを撃てる見た目のまま残さない）
+        bool shouldShow = IsAlive && !isDashing && !suppressed && currentSp >= UltimateThreshold;
         // ▼【新規追加】アイコン付きのボタン(SkillIconView)は、溜めている途中も出したままにして丸ゲージで
         // 溜まり具合を見せる。押せるのは撃てる時だけ。アイコンが無いボタンは従来どおり撃てる時だけ出す
         var iconView = SkillIconViewOfButton();
@@ -1042,7 +1141,7 @@ public static bool matchEnded = false;
                 }
                     // ▼変更：TakeDamageの結果（倒したかどうか）を受け取る
                     bool killedTarget = false;
-                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, isCrit || isWeakPoint);
+                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, hitPoint, isCrit || isWeakPoint);
                     else killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
 
                     // ▼追加：もし自分が勝者になったなら、弾き飛ぶのをキャンセル！
@@ -1250,19 +1349,22 @@ public static bool matchEnded = false;
         // ここでヒットエフェクトも出さないとマルチプレイでは誰の画面にも斬撃エフェクトが表示されなかった
         // ▼【修正】isCritはQueueHit経由でHostが判定した本物のクリティカル/弱点ヒット情報。
         // 以前はダメージ量(100以上)だけで代用しており、実際のクリティカル判定とズレていた
+        // ▼【修正】オンライン対戦では、火花とダメージ数字はMultiplayerManagerのダメージ記録から
+        // 当たった場所に出す（PlayHitVisual）。ここでは音だけ鳴らす。旧NetworkManager経由の時だけ従来どおり出す
+        bool legacyVisuals = MultiplayerOwner == null;
         if (isCrit || damage >= 100)
         {
             if (critHitSound != null) audioSource.PlayOneShot(critHitSound);
-            if (critEffectPrefab != null) Instantiate(critEffectPrefab, transform.position, Quaternion.identity);
+            if (legacyVisuals && critEffectPrefab != null) Instantiate(critEffectPrefab, transform.position, Quaternion.identity);
         }
         else
         {
             if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
-            if (normalEffectPrehub != null) Instantiate(normalEffectPrehub, transform.position, Quaternion.identity);
+            if (legacyVisuals && normalEffectPrehub != null) Instantiate(normalEffectPrehub, transform.position, Quaternion.identity);
         }
 
-        // ▼ 通信相手の画面にもダメージ数値を出す（ここはそのまま）
-        if (damagePopupPrefab != null && damage > 0)
+        // ▼ 通信相手の画面にもダメージ数値を出す（旧NetworkManager経由の時だけ）
+        if (legacyVisuals && damagePopupPrefab != null && damage > 0)
         {
             Vector3 spawnPos = transform.position + (Vector3)Random.insideUnitCircle * 1.5f;
             GameObject popup = Instantiate(damagePopupPrefab, spawnPos, Quaternion.identity);
@@ -1862,7 +1964,7 @@ public static bool matchEnded = false;
         // ▼【修正】target.TakeDamage()を直接呼ぶと、target側がマルチプレイ中(MultiplayerOwner != null)の時に
         // 何もせず握りつぶしてしまう（HPはQueueHit経由のMatchRulesでのみ確定するため）。
         // DealDamageTo()を通すことで、オンラインでも正しくダメージが反映されるようにする
-        DealDamageTo(target, damage, hitPoint, true, isWeakPoint);
+        DealDamageTo(target, damage, hitPoint, true, isWeakPoint, true);
     }
 
     // ▼【修正】剣モード専用「一直線ジャンプダッシュ」

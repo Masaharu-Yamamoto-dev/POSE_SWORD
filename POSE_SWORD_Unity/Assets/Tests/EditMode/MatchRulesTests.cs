@@ -214,6 +214,174 @@ public class MatchRulesTests
         Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "a", "b" }, new int[][] { new[] { 100 }, null }));
     }
 
+    // ===== 残機制：剣が壊れてから次の剣が出るまでの待ち時間 =====
+
+    private static MatchRules WithRespawnDelay(int delay, params int[][] lives) =>
+        new MatchRules(lives.Select((_, i) => "p" + i).ToArray(), lives, null, delay);
+
+    [Test]
+    public void BrokenSwordWaitsBeforeTheNextSwordComesOut()
+    {
+        var match = WithRespawnDelay(3, new[] { 100, 80 }, new[] { 100 });
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 100) });
+        var p0 = match.Get("p0");
+        // 壊れた直後：試合には残っているが、場には剣が無い。HPは0で、まだ壊れた剣の番号のまま
+        Assert.IsTrue(p0.Alive);
+        Assert.IsFalse(p0.OnField);
+        Assert.IsTrue(p0.Respawning);
+        Assert.AreEqual(0, p0.Hp);
+        Assert.AreEqual(0, p0.CurrentLifeIndex);
+        Assert.AreEqual(1, p0.LivesRemaining);
+        Assert.AreEqual(0, p0.RespawnSeq);
+        Assert.AreEqual(1, match.Get("p1").Kills);
+        Assert.IsFalse(match.Ended);
+        Assert.AreEqual(0, p0.Rank);
+        Assert.AreEqual(-1, p0.EliminationTick);
+        Assert.IsNull(p0.EliminationReason);
+
+        match.ResolveStep(2, new Hit[0]);
+        match.ResolveStep(3, new Hit[0]);
+        Assert.IsTrue(p0.Respawning);
+        Assert.AreEqual(0, p0.Hp);
+
+        // 壊れたステップ(1)から3ステップ後に、次の剣のHPで場に戻る
+        match.ResolveStep(4, new Hit[0]);
+        Assert.IsFalse(p0.Respawning);
+        Assert.IsTrue(p0.OnField);
+        Assert.AreEqual(80, p0.Hp);
+        Assert.AreEqual(1, p0.CurrentLifeIndex);
+        Assert.AreEqual(1, p0.RespawnSeq);
+        Assert.IsFalse(match.Ended);
+    }
+
+    [Test]
+    public void ZeroDelaySwapsInTheSameStepAsBefore()
+    {
+        var match = WithRespawnDelay(0, new[] { 100, 80 }, new[] { 100 });
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 100) });
+        Assert.IsFalse(match.Get("p0").Respawning);
+        Assert.AreEqual(80, match.Get("p0").Hp);
+        Assert.AreEqual(1, match.Get("p0").CurrentLifeIndex);
+    }
+
+    [Test]
+    public void RespawnIsNotMissedWhenStepsAreSkipped()
+    {
+        var match = WithRespawnDelay(3, new[] { 100, 80 }, new[] { 100 });
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 100) });
+        match.ResolveStep(10, new Hit[0]);
+        Assert.AreEqual(80, match.Get("p0").Hp);
+        Assert.IsTrue(match.Get("p0").OnField);
+    }
+
+    [Test]
+    public void WaitingPlayerCanNeitherDealNorTakeDamage()
+    {
+        var match = WithRespawnDelay(5, new[] { 100, 80 }, new[] { 100 });
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 100) });
+        match.ResolveStep(2, new[] { new Hit("p1", "p0", 50), new Hit("p0", "p1", 50) });
+        Assert.AreEqual(0, match.LastStepDamage.Count);
+        Assert.AreEqual(100, match.Get("p1").Hp);
+        Assert.AreEqual(100, match.Get("p0").DamageTaken);
+        Assert.AreEqual(0, match.Get("p0").DamageDealt);
+        Assert.AreEqual(1, match.Get("p1").Kills);
+        Assert.IsTrue(match.Get("p0").Respawning);
+
+        // 戻ってきた後は普通に通る
+        match.ResolveStep(6, new Hit[0]);
+        match.ResolveStep(7, new[] { new Hit("p1", "p0", 30) });
+        Assert.AreEqual(50, match.Get("p0").Hp);
+    }
+
+    [Test]
+    public void WaitingPlayerStillCountsAsASurvivorForRanksAndTheResult()
+    {
+        var match = WithRespawnDelay(5, new[] { 100, 100 }, new[] { 100 }, new[] { 100 });
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 100) });
+        // p0 が次の剣を待っている間に p2 が倒れても、p0 は生き残りとして数える(残り2人なので p2 は3位)
+        match.ResolveStep(2, new[] { new Hit("p1", "p2", 100) });
+        Assert.IsTrue(match.Get("p0").Respawning);
+        Assert.IsFalse(match.Ended);
+        Assert.AreEqual(3, match.Get("p2").Rank);
+        Assert.AreEqual(0, match.Get("p0").Rank);
+
+        match.ResolveStep(6, new Hit[0]);
+        match.ResolveStep(7, new[] { new Hit("p1", "p0", 100) });
+        Assert.IsTrue(match.Ended);
+        Assert.AreEqual("p1", match.WinnerId);
+        Assert.AreEqual(2, match.Get("p0").Rank);
+        Assert.AreEqual("KO", match.Get("p0").EliminationReason);
+        Assert.AreEqual(7, match.Get("p0").EliminationTick);
+    }
+
+    [Test]
+    public void MutualFinalHitWinsForThePlayerWhoStillHasASword()
+    {
+        // 相打ちでも、次の剣が残っている側は待ちに入るだけなので、最後の1本だった側が負ける
+        var match = WithRespawnDelay(5, new[] { 100, 100 }, new[] { 100 });
+        match.ResolveStep(1, new[] { new Hit("p0", "p1", 100), new Hit("p1", "p0", 100) });
+        Assert.IsTrue(match.Ended);
+        Assert.IsFalse(match.Draw);
+        Assert.AreEqual("p0", match.WinnerId);
+        Assert.AreEqual(1, match.Get("p0").Rank);
+        Assert.AreEqual(2, match.Get("p1").Rank);
+        Assert.IsTrue(match.Get("p0").Alive);
+        Assert.IsTrue(match.Get("p0").Respawning);
+        Assert.IsFalse(match.Get("p1").Alive);
+    }
+
+    [Test]
+    public void BothWaitingAtOnceDoesNotEndTheMatch()
+    {
+        var match = WithRespawnDelay(5, new[] { 100, 100 }, new[] { 100, 100 });
+        match.ResolveStep(1, new[] { new Hit("p0", "p1", 100), new Hit("p1", "p0", 100) });
+        Assert.IsFalse(match.Ended);
+        Assert.IsTrue(match.Players.All(p => p.Respawning));
+        match.ResolveStep(6, new Hit[0]);
+        Assert.IsTrue(match.Players.All(p => p.OnField && p.Hp == 100 && p.CurrentLifeIndex == 1));
+    }
+
+    [Test]
+    public void DisconnectionWhileWaitingEliminatesAndNeverRespawns()
+    {
+        var match = WithRespawnDelay(5, new[] { 100, 100 }, new[] { 100 }, new[] { 100 });
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 100) });
+        match.ResolveStep(2, new Hit[0], new[] { "p0" });
+        var p0 = match.Get("p0");
+        Assert.IsFalse(p0.Alive);
+        Assert.IsFalse(p0.Respawning);
+        Assert.AreEqual("DISCONNECTED", p0.EliminationReason);
+        Assert.AreEqual(0, p0.LivesRemaining);
+        Assert.AreEqual(3, p0.Rank);
+        match.ResolveStep(10, new Hit[0]);
+        Assert.AreEqual(0, p0.Hp);
+        Assert.AreEqual(0, p0.CurrentLifeIndex);
+    }
+
+    [Test]
+    public void TeamIsStillStandingWhileItsLastMemberWaits()
+    {
+        var lives = new int[][] { new[] { 100 }, new[] { 100, 100 }, new[] { 100 }, new[] { 100 } };
+        var match = new MatchRules(new[] { "boss", "t1", "t2", "t3" }, lives, new[] { 0, 1, 1, 1 }, 5);
+        match.ResolveStep(1, new[] { new Hit("boss", "t1", 100) });
+        match.ResolveStep(2, new[] { new Hit("boss", "t2", 100) });
+        match.ResolveStep(3, new[] { new Hit("boss", "t3", 100) });
+        // トリオで場に残っている剣は無いが、t1 が次の剣を待っているので決着しない
+        Assert.IsTrue(match.Get("t1").Respawning);
+        Assert.IsFalse(match.Ended);
+        match.ResolveStep(6, new Hit[0]);
+        Assert.IsTrue(match.Get("t1").OnField);
+        match.ResolveStep(7, new[] { new Hit("t1", "boss", 100) });
+        Assert.IsTrue(match.Ended);
+        Assert.AreEqual(1, match.WinnerTeam);
+    }
+
+    [Test]
+    public void NegativeRespawnDelayIsRejected()
+    {
+        Assert.Throws<System.ArgumentException>(() => WithRespawnDelay(-1, new[] { 100 }, new[] { 100 }));
+    }
+
     // ===== 1vs3：入力とターゲットの方針 =====
 
     [Test]
@@ -482,6 +650,44 @@ public class MatchRulesTests
             new int[][] { new[] { 3000 }, new[] { 100 } }, new[] { 0, 1 }));
         Assert.Throws<System.ArgumentException>(() => new MatchRules(new[] { "boss", "t1" },
             new int[][] { new[] { MatchRules.MaxHitPoints + 1 }, new[] { 100 } }, new[] { 0, 1 }));
+    }
+
+    [Test]
+    public void LastStepDamageListsEachAttackerCappedByRemainingHp()
+    {
+        var match = Four();
+        match.ResolveStep(1, new[] { new Hit("p0", "p1", 30), new Hit("p0", "p1", 20), new Hit("p2", "p3", 15) });
+        // 同じ組み合わせは1ステップで1件（大きい方）にまとまる
+        Assert.AreEqual(2, match.LastStepDamage.Count);
+        Assert.IsFalse(match.LastStepDamage.Any(d => d.Lethal));
+        Assert.IsTrue(match.LastStepDamage.Any(d => d.AttackerId == "p0" && d.TargetId == "p1" && d.Amount == 30));
+        Assert.IsTrue(match.LastStepDamage.Any(d => d.AttackerId == "p2" && d.TargetId == "p3" && d.Amount == 15));
+
+        // 2人がかりで残りHP(70)を超えたときは、表示も頭打ち後の取り分になる
+        match.ResolveStep(2, new[] { new Hit("p0", "p1", 60), new Hit("p2", "p1", 60) });
+        Assert.AreEqual(70, match.LastStepDamage.Where(d => d.TargetId == "p1").Sum(d => d.Amount));
+        Assert.IsTrue(match.LastStepDamage.All(d => d.Lethal));
+        Assert.AreEqual(match.Get("p0").DamageDealt + match.Get("p2").DamageDealt,
+            match.LastStepDamage.Sum(d => d.Amount) + 30 + 15);
+
+        // ダメージが無いステップや、古いtickでは空になる
+        match.ResolveStep(3, new Hit[0]);
+        Assert.AreEqual(0, match.LastStepDamage.Count);
+        match.ResolveStep(1, new[] { new Hit("p0", "p2", 10) });
+        Assert.AreEqual(0, match.LastStepDamage.Count);
+    }
+
+    [Test]
+    public void LastStepDamageMarksTheBlowThatCostALifeAsLethal()
+    {
+        var match = new MatchRules(new[] { "p0", "p1" }, new[] { new[] { 50 }, new[] { 40, 100 } }, null);
+        match.ResolveStep(1, new[] { new Hit("p0", "p1", 60) });
+        // 残機があるので脱落はしないが、剣は1本壊れているので撃破の一撃として扱う
+        Assert.IsTrue(match.Get("p1").Alive);
+        Assert.AreEqual(1, match.LastStepDamage.Count);
+        Assert.AreEqual(40, match.LastStepDamage[0].Amount);
+        Assert.AreEqual(60, match.LastStepDamage[0].RawDamage);
+        Assert.IsTrue(match.LastStepDamage[0].Lethal);
     }
 
     [Test]

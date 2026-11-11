@@ -2470,9 +2470,9 @@ MonoBehaviour:
   pointyAngleThreshold: 100
   critThreshold: 3000
   damagePopupPrefab: {fileID: 1265573088081304454, guid: ac1ed211887abce4c909f7a7bfa6e534, type: 3}
-  normalEffectPrehub: {fileID: 0}
+  normalEffectPrehub: {fileID: 4021103657954561960, guid: 5c755f9bc5253ea418e919994537dcc7, type: 3}
   critEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
-  guardEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
+  guardEffectPrefab: {fileID: 4021103657954561960, guid: 5c755f9bc5253ea418e919994537dcc7, type: 3}
   ultimateAuraPrefab: {fileID: 572615855}
   normalHitSound: {fileID: 8300000, guid: 86b0aa7415a27c643886df9c0a811202, type: 3}
   critHitSound: {fileID: 8300000, guid: 7a379e66c22b3de4aa1a4b697e38d3e0, type: 3}
@@ -4022,9 +4022,9 @@ MonoBehaviour:
   pointyAngleThreshold: 100
   critThreshold: 3000
   damagePopupPrefab: {fileID: 1265573088081304454, guid: ac1ed211887abce4c909f7a7bfa6e534, type: 3}
-  normalEffectPrehub: {fileID: 0}
+  normalEffectPrehub: {fileID: 4021103657954561960, guid: 5c755f9bc5253ea418e919994537dcc7, type: 3}
   critEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
-  guardEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
+  guardEffectPrefab: {fileID: 4021103657954561960, guid: 5c755f9bc5253ea418e919994537dcc7, type: 3}
   ultimateAuraPrefab: {fileID: 572615855}
   normalHitSound: {fileID: 8300000, guid: 86b0aa7415a27c643886df9c0a811202, type: 3}
   critHitSound: {fileID: 8300000, guid: 7a379e66c22b3de4aa1a4b697e38d3e0, type: 3}

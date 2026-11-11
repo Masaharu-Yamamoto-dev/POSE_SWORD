@@ -46,7 +46,8 @@ public class MultiplayerManager : MonoBehaviour
     private readonly Dictionary<string, MultiplayerCloneState> cloneSyncTargets = new Dictionary<string, MultiplayerCloneState>();
     // ▼【新規追加】BattleCameraはマルチプレイ中は無効化しているため、代わりにこのマネージャー自身の
     // LateUpdate()でシェイク量を消費する（TriggerShakeはローカルのBattleCamera.TriggerShakeと同じ役割）
-    private float shakeDuration, shakeMagnitude;
+    private float shakeDuration, shakeMagnitude, shakeTotal;
+    private bool shakeDecays, shakeRelative;
     private Vector3 lockedCameraPosition;
     private bool hasLockedCameraPosition;
     // ▼【新規追加】ダメージを伴わない柄迫り合い・壁バウンドの演出をSYNCでゲストにも伝えるための単調増加カウンタ
@@ -55,6 +56,28 @@ public class MultiplayerManager : MonoBehaviour
     private readonly Dictionary<string, bool> criticalHitThisTick = new Dictionary<string, bool>();
     // ▼【新規追加】↑と同じクリティカル情報を、clashSeqと同じ単調増加カウンタ方式でSYNC経由でもゲストへ伝える
     private readonly Dictionary<string, int> critSeq = new Dictionary<string, int>();
+    // ▼【新規追加】ダメージ数字用。QueueHitで受けたヒットの当たった位置とクリティカルかを、攻撃者→対象の組ごとに
+    // このステップの間だけ覚えておく（MatchRulesは同じ組を1件にまとめるので、こちらも一番大きいヒットの位置を残す）
+    // body：剣の本体で当てたか（分身・リーフシールドの攻撃では false）。撃破した側を止めるかどうかに使う
+    private readonly Dictionary<(string attacker, string target), (int damage, Vector2 point, bool crit, bool body)> hitDetailsThisStep =
+        new Dictionary<(string, string), (int, Vector2, bool, bool)>();
+    // ▼【新規追加】撃破した側の手応え：相手の剣を本体で壊した剣だけを、ホストの物理で短く止める（試合全体は止めない）。
+    // 止まっている間も当たり判定は残し、止める前の速度と回転を覚えておいて、解けたらそのまま動き出させる。
+    // 止まっている間に倒された時は止めを打ち切り、速度は戻さずにやられ演出に任せる
+    const float KillerFreezeSeconds = 0.3f;
+    private readonly Dictionary<string, (int untilTick, Vector2 velocity, float angularVelocity, RigidbodyConstraints2D constraints)> killerFreezes =
+        new Dictionary<string, (int, Vector2, float, RigidbodyConstraints2D)>();
+    // Hostが次のSYNCで送るダメージの記録と、その通し番号。ゲストは表示済みの番号を覚えて二重表示を防ぐ
+    private readonly List<MultiplayerHitEvent> pendingHitEvents = new List<MultiplayerHitEvent>();
+    private int hitEventSeq, shownHitEventSeq;
+    // ▼【新規追加】撃破されてまだ消え切っていない剣と、残機制の抜け殻。消えるまでカメラの画角に含める
+    private readonly List<Transform> extraCameraTargets = new List<Transform>();
+    // ▼【新規追加】決着の一撃で倒された剣と、その撃破の数字。決着後のカメラはこれを基に寄る
+    // （1人なら倒された剣を追い、2人以上（引き分けなど）なら撃破の数字の真ん中へ寄る）
+    private readonly List<string> finalKoTargets = new List<string>();
+    private readonly List<Transform> finalKoNumbers = new List<Transform>();
+    private float finishCameraSize = -1f;
+    const float FinishZoom = 1.7f;
     // ▼【修正】シーンに元々ある PL1Bar〜PL4Bar（HP赤/緑二重ゲージ・名前・SPバー）とカットイン・必殺技ボタンが
     // 乗っているCanvas。以前は多人数対応時に全Canvasを無効化していたため、これらが丸ごと表示されなくなっていた。
     // このCanvasだけは無効化対象から除外し、各プレイヤーのUI要素をここへ配線して使う
@@ -79,6 +102,11 @@ public class MultiplayerManager : MonoBehaviour
     // 「今使っている剣が手持ちの何番目か」を覚えておくための追跡用(残機モードでなければ常に0のまま)
     private bool livesModeActive;
     public bool LivesModeActive => livesModeActive;
+    // ▼【新規追加】残機モード：剣が壊れてから次の剣が出るまでの秒数。壊れた剣のやられ演出（とどめの印1.13秒
+    // ＋吹き飛び0.75秒＋消える0.6秒＝約2.5秒）を見せ切ってから、少し間を置いて次の剣を出す。
+    // 待っている間は場に剣が無い扱い（攻撃も被弾もしない）だが脱落ではない。演出の見た目を差し替えても
+    // 試合の間合いが変わらないよう、演出の長さから計算せず固定の値にしている
+    const float RespawnDelaySeconds = 2.8f;
     // 1vs3。boss(team 0)が1人、trio(team 1)が3人。有効な間だけ陣営と強化を使う。
     public const int BossTeam = 0;
     public const int TrioTeam = 1;
@@ -272,7 +300,9 @@ public class MultiplayerManager : MonoBehaviour
                     ? ownedSwordsByPlayer[p.playerId].Select(l => BuffedHp(p, l.hp)).ToArray()
                     : new[] { BuffedHp(p, p.swordData.hp) }).ToArray(),
                 // 陣営を渡すのは1vs3の時だけ。渡さなければ MatchRules は従来どおりの個人戦として動く。
-                soloModeActive ? config.players.Select(p => p.team).ToArray() : null);
+                soloModeActive ? config.players.Select(p => p.team).ToArray() : null,
+                // MatchRules は物理のステップ単位で進むので、待ち時間もステップ数に直して渡す
+                Mathf.CeilToInt(RespawnDelaySeconds / Time.fixedDeltaTime));
             // ▼ 壁も含めて自作していた即席アリーナをやめ、SceneController側の校正済み座標(GetSpawnPositions)を使う
             Vector3[] spawnPositions = scene.GetSpawnPositions(config.players.Length, soloModeActive);
             spawnPositionByPlayer = config.players.ToDictionary(p => p.playerId, p => spawnPositions[p.spawnIndex]);
@@ -284,6 +314,8 @@ public class MultiplayerManager : MonoBehaviour
             // 1vs3 は「1人 対 3人」の構図が伝わる専用HUDに差し替える。剣を作り終えてから配線する。
             if (soloModeActive) BuildSoloHud();
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
+            hitEventSeq = 0; shownHitEventSeq = 0; pendingHitEvents.Clear(); hitDetailsThisStep.Clear(); killerFreezes.Clear();
+            extraCameraTargets.Clear(); finalKoTargets.Clear(); finalKoNumbers.Clear(); finishCameraSize = -1f;
             StartCoroutine(CompleteInitialization());
         }
         catch (Exception e)
@@ -448,7 +480,11 @@ public class MultiplayerManager : MonoBehaviour
             if (!suppressLabels.TryGetValue(pair.Key, out label) || label == null)
             {
                 if (remaining <= 0f) continue;
-                label = new GameObject("SuppressLabel").AddComponent<TextMeshPro>();
+                // 有効なまま TextMeshPro を足すとフォントを入れる前にメッシュを作ろうとして警告が出るので、非表示で作る
+                // （表示は下の SetActive(show) で行う）
+                var labelObj = new GameObject("SuppressLabel");
+                labelObj.SetActive(false);
+                label = labelObj.AddComponent<TextMeshPro>();
                 label.transform.SetParent(pair.Value.transform, false);
                 label.transform.localPosition = new Vector3(0, 3.2f, -0.2f);
                 label.fontSize = 5; label.alignment = TextAlignmentOptions.Center;
@@ -921,7 +957,7 @@ public class MultiplayerManager : MonoBehaviour
         foreach (var id in judgmentTargets)
         {
             if (!bodies.ContainsKey(id) || !swords[id].IsAlive) continue;
-            QueueHit(attacker, swords[id], damage);
+            QueueHit(attacker, swords[id], damage, swords[id].currentCenterPosition);
             var rb = bodies[id];
             Vector2 outward = rb.position - (Vector2)judgmentCentre;
             if (outward.sqrMagnitude < 0.01f) outward = Vector2.up;
@@ -1062,15 +1098,19 @@ public class MultiplayerManager : MonoBehaviour
         return owned;
     }
 
-    // ▼【新規追加】残機モード：現在の剣が破壊されて次の剣に持ち替わった時に、見た目(刀身の再生成)・
+    // ▼【新規追加】残機モード：剣が壊れて待ち時間が明け、次の剣に持ち替わった時に、見た目(刀身の再生成)・
     // 位置(スポーン地点へ復帰)・操作可否を復元する。Host/Client双方から同じ手順で呼べる
     // (ネットワーク送信は行わないため、Hostが自分のFixedUpdateから、Clientが自分のSyncMultiplayerから
-    // それぞれ独立に呼んでも結果が一致する)
+    // それぞれ独立に呼んでも結果が一致する)。
+    // 壊れた剣のやられ演出は、壊れた時点でHPが0になった剣自身が撃破と同じ流れで済ませている
     void ReviveForNextLife(string playerId, int lifeIndex)
     {
         if (!swords.TryGetValue(playerId, out var battle) || battle == null ||
             !ownedSwordsByPlayer.TryGetValue(playerId, out var lives) || lifeIndex < 0 || lifeIndex >= lives.Count) return;
         var slot = lives[lifeIndex];
+        // ゲストが通信の都合でHP0の同期を受け取れず、壊れた剣をまだ倒していないまま持ち替えが届いた時だけ、
+        // 壊れた剣の見た目を写した抜け殻をその場に残してやられ演出をさせる（本物はこの後すぐ出現位置へ移る）
+        if (!battle.IsDead) DefeatGhost.Spawn(battle, this);
         battle.ReviveFromDefeat();
         if (spawnPositionByPlayer.TryGetValue(playerId, out var spawn))
         {
@@ -1091,9 +1131,9 @@ public class MultiplayerManager : MonoBehaviour
                 hp = slot.hp, imageStr = slot.imageStr, hiltType = slot.hiltType };
             generator.GenerateSwordFromJson(JsonUtility.ToJson(nextSword));
         }
-        // ▼【新規追加】持ち替え後、HPパネルの「あと何本あるか」アイコンも更新する
-        battle.UpdateReserveSwordIcons(GetReserveSprites(playerId));
-        TriggerShake(0.3f, 0.4f);
+        // ▼【新規追加】持ち替え後、HPパネルの「あと何本あるか」アイコンも更新する。
+        // 使ったアイコンを墨の線で消してから並びを更新する
+        battle.CrossOutReserveIcon(() => { if (battle != null) battle.UpdateReserveSwordIcons(GetReserveSprites(playerId)); });
     }
 
     // ▼【新規追加】シーンに元々あるPL{n}Bar（HP赤/緑二重ゲージ・名前・SPバー）の実要素を、
@@ -1226,7 +1266,8 @@ public class MultiplayerManager : MonoBehaviour
             nextSync = Time.unscaledTime + 1f / 30;
             Emit("SYNC", Snapshot());
         }
-        if (!IsHost)
+        // ▼【変更】決着後は同期が届かないので、ゲストも位置の補間をやめる（決着で跳ね上がる剣を引き戻さないように）
+        if (!IsHost && phase != "RESULT")
         {
             // ▼【修正】位置と回転で追従速度を分ける。巨大化一回転(1080°/秒)のような速い回転は、
             // 位置と同じ補間レート(25)だと定常的な追従遅れ(角速度/レート ≈ 1080/25 ≈ 43°)が生じ、
@@ -1291,14 +1332,18 @@ public class MultiplayerManager : MonoBehaviour
         // ▼【新規追加】残機モードのリスポーン直後無敵(IsRespawnInvincible)もここに加える。
         // これが無いと見た目は点滅していても、Host権威のダメージ判定では素通しになってしまう
         foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing || p.Value.HasActiveLeafShield || p.Value.IsRespawnInvincible;
+        UpdateKillerFreezes();
         Physics2D.Simulate(Time.fixedDeltaTime);
         if (!IsPlaying) return;
         rules.ResolveStep(++physicsTick, hits, forfeits);
         hits.Clear(); forfeits.Clear();
+        RecordHitEvents();
         foreach (var score in rules.Players)
         {
             // ▼【新規追加】残機モード：このtickで次の剣に持ち替わったプレイヤーを検知し、見た目を復活させる。
-            // 直後のApplyMultiplayerHealth(score.Hp, ...)が新しい剣のmaxHpを基準にHPを反映する
+            // 直後のApplyMultiplayerHealth(score.Hp, ...)が新しい剣のmaxHpを基準にHPを反映する。
+            // 剣が壊れたtickはHP0が届くだけなので、ApplyMultiplayerHealthが撃破と同じやられ演出を始め、
+            // 待ち時間が明けて CurrentLifeIndex が進んだtickにここで次の剣を出す
             if (livesModeActive && lifeIndexByPlayer.TryGetValue(score.PlayerId, out var knownLifeIndex) && knownLifeIndex != score.CurrentLifeIndex)
             {
                 lifeIndexByPlayer[score.PlayerId] = score.CurrentLifeIndex;
@@ -1326,10 +1371,12 @@ public class MultiplayerManager : MonoBehaviour
         }
     }
 
-    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage, bool isCrit = false)
+    // byBody：剣の本体で当てたか。分身・リーフシールドからの攻撃は false で呼ぶ
+    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage, Vector2 hitPoint, bool isCrit = false, bool byBody = true)
     {
+        // 残機制で次の剣を待っている人は、試合に残っていても場に剣が無いので、攻撃も被弾もしない
         if (!IsHost || !IsPlaying || target.MultiplayerOwner != this || attacker.MultiplayerOwner != this ||
-            !rules.Get(target.PlayerId).Alive) return;
+            !rules.Get(target.PlayerId).OnField || !rules.Get(attacker.PlayerId).OnField) return;
         // 味方同士はダメージにしない。弾き合いはOnCollisionEnter2D側で既に済んでいるので、
         // ここで捨てるのは数値・撃破数・ダメージ表示だけ。最終的な裁定はMatchRules側でも同じ条件で行う。
         if (rules.Get(attacker.PlayerId).Team == rules.Get(target.PlayerId).Team) return;
@@ -1346,14 +1393,126 @@ public class MultiplayerManager : MonoBehaviour
             // ▼【新規追加】クリティカル/弱点情報はMatchRulesのHitには乗らない(複数攻撃者の同時ヒットで
             // 合算されるため)ので、ここで別途覚えておいてこのtickのApplyMultiplayerHealthに渡す
             if (isCrit) criticalHitThisTick[target.PlayerId] = true;
+            var key = (attacker.PlayerId, target.PlayerId);
+            bool hadDetail = hitDetailsThisStep.TryGetValue(key, out var detail);
+            // 位置は一番大きいヒットのもの（MatchRulesが採用する方）。クリティカルと本体の当たりは1つでもあれば立てる
+            if (!hadDetail || damage > detail.damage)
+                hitDetailsThisStep[key] = (damage, hitPoint, isCrit || (hadDetail && detail.crit), byBody || (hadDetail && detail.body));
+            else
+                hitDetailsThisStep[key] = (detail.damage, detail.point, detail.crit || isCrit, detail.body || byBody);
         }
     }
 
+    // ▼【新規追加】このステップで実際に通ったダメージを、ダメージ数字の記録にする（Host専用）。
+    // Host自身の画面にはここで表示し、ゲストには次のSYNCで同じ記録を送る
+    void RecordHitEvents()
+    {
+        foreach (var record in rules.LastStepDamage)
+        {
+            hitDetailsThisStep.TryGetValue((record.AttackerId, record.TargetId), out var detail);
+            var evt = new MultiplayerHitEvent { seq = ++hitEventSeq, attackerId = record.AttackerId,
+                // 撃破の一撃は、残りHPで頭打ちする前の威力を見せる（残りHP3の相手を120で倒したら「120」）
+                targetId = record.TargetId, damage = record.Lethal ? record.RawDamage : record.Amount,
+                // 決着の一撃は、脱落させた一撃だけ。相打ちで次の剣が残っている側（勝った側）の剣が壊れても決着の印にはしない
+                crit = detail.crit, lethal = record.Lethal, final = record.Lethal && rules.Ended && !rules.Get(record.TargetId).Alive,
+                x = detail.point.x, y = detail.point.y };
+            // 位置が取れなかった時（通常は起きない）は、対象の剣の中心に出す
+            if (detail.damage == 0 && swords.TryGetValue(record.TargetId, out var fallback))
+            {
+                evt.x = fallback.currentCenterPosition.x; evt.y = fallback.currentCenterPosition.y;
+            }
+            pendingHitEvents.Add(evt);
+            ShowHitEvent(evt);
+            // 本体で剣を壊した側を短く止める。決着の一撃は試合全体のスロー（MatchEndCinematic）に任せ、
+            // 同じ一撃で自分も倒れた（相打ち）時は止めない
+            if (record.Lethal && !rules.Ended && detail.body && rules.Get(record.AttackerId).OnField) FreezeKiller(record.AttackerId);
+        }
+        hitDetailsThisStep.Clear();
+    }
+
+    void FreezeKiller(string playerId)
+    {
+        if (!bodies.TryGetValue(playerId, out var rb) || rb == null) return;
+        int untilTick = physicsTick + Mathf.CeilToInt(KillerFreezeSeconds / Time.fixedDeltaTime);
+        // 止まっている間にもう一本壊した時は、止める時間だけ延ばす（戻す速度は最初に止めた時のまま）
+        if (killerFreezes.TryGetValue(playerId, out var current))
+        {
+            killerFreezes[playerId] = (untilTick, current.velocity, current.angularVelocity, current.constraints);
+            return;
+        }
+        killerFreezes[playerId] = (untilTick, rb.linearVelocity, rb.angularVelocity, rb.constraints);
+        rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0f;
+        rb.constraints = RigidbodyConstraints2D.FreezeAll;
+    }
+
+    // 物理を進める前に毎ステップ呼ぶ。時間が来た剣と、止まっている間に倒された剣の止めを解く
+    void UpdateKillerFreezes()
+    {
+        if (killerFreezes.Count == 0) return;
+        foreach (var id in killerFreezes.Keys.ToList())
+        {
+            var freeze = killerFreezes[id];
+            bool defeated = !swords.TryGetValue(id, out var sword) || sword == null || !sword.IsAlive;
+            if (!defeated && physicsTick < freeze.untilTick) continue;
+            killerFreezes.Remove(id);
+            if (!bodies.TryGetValue(id, out var rb) || rb == null) continue;
+            rb.constraints = freeze.constraints;
+            if (defeated) continue;
+            rb.linearVelocity = freeze.velocity; rb.angularVelocity = freeze.angularVelocity;
+        }
+    }
+
+    // ▼【新規追加】ダメージ1件ぶんの数字と火花を出す。自分から見た関係（与えた／受けた／他人同士）で見た目を変える
+    void ShowHitEvent(MultiplayerHitEvent evt)
+    {
+        if (evt == null || evt.damage <= 0 || evt.targetId == null || !swords.TryGetValue(evt.targetId, out var target)) return;
+        swords.TryGetValue(evt.attackerId ?? "", out var attacker);
+        string local = config.localPlayerId;
+        var relation = evt.attackerId == local ? DamagePopup.Relation.Dealt
+            : evt.targetId == local ? DamagePopup.Relation.Taken : DamagePopup.Relation.Others;
+        Color attackerColor = attacker != null ? attacker.PlayerMainColor : Color.white;
+        var popup = target.PlayHitVisual(new Vector2(evt.x, evt.y), evt.damage, evt.crit, evt.lethal, evt.final, relation, attackerColor);
+        if (evt.final)
+        {
+            if (!finalKoTargets.Contains(evt.targetId)) finalKoTargets.Add(evt.targetId);
+            if (popup != null) finalKoNumbers.Add(popup.transform);
+        }
+    }
+
+    // ▼【新規追加】決着後にカメラが寄る先と大きさ。倒された剣が1人ならその剣を FinishZoom 倍で追う。
+    // 2人以上なら撃破の数字の真ん中へ、数字が全部収まる大きさで寄る（寄りすぎず、決着の瞬間より引かない）
+    bool TryGetFinishFocus(Camera camera, out Vector3 focus, out float size)
+    {
+        focus = Vector3.zero; size = finishCameraSize;
+        if (finishCameraSize <= 0f) return false;
+        if (finalKoTargets.Count == 1 && swords.TryGetValue(finalKoTargets[0], out var fallen) && fallen != null)
+        {
+            var bounds = new Bounds(fallen.transform.position, Vector3.zero);
+            foreach (var r in fallen.GetComponentsInChildren<SpriteRenderer>()) bounds.Encapsulate(r.bounds);
+            focus = bounds.center; size = finishCameraSize / FinishZoom;
+            return true;
+        }
+        var numbers = finalKoNumbers.Where(n => n != null).Select(n => n.position).ToList();
+        if (numbers.Count == 0) return false;
+        float minX = numbers.Min(p => p.x), maxX = numbers.Max(p => p.x), minY = numbers.Min(p => p.y), maxY = numbers.Max(p => p.y);
+        focus = new Vector3((minX + maxX) / 2f, (minY + maxY) / 2f, 0f);
+        float margin = finishCameraSize / 10f;
+        float need = Mathf.Max((maxY - minY) / 2f + 3f * margin, ((maxX - minX) / 2f + 5f * margin) / camera.aspect);
+        size = Mathf.Clamp(need, finishCameraSize / FinishZoom, finishCameraSize);
+        return true;
+    }
+
+    // ▼【新規追加】撃破されて消え切るまでの剣・抜け殻を、カメラの画角に含める／外す
+    public void AddCameraTarget(Transform target) { if (target != null && !extraCameraTargets.Contains(target)) extraCameraTargets.Add(target); }
+    public void RemoveCameraTarget(Transform target) { extraCameraTargets.Remove(target); }
+
     // ▼【新規追加】ローカルのBattleCamera.TriggerShakeと同じ役割。BattleCameraはマルチプレイ中は
     // 無効化されているため、代わりにこのマネージャーが自分のLateUpdate()でシェイクを消費する
-    public void TriggerShake(float duration, float magnitude)
+    // decays：最初が一番強く、時間とともに弱まって収まる揺れにする。
+    // relativeToView：magnitude を「カメラの縦の大きさに対する割合」として扱う（寄っても引いても画面上で同じ揺れ幅になる）
+    public void TriggerShake(float duration, float magnitude, bool decays = false, bool relativeToView = false)
     {
-        shakeDuration = duration; shakeMagnitude = magnitude;
+        shakeDuration = duration; shakeMagnitude = magnitude; shakeTotal = duration; shakeDecays = decays; shakeRelative = relativeToView;
     }
 
     // ▼【新規追加】柄迫り合い・壁バウンドなどダメージを伴わない衝突演出は、Host側のOnCollisionEnter2Dでしか
@@ -1470,7 +1629,9 @@ public class MultiplayerManager : MonoBehaviour
 
     MultiplayerSync Snapshot()
     {
-        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, phase = phase,
+        var hitEvents = pendingHitEvents.ToArray();
+        pendingHitEvents.Clear();
+        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, phase = phase, hits = hitEvents,
             countdownRemaining = phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0,
             players = config.players.Select(p => {
                 var sword = swords[p.playerId]; var pos = sword.transform.position;
@@ -1518,7 +1679,8 @@ public class MultiplayerManager : MonoBehaviour
             syncTargets[data.playerId] = data;
             sword.currentCenterPosition = new Vector3(data.centerX, data.centerY, 0);
             // ▼【新規追加】残機モード：Hostから届いたlifeIndexがこれまで認識していた値より増えていれば、
-            // Hostのfixedupdateと同じ手順(ReviveForNextLife)でこちらの見た目も持ち替えさせる
+            // Hostのfixedupdateと同じ手順(ReviveForNextLife)でこちらの見た目も持ち替えさせる。
+            // 剣が壊れた時はまずhp=0が届いてやられ演出が始まり、待ち時間が明けた後のSYNCでlifeIndexが進む
             if (livesModeActive && lifeIndexByPlayer.TryGetValue(data.playerId, out var knownLifeIndex) && data.lifeIndex != knownLifeIndex)
             {
                 lifeIndexByPlayer[data.playerId] = data.lifeIndex;
@@ -1540,6 +1702,14 @@ public class MultiplayerManager : MonoBehaviour
             targets[data.playerId] = data.targetPlayerId;
         }
         SyncClones(sync.clones);
+        // ▼【新規追加】Hostから届いたダメージの記録を、まだ出していない番号のものだけ表示する
+        if (sync.hits != null)
+            foreach (var evt in sync.hits.Where(h => h != null).OrderBy(h => h.seq))
+            {
+                if (evt.seq <= shownHitEventSeq) continue;
+                shownHitEventSeq = evt.seq;
+                ShowHitEvent(evt);
+            }
         receivedTick = sync.tick;
     }
 
@@ -1610,23 +1780,37 @@ public class MultiplayerManager : MonoBehaviour
         {
             // ▼【修正】ローカルのBattleCamera.StopTracking()と同じく、決着した瞬間の位置で固定する
             // (以前はここで即returnしていたため、シェイクも一切乗らなかった)
-            if (!hasLockedCameraPosition) { lockedCameraPosition = camera.transform.position; hasLockedCameraPosition = true; }
+            if (!hasLockedCameraPosition)
+            {
+                lockedCameraPosition = camera.transform.position; hasLockedCameraPosition = true;
+                finishCameraSize = camera.orthographicSize;
+            }
+            // ▼【新規追加】決着の一撃で倒された剣が1人ならその剣を追い、2人以上（引き分けなど）なら撃破の数字の
+            // 真ん中へ寄る。スロー中も止まらないよう実時間でなめらかに動かす（揺れはこの位置を基準に乗せる）
+            if (TryGetFinishFocus(camera, out Vector3 focus, out float focusSize))
+            {
+                float kp = 1 - Mathf.Exp(-7 * Time.unscaledDeltaTime), kz = 1 - Mathf.Exp(-6 * Time.unscaledDeltaTime);
+                lockedCameraPosition = Vector3.Lerp(lockedCameraPosition, new Vector3(focus.x, focus.y, lockedCameraPosition.z), kp);
+                camera.orthographicSize = Mathf.Lerp(camera.orthographicSize, focusSize, kz);
+            }
             basePosition = lockedCameraPosition;
             camera.transform.position = basePosition;
         }
         else
         {
             hasLockedCameraPosition = false;
-            var alive = swords.Values.Where(s => s.IsAlive).ToArray();
-            if (alive.Length == 0) return;
+            // ▼【変更】生きている剣に加えて、撃破されてまだ消え切っていない剣と抜け殻も画角に含める
+            var points = swords.Values.Where(s => s.IsAlive).Select(s => s.currentCenterPosition).ToList();
+            extraCameraTargets.RemoveAll(target => target == null);
+            foreach (var target in extraCameraTargets) points.Add(target.position);
+            if (points.Count == 0) return;
             // ▼【修正】SpriteRenderer.boundsは見た目のAABBなので、キャラが回転すると
             // (独楽モードのスピンなど)対角線の分だけ見かけ上のサイズが膨らんで、
             // カメラの位置・ズームが毎フレーム細かくぐらついてしまう。BattleCamera.GetSafePositionと
             // 同じく、回転に左右されない重心(currentCenterPosition)だけで画角を決める
             float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
-            foreach (var sword in alive)
+            foreach (var pos in points)
             {
-                Vector3 pos = sword.currentCenterPosition;
                 minX = Mathf.Min(minX, pos.x); maxX = Mathf.Max(maxX, pos.x);
                 minY = Mathf.Min(minY, pos.y); maxY = Mathf.Max(maxY, pos.y);
             }
@@ -1645,7 +1829,10 @@ public class MultiplayerManager : MonoBehaviour
         // 無効化されているため、代わりにこのマネージャー自身でTriggerShakeの値を消費する
         if (shakeDuration > 0)
         {
-            camera.transform.position = basePosition + (Vector3)UnityEngine.Random.insideUnitCircle * shakeMagnitude;
+            float magnitude = shakeMagnitude;
+            if (shakeDecays) magnitude *= Mathf.Clamp01(shakeDuration / Mathf.Max(.0001f, shakeTotal));
+            if (shakeRelative) magnitude *= camera.orthographicSize;
+            camera.transform.position = basePosition + (Vector3)UnityEngine.Random.insideUnitCircle * magnitude;
             shakeDuration -= Time.unscaledDeltaTime;
         }
     }
@@ -1664,9 +1851,14 @@ public class MultiplayerManager : MonoBehaviour
         var specialButton = firstSword != null ? firstSword.specialAttackButton : null;
         if (specialButton != null) specialButton.gameObject.SetActive(false);
         foreach (var sword in swords.Values) { sword.StopAllCoroutines(); bodies[sword.PlayerId].simulated = false; }
+        // ▼【新規追加】決着の一撃で倒された剣は、その場で止めずにすぐ跳ね上げる（物理は止めたので、各自の画面で動かす）。
+        // 決着後のカメラはこの剣を追う
+        foreach (var id in finalKoTargets) if (swords.TryGetValue(id, out var fallen) && fallen != null) DefeatFlight.Launch(fallen.gameObject);
         // ▼【修正】ローカルのDefeatRoutine後半(カメラロック・シェイク・スローモーション・完全停止)と同じ決着演出。
         // カメラロック自体はLateUpdate()がphase=="RESULT"を見て自動的に行う
-        TriggerShake(1.5f, 1.2f);
+        // ▼【変更】決着の揺れ：以前は強さ1.2（ワールド）のまま1.5秒続いていた。画面の縦の大きさに対する割合で決め
+        // （寄っても揺れが小さくならない）、最初が一番強く1.2秒かけてゆるやかに収まる揺れにする
+        TriggerShake(1.2f, .12f, true, true);
         StartCoroutine(MatchEndCinematic());
     }
 
@@ -1710,6 +1902,9 @@ public class MultiplayerManager : MonoBehaviour
         foreach (var visual in cloneVisuals.Values) if (visual != null) Destroy(visual);
         cloneVisuals.Clear();
         clashSeq.Clear(); criticalHitThisTick.Clear(); critSeq.Clear();
+        hitDetailsThisStep.Clear(); pendingHitEvents.Clear(); killerFreezes.Clear();
+        DamagePopup.ClearAll(); InkPiece.ClearAll(); DefeatGhost.ClearAll();
+        extraCameraTargets.Clear(); finalKoTargets.Clear(); finalKoNumbers.Clear(); finishCameraSize = -1f;
         shakeDuration = 0f; hasLockedCameraPosition = false;
         livesModeActive = false; soloModeActive = false;
         suppressUntil.Clear(); wasSuppressed.Clear();

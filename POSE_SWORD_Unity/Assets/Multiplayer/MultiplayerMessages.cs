@@ -88,6 +88,21 @@ using UnityEngine;
     // -1は「残機モードでない、または特定の剣に紐付かない」ことを表し、持ち主の現在の刀身を使う
     public int spriteIndex = -1;
 }
+// ▼【新規追加】実際に通ったダメージ1件分。ダメージ数字を「与えた／受けた／他人同士」で出し分けるため、
+// 攻撃した人と当たった位置も一緒に送る。seq は試合ごとの通し番号で、ゲストは前回より大きいものだけ表示する
+[Serializable] public class MultiplayerHitEvent
+{
+    public int seq;
+    public string attackerId;
+    public string targetId;
+    public int damage;
+    public bool crit;
+    // この一撃で剣が壊れたか（残機制で次の剣に持ち替わった時も含む）。撃破の数字は剣についていかせない
+    public bool lethal;
+    // 試合を決めた一撃か。決着の数字と撃破演出の印は消さずに残し、カメラもこれを基に寄る
+    public bool final;
+    public float x, y;
+}
 [Serializable] public class MultiplayerSync
 {
     public string matchId;
@@ -96,6 +111,8 @@ using UnityEngine;
     public float countdownRemaining;
     public MultiplayerPlayerState[] players;
     public MultiplayerCloneState[] clones;
+    // 前回のSYNC以降に通ったダメージ（Hostが溜めて、SYNCを送るたびに空にする）
+    public MultiplayerHitEvent[] hits;
 }
 [Serializable] public class MultiplayerScore
 {
