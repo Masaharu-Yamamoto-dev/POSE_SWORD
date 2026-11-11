@@ -274,7 +274,7 @@ public class MultiplayerManager : MonoBehaviour
                 tutorial.enabled = false;
             }
             if (BackgroundManager.Instance != null) BackgroundManager.Instance.enabled = false;
-            if (CutinManager.Instance != null) CutinManager.Instance.StopAllCoroutines();
+            if (CutinManager.Instance != null) CutinManager.Instance.StopCutin();
             Time.timeScale = 1;
             SwordBattle.isRoundStarted = false;
             SwordBattle.matchEnded = false;
@@ -1443,6 +1443,13 @@ public class MultiplayerManager : MonoBehaviour
         killerFreezes[playerId] = (untilTick, rb.linearVelocity, rb.angularVelocity, rb.constraints);
         rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0f;
         rb.constraints = RigidbodyConstraints2D.FreezeAll;
+    }
+
+    // 撃破で短く止められている最中か。止まっている間は必殺技の時間も進めない（SwordBattle.WaitSkillTime）。
+    // 止めているのはホストだけなので、ゲストでは常に false
+    public bool IsKillerFrozen(string playerId)
+    {
+        return playerId != null && killerFreezes.ContainsKey(playerId);
     }
 
     // 物理を進める前に毎ステップ呼ぶ。時間が来た剣と、止まっている間に倒された剣の止めを解く

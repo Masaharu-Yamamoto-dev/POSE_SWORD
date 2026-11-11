@@ -472,7 +472,8 @@ public static bool matchEnded = false;
         // 一度も実行されず、3〜4人戦でまだ試合が終わっていない撃破でもスローのまま固まっていた。
         // 試合自体が終わった場合はMatchEndCinematicが改めてtimeScaleを制御するのでmatchEndedの時は触らない
         StopAllCoroutines();
-        if (!matchEnded) Time.timeScale = 1f;
+        // 必殺技のカットインがスローをかけている最中なら、等速へ戻すのはカットイン側に任せる
+        if (!matchEnded && !CutinSlowingTime) Time.timeScale = 1f;
         // ▼【新規追加】倒された後はUpdate()が止まり、必殺技ボタンが更新されなくなる。SPが溜まったまま倒されると
         // 撃てる見た目で固まるので、操作を外す前に一度だけ「撃てない」状態にしておく
         // （残機制では次の剣が出るまで数秒あるので特に目立つ。次の剣が出ればUpdate()がまた更新する）
@@ -1283,7 +1284,9 @@ public static bool matchEnded = false;
         // 開始してからisDead=trueにするため、3〜4人戦で決着がついていない撃破でもここがfalseのままに
         // なり、Time.timeScaleが0.05に固まって戻らなくなっていた。本当に戻すべきでないのはmatchEnded
         // (＝試合全体の決着)の時だけなので、isDeadでの判定はやめる
-        if (!matchEnded)
+        // ▼【修正】必殺技のカットイン中に被弾すると、ここで等速に戻してカットインのスローを途中で解いていた。
+        // カットインがスローをかけている間は、終わりの等速化はカットイン側に任せる
+        if (!matchEnded && !CutinSlowingTime)
         {
             Time.timeScale = 1f;
         }
@@ -1518,6 +1521,51 @@ public static bool matchEnded = false;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
+    // ▼【新規追加】必殺技のカットインを出し、抜け切るまで待つ。技の中身はこの後に始める
+    // （以前はカットインと同時に始まり、0.05倍のスローの中でカットインの裏で少しずつ進んでいた）。
+    // マルチプレイでもカットイン中は全員の動きを止める演出にする(useSlowMotion常にtrue)。
+    // Host権威のPhysics2D.Simulateが実質停止するため、この間だけは意図的に全員が止まる
+    // (Client側は停止したSYNCデータをそのまま補間するので、こちらでも自然に止まって見える)。
+    // 待つのは実時間。別の剣のカットインに置き換えられたら、その時点で待つのをやめる
+    IEnumerator PlayUltimateCutinAndWait(string skillName, Color themeColor)
+    {
+        if (CutinManager.Instance == null || spriteRenderer == null) yield break;
+        int serial = CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, themeColor, PlayerMainColor, true);
+        // カットインが何かの理由で終わらなかった時に、技が始まらないまま固まらないための上限
+        float giveUpAt = Time.unscaledTime + 3f;
+        while (CutinManager.Instance != null && !CutinManager.Instance.IsFinished(serial) && Time.unscaledTime < giveUpAt)
+            yield return null;
+    }
+
+    // カットインを待っている間に倒された・試合が終わった時は、技を始めずに状態だけ戻す
+    bool UltimateCancelled => isDead || matchEnded;
+    void CancelUltimate()
+    {
+        isDashing = false;
+        isDashShooting = false;
+        currentDashType = 0;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】必殺技の待ち時間。WaitForSecondsと同じくゲーム内の時間で数えるが、オンライン対戦で
+    // 撃破して短く止められている間（MultiplayerManager.FreezeKiller）は進めない。
+    // 以前は止まっている間も時間が進み、その分だけ技が削れていた（巨大回転斬はほぼ一回転分が消えていた）
+    bool SkillClockStopped => MultiplayerOwner != null && MultiplayerOwner.IsKillerFrozen(PlayerId);
+
+    IEnumerator WaitSkillTime(float seconds)
+    {
+        float elapsed = 0f;
+        while (elapsed < seconds)
+        {
+            yield return null;
+            if (!SkillClockStopped) elapsed += Time.deltaTime;
+        }
+    }
+
+    // カットインが時間をゆっくりにしている最中か。ヒットストップなどの後で等速に戻す時は、
+    // これがtrueなら戻さない（戻すとカットインのスローが途中で解け、技がカットインの裏で進んでしまう）
+    static bool CutinSlowingTime => CutinManager.Instance != null && CutinManager.Instance.IsSlowingTime;
+
     // ▼【新規追加】剣ごとのhiltType（JSON由来）に応じて必殺技の中身を振り分ける
     // 未対応のhiltType（未指定＝"0"を含む）は既存のデフォルト必殺技にフォールバック
     IEnumerator UltimateRoutine()
@@ -1565,17 +1613,11 @@ public static bool matchEnded = false;
 
         Debug.Log($"🌪️ 独楽モード：超必殺【竜巻】発動！ (消費SP: {consumedSp:F0})");
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            // ▼【修正】マルチプレイでも必殺技カットイン中は全員の動きを止める演出にする(useSlowMotion常にtrue)。
-            // Host権威のPhysics2D.Simulateが実質停止するため、この間だけは意図的に両プレイヤーとも止まる
-            // (Client側は停止したSYNCデータをそのまま補間するので、こちらでも自然に止まって見える)
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f), PlayerMainColor, true);
-        }
-
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
+        yield return StartCoroutine(PlayUltimateCutinAndWait("竜巻猛突!!", new Color(1f, 0.8f, 0.2f)));
+        if (UltimateCancelled) { CancelUltimate(); yield break; }
 
-        float duration = 0.8f; 
+        float duration = 0.8f;
         float timer = 0f;
 
         while (timer < duration)
@@ -1595,8 +1637,9 @@ public static bool matchEnded = false;
                 Instantiate(guardEffectPrefab, transform.position + (Vector3)Random.insideUnitCircle * 1.5f, Quaternion.identity);
             }
 
-            timer += Time.deltaTime;
-            yield return null; 
+            // 撃破で止められている間は、竜巻の残り時間を減らさない
+            if (!SkillClockStopped) timer += Time.deltaTime;
+            yield return null;
         }
 
         // ▼【修正】ブレーキもHostのみ
@@ -1618,14 +1661,10 @@ public static bool matchEnded = false;
         currentSp = 0f;
         giantSpinHitTargets.Clear();
 
-        // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
-        // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f), PlayerMainColor, true);
-        }
-
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.3f, 0.3f);
+        // カットインが抜けてから巨大化する（以前はカットインの裏で先に6倍になっていた）
+        yield return StartCoroutine(PlayUltimateCutinAndWait("巨大回転斬!!", new Color(1f, 0.3f, 0.3f)));
+        if (UltimateCancelled) { CancelUltimate(); yield break; }
 
         Vector3 originalScale = transform.localScale;
         transform.localScale = originalScale * giantSpinScale;
@@ -1670,7 +1709,8 @@ public static bool matchEnded = false;
             rb.angularVelocity = angularSpeed;
         }
 
-        yield return new WaitForSeconds(duration);
+        // 回転中に撃破して止められても、止まっている間は数えないので一回転しきる
+        yield return StartCoroutine(WaitSkillTime(duration));
 
         if (controlsPhysics)
         {
@@ -1698,14 +1738,11 @@ public static bool matchEnded = false;
 
         Color cloneColor = new Color(0.3f, 0.6f, 1f);
 
-        // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
-        // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達アタック!!", cloneColor, PlayerMainColor, true);
-        }
-
         if (spriteRenderer != null) spriteRenderer.color = cloneColor;
+        // カットインが抜けてから分身を出す（以前は1体目がカットインの裏で出て、スローの中を進んでいた）。
+        // 狙う位置もカットインの後で取るので、カットインの間に相手が動いても外れにくい
+        yield return StartCoroutine(PlayUltimateCutinAndWait("オレ達アタック!!", cloneColor));
+        if (UltimateCancelled) { CancelUltimate(); yield break; }
 
         // ▼【重要】実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行う。
         // Client側の見た目再生（Kinematicコピー）では分身は出すが、ダメージは与えない。
@@ -1808,11 +1845,11 @@ public static bool matchEnded = false;
             // 出現タイミングを1体ずつずらす（最後の1体の後は待たない）
             if (i < cloneCount - 1 && cloneSpawnStagger > 0f)
             {
-                yield return new WaitForSeconds(cloneSpawnStagger);
+                yield return StartCoroutine(WaitSkillTime(cloneSpawnStagger));
             }
         }
 
-        yield return new WaitForSeconds(0.3f);
+        yield return StartCoroutine(WaitSkillTime(0.3f));
 
         isDashing = false;
         currentDashType = 0;
@@ -1830,14 +1867,10 @@ public static bool matchEnded = false;
 
         Color shieldColor = new Color(0.4f, 0.95f, 0.5f);
 
-        // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
-        // 他の剣モード必殺技と同様にローカル/テストモード時だけ再生する
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達シールド!!", shieldColor, PlayerMainColor, true);
-        }
-
         if (spriteRenderer != null) spriteRenderer.color = shieldColor;
+        // カットインが抜けてからシールドを出す（以前はカットインの開始と同時に出て、もう回っていた）
+        yield return StartCoroutine(PlayUltimateCutinAndWait("オレ達シールド!!", shieldColor));
+        if (UltimateCancelled) { CancelUltimate(); yield break; }
 
         // ▼【重要】実際にシールドを展開・判定するのはHost権威（またはローカル/テストモード）側のみ。
         // Client側の見た目再生（Kinematicコピー）では展開しない（見た目はSYNCで複製される）
@@ -1890,7 +1923,7 @@ public static bool matchEnded = false;
             }
         }
 
-        yield return new WaitForSeconds(0.2f);
+        yield return StartCoroutine(WaitSkillTime(0.2f));
 
         isDashing = false;
         currentDashType = 0;
@@ -1979,10 +2012,9 @@ public static bool matchEnded = false;
         currentSp = 0f;
         dashDamageBonus = 5.0f; 
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f), PlayerMainColor, true);
-        }
+        // カットインが抜けてから小ジャンプに入る（以前はカットインの裏でもうジャンプが始まっていた）
+        yield return StartCoroutine(PlayUltimateCutinAndWait("大回転斬!!", new Color(0.5f, 1f, 1f)));
+        if (UltimateCancelled) { CancelUltimate(); dashDamageBonus = 1.0f; yield break; }
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
@@ -1991,7 +2023,7 @@ public static bool matchEnded = false;
             rb.angularVelocity = 720f; 
         }
         
-        yield return new WaitForSeconds(0.2f);
+        yield return StartCoroutine(WaitSkillTime(0.2f));
 
         // ▼【修正】2. 空中で一瞬静止（Hostのみ）
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
@@ -2001,7 +2033,7 @@ public static bool matchEnded = false;
             rb.angularVelocity = 1440f;
         }
 
-        yield return new WaitForSeconds(0.1f);
+        yield return StartCoroutine(WaitSkillTime(0.1f));
 
         isDashShooting = true; 
 
@@ -2017,7 +2049,7 @@ public static bool matchEnded = false;
             Debug.Log($"⚔️ 剣モード：一直線ダッシュ発動！");
         }
 
-        yield return new WaitForSeconds(2.0f);
+        yield return StartCoroutine(WaitSkillTime(2.0f));
         if (isDashing && !SwordController.isKomaMode)
         {
             EndSwordDash();

@@ -281,4 +281,66 @@ public class MultiplayerSceneTests
         Assert.Greater(body.position.y, heightAtDefeat + 1f);
     }
 
+    // ===== 必殺技の時間：カットインが抜けてから始まり、撃破で止まっている間は進まない =====
+
+    private static void FireUltimate(Component sword, string hiltType)
+    {
+        sword.GetType().GetField("hiltType").SetValue(sword, hiltType);
+        sword.GetType().GetField("currentSp").SetValue(sword, 100f);
+        sword.GetType().GetMethod("ExecuteMultiplayerUltimate").Invoke(sword, null);
+    }
+
+    [UnityTest]
+    public IEnumerator UltimateWaitsForItsCutinAndAHitStopDoesNotEndTheSlowMotion()
+    {
+        Call("InitializeMultiplayer", Config("cutin-wait", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"cutin-wait\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+
+        FireUltimate(p0, "0"); // 大回転斬
+        yield return new WaitForSecondsRealtime(.2f);
+        Assert.IsTrue((bool)p0.GetType().GetField("isDashing").GetValue(p0), "The sword is protected while its cutin plays.");
+        Assert.Less(p0.GetComponent<Rigidbody2D>().linearVelocity.y, 5f, "The jump must wait until the cutin has passed.");
+        Assert.AreEqual(.05f, Time.timeScale, .001f);
+
+        // カットインの最中に誰かが大きく被弾しても、ヒットストップの後でスローが解けない
+        var p1 = Sword("p1");
+        p1.GetType().GetMethod("PlayClientDamageEffect").Invoke(p1, new object[] { 50, true });
+        yield return new WaitForSecondsRealtime(.3f);
+        Assert.AreEqual(.05f, Time.timeScale, .001f, "A hit stop must not cut the cutin's slow motion short.");
+        Assert.IsFalse((bool)p0.GetType().GetField("isDashShooting").GetValue(p0));
+
+        // カットインが抜けた後で、跳んで止まって発射する
+        yield return new WaitForSecondsRealtime(1.1f);
+        Assert.AreEqual(1f, Time.timeScale, .001f);
+        Assert.IsTrue((bool)p0.GetType().GetField("isDashShooting").GetValue(p0) ||
+            !(bool)p0.GetType().GetField("isDashing").GetValue(p0), "The dash starts once the cutin is over.");
+    }
+
+    [UnityTest]
+    public IEnumerator GiantSpinDoesNotLoseTimeWhileThePlayerIsPausedForAKill()
+    {
+        Call("InitializeMultiplayer", Config("giant-freeze", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"giant-freeze\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p1 = Sword("p1"); var p2 = Sword("p2");
+        float baseScale = p1.transform.localScale.x;
+
+        FireUltimate(p1, "1"); // 巨大回転斬
+        float giveUp = Time.realtimeSinceStartup + 3f;
+        while (p1.transform.localScale.x < baseScale * 2f && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.Greater(p1.transform.localScale.x, baseScale * 2f, "The sword grows once the cutin is over.");
+
+        // 回り始めた直後に本体で倒して0.3秒止まる。一回転（360/540=約0.67秒）の時間は、止まっていた分だけ後ろへずれる
+        QueueHit(p1, p2, 1000);
+        yield return new WaitForSecondsRealtime(.8f);
+        Assert.Greater(p1.transform.localScale.x, baseScale * 2f, "The pause must not eat into the spin.");
+
+        yield return new WaitForSecondsRealtime(.6f);
+        Assert.AreEqual(baseScale, p1.transform.localScale.x, .001f, "The spin still ends after one full turn.");
+    }
+
 }
