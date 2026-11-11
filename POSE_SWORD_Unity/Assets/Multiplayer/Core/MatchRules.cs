@@ -9,12 +9,31 @@ namespace PoseSword.Multiplayer
         public string AttackerId { get; private set; }
         public string TargetId { get; private set; }
         public int Damage { get; private set; }
+        // ライフスティール：このヒットで相手のHPを実際に減らした量のうち、攻撃した側が回復する割合(0〜1)。
+        // 通常の攻撃は0。オレ達アタックの分身などが渡す
+        public float LifestealRate { get; private set; }
 
-        public Hit(string attackerId, string targetId, int damage)
+        public Hit(string attackerId, string targetId, int damage, float lifestealRate = 0f)
         {
+            if (float.IsNaN(lifestealRate) || lifestealRate < 0f || lifestealRate > 1f)
+                throw new ArgumentException("A lifesteal rate must be between zero and one.");
             AttackerId = attackerId;
             TargetId = targetId;
             Damage = damage;
+            LifestealRate = lifestealRate;
+        }
+    }
+
+    // 1ステップで実際に回復した量1件分（ライフスティール）。回復量の表示とテストに使う
+    public sealed class HealRecord
+    {
+        public string PlayerId { get; private set; }
+        public int Amount { get; private set; }
+
+        public HealRecord(string playerId, int amount)
+        {
+            PlayerId = playerId;
+            Amount = amount;
         }
     }
 
@@ -46,6 +65,8 @@ namespace PoseSword.Multiplayer
         public string PlayerId { get; private set; }
         public int SlotIndex { get; private set; }
         public int Hp { get; internal set; }
+        // 今使っている剣の最大HP。回復はこれを超えない
+        public int MaxHp { get { return lives[CurrentLifeIndex]; } }
         // 試合に残っているか(脱落していないか)。残機制で次の剣を待っている間も true のままなので、
         // 順位・決着の判定はこれを見る
         public bool Alive { get { return Hp > 0 || Respawning; } }
@@ -136,6 +157,9 @@ namespace PoseSword.Multiplayer
         // 直前の ResolveStep で通ったダメージ。次の ResolveStep の呼び出しで作り直す。
         private readonly List<DamageRecord> lastStepDamage = new List<DamageRecord>();
         public IReadOnlyList<DamageRecord> LastStepDamage { get { return lastStepDamage; } }
+        // 直前の ResolveStep で回復した量（ライフスティール）。次の ResolveStep の呼び出しで作り直す。
+        private readonly List<HealRecord> lastStepHealing = new List<HealRecord>();
+        public IReadOnlyList<HealRecord> LastStepHealing { get { return lastStepHealing; } }
 
         // 通常(残機モードなし)：各プレイヤーHP1つだけの1本勝負
         public MatchRules(string[] playerIds, int[] hitPoints)
@@ -177,6 +201,7 @@ namespace PoseSword.Multiplayer
         public void ResolveStep(int tick, IEnumerable<Hit> hits, IEnumerable<string> forfeits = null)
         {
             lastStepDamage.Clear();
+            lastStepHealing.Clear();
             if (Ended || tick <= LastTick || tick < 0) return;
             if (hits == null) throw new ArgumentNullException("hits");
 
@@ -195,8 +220,12 @@ namespace PoseSword.Multiplayer
                     !disconnected.Contains(h.AttackerId) && !disconnected.Contains(h.TargetId) &&
                     Get(h.AttackerId).Team != Get(h.TargetId).Team)
                 .GroupBy(h => new { h.AttackerId, h.TargetId })
-                .Select(g => new Hit(g.Key.AttackerId, g.Key.TargetId, g.Max(h => h.Damage)))
+                // 同じ相手への同じステップのヒットは一番大きい1つにまとめる。回復率もその1つのものを使う
+                .Select(g => g.OrderByDescending(h => h.Damage).ThenByDescending(h => h.LifestealRate).First())
                 .ToArray();
+
+            // ライフスティールで回復する量。全員のダメージを確定してから、まとめて回復させる
+            var pendingHeals = new Dictionary<PlayerScore, int>();
 
             foreach (var targetGroup in attacks.GroupBy(h => h.TargetId))
             {
@@ -206,7 +235,8 @@ namespace PoseSword.Multiplayer
                 var shares = targetGroup.Select(h => new Share {
                     Player = Get(h.AttackerId),
                     Exact = (decimal)h.Damage * actual / total,
-                    Raw = h.Damage
+                    Raw = h.Damage,
+                    LifestealRate = h.LifestealRate
                 }).ToList();
                 foreach (var share in shares) share.Amount = (int)share.Exact;
                 int remainder = actual - shares.Sum(s => s.Amount);
@@ -217,6 +247,14 @@ namespace PoseSword.Multiplayer
                 {
                     share.Player.DamageDealt += share.Amount;
                     if (share.Amount > 0) lastStepDamage.Add(new DamageRecord(share.Player.PlayerId, target.PlayerId, share.Amount, lethal, share.Raw));
+                    // 回復は「実際に減らした量」（残りHPで頭打ちし、複数人なら自分の取り分）から計算する
+                    if (share.Amount > 0 && share.LifestealRate > 0f)
+                    {
+                        int heal = (int)Math.Round((decimal)share.Amount * (decimal)share.LifestealRate, MidpointRounding.AwayFromZero);
+                        int sofar;
+                        pendingHeals.TryGetValue(share.Player, out sofar);
+                        pendingHeals[share.Player] = sofar + heal;
+                    }
                 }
 
                 target.Hp -= actual;
@@ -232,6 +270,17 @@ namespace PoseSword.Multiplayer
                         target.EliminationReason = "KO";
                     }
                 }
+            }
+
+            // ライフスティール：同じステップで倒れた（相打ち・次の剣待ち）側は回復しない。今の剣の最大HPを超えない
+            foreach (var pair in pendingHeals.OrderBy(p => p.Key.SlotIndex))
+            {
+                var player = pair.Key;
+                if (!player.OnField) continue;
+                int healed = Math.Min(pair.Value, player.MaxHp - player.Hp);
+                if (healed <= 0) continue;
+                player.Hp += healed;
+                lastStepHealing.Add(new HealRecord(player.PlayerId, healed));
             }
 
             // 切断は残機の有無に関わらず即座に脱落させる
@@ -277,6 +326,7 @@ namespace PoseSword.Multiplayer
             internal decimal Exact;
             internal int Amount;
             internal int Raw;
+            internal float LifestealRate;
         }
     }
 }

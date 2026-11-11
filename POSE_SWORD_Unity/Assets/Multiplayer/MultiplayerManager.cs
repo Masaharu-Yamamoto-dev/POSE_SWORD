@@ -1372,7 +1372,9 @@ public class MultiplayerManager : MonoBehaviour
     }
 
     // byBody：剣の本体で当てたか。分身・リーフシールドからの攻撃は false で呼ぶ
-    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage, Vector2 hitPoint, bool isCrit = false, bool byBody = true)
+    // lifestealRate：実際に減らしたHPのうち、攻撃した側が回復する割合（0〜1）。回復はMatchRulesがダメージ確定後に行う
+    public void QueueHit(SwordBattle attacker, SwordBattle target, int damage, Vector2 hitPoint, bool isCrit = false, bool byBody = true,
+        float lifestealRate = 0f)
     {
         // 残機制で次の剣を待っている人は、試合に残っていても場に剣が無いので、攻撃も被弾もしない
         if (!IsHost || !IsPlaying || target.MultiplayerOwner != this || attacker.MultiplayerOwner != this ||
@@ -1389,7 +1391,9 @@ public class MultiplayerManager : MonoBehaviour
         bool clash = SwordController.isKomaMode && invulnerable.ContainsKey(attacker.PlayerId) && invulnerable[attacker.PlayerId];
         if (!blocked || clash)
         {
-            hits.Add(new Hit(attacker.PlayerId, target.PlayerId, damage));
+            // MatchRules は範囲外の回復率を拒否するので、物理ステップの途中で例外にならないよう0〜1に収めて渡す
+            float rate = float.IsNaN(lifestealRate) ? 0f : Mathf.Clamp01(lifestealRate);
+            hits.Add(new Hit(attacker.PlayerId, target.PlayerId, damage, rate));
             // ▼【新規追加】クリティカル/弱点情報はMatchRulesのHitには乗らない(複数攻撃者の同時ヒットで
             // 合算されるため)ので、ここで別途覚えておいてこのtickのApplyMultiplayerHealthに渡す
             if (isCrit) criticalHitThisTick[target.PlayerId] = true;

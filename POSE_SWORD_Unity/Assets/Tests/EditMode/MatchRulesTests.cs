@@ -708,4 +708,93 @@ public class MatchRulesTests
             Assert.IsTrue(match.Players.All(p => p.Rank == 1 && p.Kills == 1 && p.DamageDealt == 100));
         }
     }
+
+    // ===== ライフスティール（オレ達アタックの分身）：実際に減らした量の一部を、攻撃した側が回復する =====
+
+    [Test]
+    public void LifestealHealsAShareOfTheDamageActuallyDealt()
+    {
+        var match = Four();
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 50) });
+        match.ResolveStep(2, new[] { new Hit("p0", "p2", 30, .2f) });
+        Assert.AreEqual(56, match.Get("p0").Hp, "30 damage at 20% heals 6.");
+        Assert.AreEqual(70, match.Get("p2").Hp);
+        Assert.AreEqual(30, match.Get("p0").DamageDealt, "Healing does not change the damage stats.");
+        Assert.AreEqual(1, match.LastStepHealing.Count);
+        Assert.AreEqual("p0", match.LastStepHealing[0].PlayerId);
+        Assert.AreEqual(6, match.LastStepHealing[0].Amount);
+    }
+
+    [Test]
+    public void LifestealNeverHealsPastTheCurrentSwordsMaximum()
+    {
+        var match = Four();
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 3) });
+        match.ResolveStep(2, new[] { new Hit("p0", "p2", 50, .2f) });
+        Assert.AreEqual(100, match.Get("p0").Hp);
+        Assert.AreEqual(3, match.LastStepHealing.Single().Amount, "Only the missing HP is recorded as healed.");
+
+        match.ResolveStep(3, new[] { new Hit("p0", "p3", 50, .2f) });
+        Assert.IsEmpty(match.LastStepHealing, "A full sword records no healing.");
+    }
+
+    [Test]
+    public void LifestealOnAFinishingBlowUsesTheHpThatWasLeft()
+    {
+        var match = Four();
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 60), new Hit("p3", "p2", 90) });
+        match.ResolveStep(2, new[] { new Hit("p0", "p2", 300, .2f) });
+        Assert.IsFalse(match.Get("p2").Alive);
+        Assert.AreEqual(42, match.Get("p0").Hp, "Only the 10 HP that was left counts: 10 at 20% heals 2.");
+    }
+
+    [Test]
+    public void LifestealIsWorkedOutFromEachAttackersOwnShare()
+    {
+        var match = Four();
+        match.ResolveStep(1, new[] { new Hit("p2", "p0", 50), new Hit("p2", "p1", 50) });
+        // p0 と p1 が同じステップで p3 を殴る。合計100が丸ごと入り、取り分は 60 と 40
+        match.ResolveStep(2, new[] { new Hit("p0", "p3", 60, .5f), new Hit("p1", "p3", 40, .5f) });
+        Assert.AreEqual(80, match.Get("p0").Hp);
+        Assert.AreEqual(70, match.Get("p1").Hp);
+    }
+
+    [Test]
+    public void ASwordBrokenInTheSameStepDoesNotHeal()
+    {
+        var match = Four();
+        match.ResolveStep(1, new[] { new Hit("p0", "p1", 50, 1f), new Hit("p1", "p0", 100) });
+        Assert.IsFalse(match.Get("p0").Alive);
+        Assert.IsEmpty(match.LastStepHealing);
+
+        // 残機制でも、壊れたステップのうちに次の剣へ持ち替わった時は、壊れた剣の回復を新しい剣に持ち込まない
+        var lives = new MatchRules(new[] { "p0", "p1" }, new[] { new[] { 100, 100 }, new[] { 100 } });
+        lives.ResolveStep(1, new[] { new Hit("p0", "p1", 50, 1f), new Hit("p1", "p0", 100) });
+        Assert.AreEqual(100, lives.Get("p0").Hp);
+        Assert.IsEmpty(lives.LastStepHealing);
+    }
+
+    [Test]
+    public void OrdinaryHitsDoNotHealAndTheBiggestHitsRateIsUsed()
+    {
+        var match = Four();
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 50) });
+        match.ResolveStep(2, new[] { new Hit("p0", "p2", 40) });
+        Assert.AreEqual(50, match.Get("p0").Hp);
+        Assert.IsEmpty(match.LastStepHealing);
+
+        // 同じステップに同じ相手へのヒットが2つあれば、大きい方の1つだけが通り、その回復率を使う
+        match.ResolveStep(3, new[] { new Hit("p0", "p3", 10, 1f), new Hit("p0", "p3", 30, .5f) });
+        Assert.AreEqual(70, match.Get("p3").Hp);
+        Assert.AreEqual(65, match.Get("p0").Hp);
+    }
+
+    [Test]
+    public void LifestealRateMustBeBetweenZeroAndOne()
+    {
+        Assert.Throws<System.ArgumentException>(() => new Hit("p0", "p1", 10, -.1f));
+        Assert.Throws<System.ArgumentException>(() => new Hit("p0", "p1", 10, 1.1f));
+        Assert.Throws<System.ArgumentException>(() => new Hit("p0", "p1", 10, float.NaN));
+        Assert.AreEqual(0f, new Hit("p0", "p1", 10).LifestealRate);
+    }
 }

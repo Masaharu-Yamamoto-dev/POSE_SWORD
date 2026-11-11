@@ -143,7 +143,7 @@ public class MultiplayerSceneTests
     private static bool Flag(Component sword, string property) { return (bool)sword.GetType().GetProperty(property).GetValue(sword); }
     private void QueueHit(Component attacker, Component target, int damage, bool byBody = true)
     {
-        manager.GetType().GetMethod("QueueHit").Invoke(manager, new object[] { attacker, target, damage, Vector2.zero, false, byBody });
+        manager.GetType().GetMethod("QueueHit").Invoke(manager, new object[] { attacker, target, damage, Vector2.zero, false, byBody, 0f });
     }
     private void Sync(string id, int tick, int p0Hp, int p0LifeIndex)
     {
