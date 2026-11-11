@@ -1454,13 +1454,20 @@ public class MultiplayerManager : MonoBehaviour
     public IEnumerable<SwordBattle> TeammateSwordsOf(string playerId)
     {
         if (!soloModeActive || config == null || playerId == null) yield break;
-        var self = config.players.FirstOrDefault(p => p.playerId == playerId);
-        if (self == null) yield break;
         foreach (var mate in config.players)
         {
-            if (mate.playerId == playerId || mate.team != self.team) continue;
+            if (!AreTeammates(playerId, mate.playerId)) continue;
             if (swords.TryGetValue(mate.playerId, out var sword) && sword != null && sword.IsAlive) yield return sword;
         }
+    }
+
+    // 別の2人が同じ陣営か。陣営があるのは1vs3だけなので、個人戦では常に false
+    public bool AreTeammates(string a, string b)
+    {
+        if (!soloModeActive || config == null || a == null || b == null || a == b) return false;
+        var pa = config.players.FirstOrDefault(p => p.playerId == a);
+        var pb = config.players.FirstOrDefault(p => p.playerId == b);
+        return pa != null && pb != null && pa.team == pb.team;
     }
 
     // 撃破で短く止められている最中か。止まっている間は必殺技の時間も進めない（SwordBattle.WaitSkillTime）。

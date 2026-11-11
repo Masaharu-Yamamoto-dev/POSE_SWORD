@@ -57,6 +57,10 @@ public class SwordBattle : MonoBehaviour
     // 制圧の技番号。既存の1〜6と衝突しない値にして、色分けとカットインの同期にそのまま乗せる
     public const int SuppressDashType = 7;
     public const string SuppressSkillName = "オレ掌握斬!!";
+    // 巨大回転斬の後の「ふらつき」の技番号。技番号の同期に乗せて、ゲストの画面でも点滅させる。
+    // カットインは鳴らさない（TryPlayUltimateCutinの対象外）
+    public const int StaggerDashType = 8;
+    public bool IsStaggered => currentDashType == StaggerDashType;
     // ▼【新規追加】残機モード：HPパネル内に表示する「あと何本あるか」の小さいアイコン列。
     // 今戦っている剣は含めない(残りの手持ちの剣だけ)。MultiplayerManager.WireHudBarが実行時に生成して渡す
     [HideInInspector] public Image[] reserveSwordIcons;
@@ -98,6 +102,18 @@ public static bool matchEnded = false;
     public float giantSpinScale = 6f; // 巨大化一回転（hiltType:"1"）の拡大率
     public float giantSpinDamageMultiplier = 8f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
     public float giantSpinRotationSpeed = 1080f; // 巨大化一回転の回転速度（度/秒）。小さくするとゆっくり回るようになる（一回転にかかる時間もこれに応じて伸びる）
+    // ▼【新規追加】巨大回転斬の流れ（カットインの後）：柄が光る → 3段階で巨大化 → 振りかぶり → 一回転（攻撃判定はここだけ）
+    // → 余韻 → 縮む → ふらつき。秒数はゲーム内の時間で、撃破で止められている間は進まない（ふらつきを除く）
+    public float giantSpinHiltGlowTime = 0.2f;   // 柄が光る（技の出どころを見せる）
+    public float giantSpinGrowTime = 0.3f;       // 3段階で巨大化しきるまで
+    public float giantSpinWindupTime = 0.15f;    // 振りかぶり
+    public float giantSpinWindupAngle = 30f;     // 振りかぶりで回転と逆向きに引く角度（度）
+    public float giantSpinLingerTime = 0.2f;     // 一回転した後、大きいまま止まる余韻
+    public float giantSpinShrinkTime = 0.3f;     // 元の大きさに縮むまで
+    public float giantSpinSecondHitRate = 0.7f;  // 2人目に当たった時の威力の割合
+    public float giantSpinLaterHitRate = 0.5f;   // 3人目以降に当たった時の威力の割合
+    public float giantSpinStaggerOnHit = 0.3f;   // 誰かに当てた後のふらつき（操作できない・無敵ではない）
+    public float giantSpinStaggerOnMiss = 1.0f;  // 誰にも当たらなかった後のふらつき
     public int cloneCount = 3; // 分身突進（hiltType:"2"）の分身数
     public float cloneSpawnMinRadius = 2f; // 分身の出現位置：自分からの最小距離
     public float cloneSpawnMaxRadius = 4f; // 分身の出現位置：自分からの最大距離
@@ -123,6 +139,10 @@ public static bool matchEnded = false;
     // 何度も連続ヒットするのを防ぎたいだけなので、「すでに当てた相手の集合」で管理し、
     // 別の相手には引き続き当たるようにする
     private readonly HashSet<SwordBattle> giantSpinHitTargets = new HashSet<SwordBattle>();
+    // ▼【新規追加】巨大回転斬の攻撃判定が有効なのは一回転の間だけ（巨大化・振りかぶり・余韻・縮む間は当たらない）
+    private bool giantSpinHitActive;
+    // 1つの物理ステップで触れた相手をここに貯め、次のFixedUpdateで近い順に当てる（2人目以降の減衰の順番を決めるため）
+    private readonly List<(SwordBattle target, Collider2D part)> pendingGiantSpinHits = new List<(SwordBattle target, Collider2D part)>();
     // ▼【調査用】必殺技ボタンがでっぱなしになる不具合調査用の、一度きりログ発火フラグ
     private bool loggedUpdateStall = false;
     private bool loggedButtonGuardStall = false;
@@ -247,7 +267,7 @@ public static bool matchEnded = false;
     {
         if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
         string action = PoseSword.Multiplayer.BattlePolicies.PrimaryAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, isDashing, right, MultiplayerOwner.IsSuppressed(PlayerId));
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing, right, MultiplayerOwner.IsSuppressed(PlayerId) || IsStaggered);
         switch (action)
         {
             case "KomaDash": StartCoroutine(DashRoutine()); break;
@@ -265,7 +285,7 @@ public static bool matchEnded = false;
         // 閾値はUIと同じ ultimateSp を渡す。ここを固定値にすると、ボス(maxSp=200)で
         // 「ボタンは出ていないのに撃てる」ような食い違いが起きる。
         string action = PoseSword.Multiplayer.BattlePolicies.UltimateAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, isDashing, MultiplayerOwner.IsSuppressed(PlayerId), ultimateSp);
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing, MultiplayerOwner.IsSuppressed(PlayerId) || IsStaggered, ultimateSp);
         if (action == null) return;
         StartCoroutine(UltimateRoutine());
     }
@@ -319,7 +339,8 @@ public static bool matchEnded = false;
     IEnumerator JudgmentSweepRoutine(float seconds, float scale)
     {
         Vector3 originalScale = transform.localScale;
-        if (scale > 0f) transform.localScale = originalScale * scale;
+        // 奥行き(z)は拡大しない（柄がカメラの後ろに回り込んで消えるため。ScaledFlat参照）
+        if (scale > 0f) transform.localScale = ScaledFlat(originalScale, scale);
         yield return new WaitForSecondsRealtime(seconds);
         transform.localScale = originalScale;
         if (rb != null) rb.angularVelocity *= 0.25f;   // 回したままにせず、振り抜いたところで収める
@@ -467,6 +488,9 @@ public static bool matchEnded = false;
         if (hp > 0) return;
         isDead = true; isDashing = false; currentDashType = 0;
         RestoreTeammateCollisions();
+        SetHiltGlow(false);
+        giantSpinHitActive = false;
+        pendingGiantSpinHits.Clear();
         StopUltimateAura();
         // ▼【修正】撃破に値する一撃(damage>=20等)は直前のPlayClientDamageEffectでHitStopRoutineを
         // 開始しており、Time.timeScaleを0.05にした直後にここのStopAllCoroutines()が
@@ -519,13 +543,128 @@ public static bool matchEnded = false;
     }
 
     // 技の種別に対応する刀身の色。制圧の減光でも「本来の色」を引くのに使う。
+    // ▼【新規追加】巨大回転斬の「届く範囲の円」と、その後の「ふらつき」の点滅（どちらも仮の見た目）。
+    // 技番号と大きさはゲストにも同期されているので、ホストもゲストもそれぞれの画面でこれを見て描く
+    void LateUpdate()
+    {
+        UpdateGiantSpinReach();
+        UpdateStaggerBlink();
+    }
+
+    const int ReachSegments = 64;
+    LineRenderer giantReachLine;
+    PolygonCollider2D[] bladeShapes;
+    int reachSeenDashType;
+    float giantSpinBaseScaleX;
+
+    void UpdateGiantSpinReach()
+    {
+        // 巨大回転斬が始まった瞬間（カットインの前で、まだ元の大きさ）の大きさを、巨大化したかどうかの基準にする
+        if (currentDashType == 4 && reachSeenDashType != 4)
+        {
+            giantSpinBaseScaleX = transform.localScale.x;
+            bladeShapes = GetComponentsInChildren<PolygonCollider2D>(true);
+        }
+        reachSeenDashType = currentDashType;
+
+        bool show = IsAlive && currentDashType == 4 && giantSpinBaseScaleX > 0f && transform.localScale.x > giantSpinBaseScaleX * 1.05f;
+        if (!show)
+        {
+            if (giantReachLine != null) giantReachLine.enabled = false;
+            return;
+        }
+        if (giantReachLine == null) giantReachLine = CreateReachLine();
+
+        float radius = CurrentReach();
+        Vector3 centre = transform.position;
+        for (int i = 0; i < ReachSegments; i++)
+        {
+            float a = i * Mathf.PI * 2f / ReachSegments;
+            giantReachLine.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
+        }
+        giantReachLine.startWidth = giantReachLine.endWidth = radius * 0.015f;
+        giantReachLine.enabled = true;
+    }
+
+    // 剣の中心から一番遠い刀身の点までの距離（回転しても変わらない、今の大きさでの届く範囲）
+    float CurrentReach()
+    {
+        Vector2 centre = transform.position;
+        float reach = 0f;
+        if (bladeShapes != null)
+            foreach (var shape in bladeShapes)
+            {
+                if (shape == null) continue;
+                for (int p = 0; p < shape.pathCount; p++)
+                    foreach (var point in shape.GetPath(p))
+                        reach = Mathf.Max(reach, ((Vector2)shape.transform.TransformPoint(point + shape.offset) - centre).magnitude);
+            }
+        if (reach <= 0f && spriteRenderer != null) reach = spriteRenderer.bounds.extents.magnitude;
+        return reach;
+    }
+
+    LineRenderer CreateReachLine()
+    {
+        // 剣の子にすると大きさに引きずられるので、独立したオブジェクトにして OnDestroy で片付ける
+        var line = new GameObject("GiantSpinReach_" + name).AddComponent<LineRenderer>();
+        line.useWorldSpace = true;
+        line.loop = true;
+        line.positionCount = ReachSegments;
+        var shader = Shader.Find("Sprites/Default");
+        if (shader != null) line.material = new Material(shader);
+        Color c = ColorForDashType(4);
+        c.a = .55f;
+        line.startColor = line.endColor = c;
+        if (spriteRenderer != null)
+        {
+            line.sortingLayerID = spriteRenderer.sortingLayerID;
+            line.sortingOrder = spriteRenderer.sortingOrder - 1;
+        }
+        return line;
+    }
+
+    bool staggerBlinking;
+
+    void UpdateStaggerBlink()
+    {
+        if (spriteRenderer == null) return;
+        if (IsStaggered && IsAlive)
+        {
+            var c = spriteRenderer.color;
+            c.a = Mathf.FloorToInt(Time.time / 0.08f) % 2 == 0 ? 1f : .4f;
+            spriteRenderer.color = c;
+            staggerBlinking = true;
+        }
+        else if (staggerBlinking)
+        {
+            staggerBlinking = false;
+            // リスポーン直後の点滅中なら、そちらに任せる
+            if (respawnInvincibleTimer <= 0f)
+            {
+                var c = spriteRenderer.color;
+                c.a = 1f;
+                spriteRenderer.color = c;
+            }
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (giantReachLine != null)
+        {
+            if (giantReachLine.material != null) Destroy(giantReachLine.material);
+            Destroy(giantReachLine.gameObject);
+        }
+    }
+
     public static Color ColorForDashType(int dashType)
     {
         return dashType == 1 ? new Color(1, .5f, .5f) :
             dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) :
             dashType == 4 ? new Color(1f, .3f, .3f) : dashType == 5 ? new Color(.3f, .6f, 1f) :
             dashType == 6 ? new Color(.4f, .95f, .5f) :
-            dashType == SuppressDashType ? new Color(.78f, .45f, 1f) : Color.white;
+            dashType == SuppressDashType ? new Color(.78f, .45f, 1f) :
+            dashType == StaggerDashType ? new Color(.7f, .66f, .66f) : Color.white;
     }
 
     // ▼【新規追加】1vs3：制圧のカットイン。技番号を一瞬だけ立てることで、同期を受け取った側の
@@ -605,6 +744,8 @@ public static bool matchEnded = false;
 
     void FixedUpdate()
     {
+        // 巨大回転斬：前の物理ステップで触れた相手に、近い順で当てる
+        FlushGiantSpinHits();
         trueVelocity = ((Vector2)transform.position - lastPosition) / Time.fixedDeltaTime;
         lastPosition = transform.position;
 
@@ -824,6 +965,7 @@ public static bool matchEnded = false;
         ApplySuppressButtonSkin(false);
         // 突進の途中で剣が片付けられても、味方との当たり判定を切ったままにしない
         RestoreTeammateCollisions();
+        SetHiltGlow(false);
     }
 
     // ▼【新規追加】残機モード：HPパネル内の「あと何本あるか」アイコン列を、渡された残りの剣の
@@ -1412,7 +1554,8 @@ public static bool matchEnded = false;
     public void TryAction(bool clickedRight = true)
     {
         if (MultiplayerOwner != null) { MultiplayerOwner.SubmitLocalInput(clickedRight); return; }
-        if (isDead || matchEnded || isDashing) return;
+        // 巨大回転斬の後のふらつき中は操作を受け付けない
+        if (isDead || matchEnded || isDashing || IsStaggered) return;
 
         string actionName = ""; // ★Webに送る用のアクション名
 
@@ -1455,7 +1598,7 @@ public static bool matchEnded = false;
             else MultiplayerOwner.SubmitLocalUltimate();
             return;
         }
-        if (isDead || matchEnded || isDashing || !isRoundStarted) return;
+        if (isDead || matchEnded || isDashing || IsStaggered || !isRoundStarted) return;
         if (currentSp < UltimateThreshold) return;
 
         StartCoroutine(UltimateRoutine());
@@ -1473,7 +1616,8 @@ public static bool matchEnded = false;
     // ▼【新規追加】通信相手のアクションを「強制発動」させる受信専用関数！
     public void ExecuteRemoteAction(string actionName)
     {
-        if (isDead || matchEnded || isDashing) return;
+        // 巨大回転斬の後のふらつき中は操作を受け付けない
+        if (isDead || matchEnded || isDashing || IsStaggered) return;
 
         Debug.Log($"📡 相手からの通信を受信！ 強制発動: {actionName}");
 
@@ -1667,17 +1811,33 @@ public static bool matchEnded = false;
         currentDashType = 4;
         currentSp = 0f;
         giantSpinHitTargets.Clear();
+        pendingGiantSpinHits.Clear();
+        giantSpinHitActive = false;
+        Color giantColor = ColorForDashType(4);
 
-        if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.3f, 0.3f);
+        if (spriteRenderer != null) spriteRenderer.color = giantColor;
         // カットインが抜けてから巨大化する（以前はカットインの裏で先に6倍になっていた）
-        yield return StartCoroutine(PlayUltimateCutinAndWait("巨大回転斬!!", new Color(1f, 0.3f, 0.3f)));
+        yield return StartCoroutine(PlayUltimateCutinAndWait("巨大回転斬!!", giantColor));
         if (UltimateCancelled) { CancelUltimate(); yield break; }
 
-        Vector3 originalScale = transform.localScale;
-        transform.localScale = originalScale * giantSpinScale;
+        bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
+        float originalGravityScale = 0f;
+        if (controlsPhysics)
+        {
+            // 技の間は床に落ちていかないよう、重力も一時的に切ってその場に留める
+            originalGravityScale = rb.gravityScale;
+            rb.gravityScale = 0f;
+            rb.linearVelocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+        }
 
-        // 壁にも相手の剣にも物理的に引っかからず回転できるよう、回転中は当たり判定をトリガー化する
-        // （ダメージはOnTriggerEnter2D側で判定する）
+        // 1. 柄が光る（技の種類を決めているのは柄なので、技の出どころを柄で見せる）
+        SetHiltGlow(true);
+        yield return StartCoroutine(WaitSkillTime(giantSpinHiltGlowTime));
+        SetHiltGlow(false);
+
+        // 壁にも相手の剣にも物理的に引っかからないよう、大きくなる前から当たり判定をトリガー化する。
+        // ダメージはOnTriggerEnter2D/Stay2D側で、一回転の間だけ判定する
         Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
         bool[] originalTriggerStates = new bool[myColliders.Length];
         for (int i = 0; i < myColliders.Length; i++)
@@ -1686,15 +1846,22 @@ public static bool matchEnded = false;
             myColliders[i].isTrigger = true;
         }
 
-        bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
-        float originalGravityScale = 0f;
-
-        if (controlsPhysics)
+        // 2. 3段階で巨大化する（各段の最後で少し行き過ぎてから戻る）。届く範囲の円は UpdateGiantSpinReach が出す
+        Vector3 originalScale = transform.localScale;
+        float stepTime = giantSpinGrowTime / 3f;
+        for (int step = 1; step <= 3; step++)
         {
-            // 回転中は床に落ちていかないよう、重力も一時的に切る
-            originalGravityScale = rb.gravityScale;
-            rb.gravityScale = 0f;
-            rb.linearVelocity = Vector2.zero;
+            Vector3 from = transform.localScale;
+            // 奥行き(z)は拡大しない（ScaledFlat参照）
+            Vector3 to = ScaledFlat(originalScale, Mathf.Lerp(1f, giantSpinScale, step / 3f));
+            float elapsed = 0f;
+            while (elapsed < stepTime)
+            {
+                yield return null;
+                if (!SkillClockStopped) elapsed += Time.deltaTime;
+                transform.localScale = Vector3.LerpUnclamped(from, to, EaseOutBack(Mathf.Clamp01(elapsed / stepTime)));
+            }
+            transform.localScale = to;
         }
 
         // 敵がいる方向に振りかぶるように回転方向を決める
@@ -1708,32 +1875,79 @@ public static bool matchEnded = false;
             }
         }
 
+        // 3. 振りかぶり：回る向きと逆に少し引く
+        if (controlsPhysics && giantSpinWindupTime > 0f) rb.angularVelocity = -spinDir * giantSpinWindupAngle / giantSpinWindupTime;
+        yield return StartCoroutine(WaitSkillTime(giantSpinWindupTime));
+
+        // 4. 一回転。攻撃判定があるのはここだけ
         float angularSpeed = giantSpinRotationSpeed * spinDir; // 度/秒
         float duration = 360f / Mathf.Abs(angularSpeed); // ちょうど一回転分の時間
-
-        if (controlsPhysics)
-        {
-            rb.angularVelocity = angularSpeed;
-        }
-
+        if (controlsPhysics) rb.angularVelocity = angularSpeed;
+        giantSpinHitActive = true;
         // 回転中に撃破して止められても、止まっている間は数えないので一回転しきる
         yield return StartCoroutine(WaitSkillTime(duration));
+        giantSpinHitActive = false;
+        if (controlsPhysics) rb.angularVelocity = 0f;
 
-        if (controlsPhysics)
+        // 5. 余韻のあと縮む
+        yield return StartCoroutine(WaitSkillTime(giantSpinLingerTime));
+        Vector3 bigScale = transform.localScale;
+        float shrinkElapsed = 0f;
+        while (shrinkElapsed < giantSpinShrinkTime)
         {
-            rb.angularVelocity = 0f;
-            rb.gravityScale = originalGravityScale;
+            yield return null;
+            if (!SkillClockStopped) shrinkElapsed += Time.deltaTime;
+            float k = Mathf.Clamp01(shrinkElapsed / giantSpinShrinkTime);
+            transform.localScale = Vector3.Lerp(bigScale, originalScale, k * k * (3f - 2f * k));
         }
+        transform.localScale = originalScale;
 
         for (int i = 0; i < myColliders.Length; i++)
         {
             if (myColliders[i] != null) myColliders[i].isTrigger = originalTriggerStates[i];
         }
+        if (controlsPhysics) rb.gravityScale = originalGravityScale;
 
-        transform.localScale = originalScale;
+        // 6. ふらつき：操作を受け付けない（無敵ではない）。外した時は長い
+        bool hitSomeone = giantSpinHitTargets.Count > 0;
         isDashing = false;
-        currentDashType = 0;
-        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+        currentDashType = StaggerDashType;
+        if (spriteRenderer != null) spriteRenderer.color = ColorForDashType(StaggerDashType);
+        yield return new WaitForSeconds(hitSomeone ? giantSpinStaggerOnHit : giantSpinStaggerOnMiss);
+        if (currentDashType == StaggerDashType) currentDashType = 0;
+        if (spriteRenderer != null && IsAlive) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【修正】剣を大きくする時は、x・yだけを拡大して奥行き(z)は元のままにする。
+    // 柄(Handle-A)は刀身より手前に描くため z=-5 に置かれており、zまで6倍にすると z=-30 になって
+    // z=-10 にあるカメラの後ろへ回り込み、映らなくなっていた（巨大化すると柄が消える不具合の原因）
+    static Vector3 ScaledFlat(Vector3 scale, float multiplier)
+    {
+        return new Vector3(scale.x * multiplier, scale.y * multiplier, scale.z);
+    }
+
+    // 少し行き過ぎてから止まる動き（巨大化の各段で使う）
+    static float EaseOutBack(float t)
+    {
+        const float c1 = 1.70158f, c3 = c1 + 1f;
+        return 1f + c3 * Mathf.Pow(t - 1f, 3f) + c1 * Mathf.Pow(t - 1f, 2f);
+    }
+
+    // ▼【新規追加】巨大回転斬の「柄が光る」。柄（Handleタグ）の見た目だけを金色にする。
+    // ゲストの画面には同期しない仮の見た目（演出の本番は別途差し替える）
+    readonly List<(SpriteRenderer renderer, Color color)> glowingHilts = new List<(SpriteRenderer renderer, Color color)>();
+
+    void SetHiltGlow(bool on)
+    {
+        foreach (var hilt in glowingHilts) if (hilt.renderer != null) hilt.renderer.color = hilt.color;
+        glowingHilts.Clear();
+        if (!on) return;
+        foreach (var r in GetComponentsInChildren<SpriteRenderer>())
+        {
+            if (r == spriteRenderer || !r.CompareTag("Handle")) continue;
+            glowingHilts.Add((r, r.color));
+            r.color = new Color(1f, .85f, .3f, r.color.a);
+        }
     }
 
     // ▼【新規追加】剣モード必殺技（hiltType:"2"）：分身を3体出現させ、相手へホーミング突進させる
@@ -1977,11 +2191,16 @@ public static bool matchEnded = false;
     }
 
     // ▼【新規追加】巨大化一回転（currentDashType 4）専用のダメージ判定
-    // （回転中は当たり判定をトリガー化しているためOnCollisionEnter2Dではなくこちらで処理する）
-    void OnTriggerEnter2D(Collider2D other)
+    // （技の間は当たり判定をトリガー化しているためOnCollisionEnter2Dではなくこちらで処理する）。
+    // ▼【修正】攻撃判定は一回転の間だけ。巨大化の途中から重なっていた相手にも当たるよう、Enterに加えてStayでも拾う。
+    // 触れた相手はいったん貯め、次のFixedUpdateで近い順に当てる（2人目以降の減衰の順番を距離で決めるため）
+    void OnTriggerEnter2D(Collider2D other) { QueueGiantSpinHit(other); }
+    void OnTriggerStay2D(Collider2D other) { QueueGiantSpinHit(other); }
+
+    void QueueGiantSpinHit(Collider2D other)
     {
         if (isDead || matchEnded) return;
-        if (currentDashType != 4) return;
+        if (currentDashType != 4 || !giantSpinHitActive) return;
 
         // ▼【重要】トリガー判定はKinematic同士でも発火してしまう。
         // 他の必殺技と同様、実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行い、
@@ -1989,22 +2208,39 @@ public static bool matchEnded = false;
         if (rb == null || rb.bodyType != RigidbodyType2D.Dynamic) return;
 
         SwordBattle target = other.GetComponentInParent<SwordBattle>();
-        if (target == null || target == this) return;
-        // ▼【修正】同じ相手への連続ヒット(回転中に何度もすれ違う)だけを防ぐ。Add()はこの相手が
-        // 初めてなら追加してtrueを返すので、既にヒット済みの相手ならここでreturnして二重ヒットを防止しつつ、
-        // 別の相手(初めて触れた相手)には引き続き当たるようにする
-        if (!giantSpinHitTargets.Add(target)) return;
+        if (target == null || target == this || !target.IsAlive) return;
+        // 味方（1vs3の同じ陣営）はダメージにならないので、減衰の人数にも数えない
+        if (MultiplayerOwner != null && MultiplayerOwner.AreTeammates(PlayerId, target.PlayerId)) return;
+        // 同じ相手には一度だけ当てる（回転中に何度もすれ違っても二重に当てない）。別の相手には引き続き当たる
+        if (giantSpinHitTargets.Contains(target)) return;
+        foreach (var pending in pendingGiantSpinHits) if (pending.target == target) return;
+        // 最初に触れた部分で当たり方を決める（相手の柄なら弱点で2倍）
+        pendingGiantSpinHits.Add((target, other));
+    }
 
-        bool isWeakPoint = other.CompareTag("Handle");
-        int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier);
-        if (isWeakPoint) damage *= 2;
-        damage = Mathf.Max(damage, 1);
+    void FlushGiantSpinHits()
+    {
+        if (pendingGiantSpinHits.Count == 0) return;
+        Vector2 centre = transform.position;
+        pendingGiantSpinHits.Sort((a, b) =>
+            ((Vector2)a.target.transform.position - centre).sqrMagnitude.CompareTo(((Vector2)b.target.transform.position - centre).sqrMagnitude));
+        foreach (var (target, part) in pendingGiantSpinHits)
+        {
+            if (target == null || !target.IsAlive || !giantSpinHitTargets.Add(target)) continue;
+            // 1人目は等倍、2人目・3人目以降は減らす
+            float rate = PoseSword.Multiplayer.BattlePolicies.GiantSpinHitRate(giantSpinHitTargets.Count, giantSpinSecondHitRate, giantSpinLaterHitRate);
+            bool isWeakPoint = part != null && part.CompareTag("Handle");
+            int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier * rate);
+            if (isWeakPoint) damage *= 2;
+            damage = Mathf.Max(damage, 1);
 
-        Vector2 hitPoint = other.ClosestPoint(transform.position);
-        // ▼【修正】target.TakeDamage()を直接呼ぶと、target側がマルチプレイ中(MultiplayerOwner != null)の時に
-        // 何もせず握りつぶしてしまう（HPはQueueHit経由のMatchRulesでのみ確定するため）。
-        // DealDamageTo()を通すことで、オンラインでも正しくダメージが反映されるようにする
-        DealDamageTo(target, damage, hitPoint, true, isWeakPoint, true);
+            Vector2 hitPoint = part != null ? part.ClosestPoint(transform.position) : (Vector2)target.transform.position;
+            // ▼【修正】target.TakeDamage()を直接呼ぶと、target側がマルチプレイ中(MultiplayerOwner != null)の時に
+            // 何もせず握りつぶしてしまう（HPはQueueHit経由のMatchRulesでのみ確定するため）。
+            // DealDamageTo()を通すことで、オンラインでも正しくダメージが反映されるようにする
+            DealDamageTo(target, damage, hitPoint, true, isWeakPoint, true);
+        }
+        pendingGiantSpinHits.Clear();
     }
 
     // ▼【修正】剣モード専用「一直線ジャンプダッシュ」

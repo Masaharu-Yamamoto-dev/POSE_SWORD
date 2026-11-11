@@ -709,6 +709,21 @@ public class MatchRulesTests
         }
     }
 
+    // ===== 巨大回転斬：2人目以降は威力を減らす =====
+
+    [Test]
+    public void GiantSpinHitsLaterTargetsForLess()
+    {
+        Assert.AreEqual(1f, BattlePolicies.GiantSpinHitRate(1, .7f, .5f));
+        Assert.AreEqual(.7f, BattlePolicies.GiantSpinHitRate(2, .7f, .5f));
+        Assert.AreEqual(.5f, BattlePolicies.GiantSpinHitRate(3, .7f, .5f));
+        Assert.AreEqual(.5f, BattlePolicies.GiantSpinHitRate(4, .7f, .5f));
+        // 設定を間違えても、威力が増えたり負になったりしない
+        Assert.AreEqual(1f, BattlePolicies.GiantSpinHitRate(2, 3f, .5f));
+        Assert.AreEqual(0f, BattlePolicies.GiantSpinHitRate(3, .7f, -1f));
+        Assert.AreEqual(1f, BattlePolicies.GiantSpinHitRate(2, float.NaN, .5f));
+    }
+
     // ===== ライフスティール（オレ達アタックの分身）：実際に減らした量の一部を、攻撃した側が回復する =====
 
     [Test]

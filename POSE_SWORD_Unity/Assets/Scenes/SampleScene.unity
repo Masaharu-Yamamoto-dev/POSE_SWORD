@@ -2487,6 +2487,16 @@ MonoBehaviour:
   giantSpinScale: 6
   giantSpinDamageMultiplier: 8
   giantSpinRotationSpeed: 540
+  giantSpinHiltGlowTime: 0.2
+  giantSpinGrowTime: 0.3
+  giantSpinWindupTime: 0.15
+  giantSpinWindupAngle: 30
+  giantSpinLingerTime: 0.2
+  giantSpinShrinkTime: 0.3
+  giantSpinSecondHitRate: 0.7
+  giantSpinLaterHitRate: 0.5
+  giantSpinStaggerOnHit: 0.3
+  giantSpinStaggerOnMiss: 1
   cloneCount: 3
   cloneSpawnMinRadius: 2
   cloneSpawnMaxRadius: 4
@@ -4040,6 +4050,16 @@ MonoBehaviour:
   giantSpinScale: 6
   giantSpinDamageMultiplier: 8
   giantSpinRotationSpeed: 540
+  giantSpinHiltGlowTime: 0.2
+  giantSpinGrowTime: 0.3
+  giantSpinWindupTime: 0.15
+  giantSpinWindupAngle: 30
+  giantSpinLingerTime: 0.2
+  giantSpinShrinkTime: 0.3
+  giantSpinSecondHitRate: 0.7
+  giantSpinLaterHitRate: 0.5
+  giantSpinStaggerOnHit: 0.3
+  giantSpinStaggerOnMiss: 1
   cloneCount: 3
   cloneSpawnMinRadius: 2
   cloneSpawnMaxRadius: 4

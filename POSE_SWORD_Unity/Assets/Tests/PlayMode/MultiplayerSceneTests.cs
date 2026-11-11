@@ -327,20 +327,66 @@ public class MultiplayerSceneTests
         Call("BeginMultiplayer", "{\"matchId\":\"giant-freeze\"}");
         yield return new WaitForSecondsRealtime(3.2f);
         var p1 = Sword("p1"); var p2 = Sword("p2");
-        float baseScale = p1.transform.localScale.x;
 
         FireUltimate(p1, "1"); // 巨大回転斬
-        float giveUp = Time.realtimeSinceStartup + 3f;
-        while (p1.transform.localScale.x < baseScale * 2f && Time.realtimeSinceStartup < giveUp) yield return null;
-        Assert.Greater(p1.transform.localScale.x, baseScale * 2f, "The sword grows once the cutin is over.");
+        float giveUp = Time.realtimeSinceStartup + 4f;
+        while (!Field(p1, "giantSpinHitActive") && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.IsTrue(Field(p1, "giantSpinHitActive"), "The spin starts once the sword has grown and wound up.");
 
         // 回り始めた直後に本体で倒して0.3秒止まる。一回転（360/540=約0.67秒）の時間は、止まっていた分だけ後ろへずれる
         QueueHit(p1, p2, 1000);
         yield return new WaitForSecondsRealtime(.8f);
-        Assert.Greater(p1.transform.localScale.x, baseScale * 2f, "The pause must not eat into the spin.");
+        Assert.IsTrue(Field(p1, "giantSpinHitActive"), "The pause must not eat into the spin.");
 
-        yield return new WaitForSecondsRealtime(.6f);
-        Assert.AreEqual(baseScale, p1.transform.localScale.x, .001f, "The spin still ends after one full turn.");
+        yield return new WaitForSecondsRealtime(.5f);
+        Assert.IsFalse(Field(p1, "giantSpinHitActive"), "The spin still ends after one full turn.");
+    }
+
+    [UnityTest]
+    public IEnumerator GiantSpinGrowsAfterItsCutinHitsOnlyWhileTurningAndStaggersAfterwards()
+    {
+        Call("InitializeMultiplayer", Config("giant-flow", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"giant-flow\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p1 = Sword("p1");
+        float baseScale = p1.transform.localScale.x;
+        float baseDepth = p1.transform.localScale.z;
+
+        FireUltimate(p1, "1");
+        yield return new WaitForSecondsRealtime(.5f);
+        Assert.AreEqual(baseScale, p1.transform.localScale.x, .001f, "Nothing grows while the cutin plays.");
+
+        float giveUp = Time.realtimeSinceStartup + 3f;
+        while (p1.transform.localScale.x < baseScale * 1.05f && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.Greater(p1.transform.localScale.x, baseScale * 1.05f, "The sword grows once the cutin is over.");
+        Assert.IsFalse(Field(p1, "giantSpinHitActive"), "Growing does not hit anyone yet.");
+        // 円は剣の LateUpdate で描くので、大きくなったフレームの終わりまで待ってから見る
+        yield return null;
+        var reach = GameObject.Find("GiantSpinReach_" + p1.name);
+        Assert.IsNotNull(reach, "The reach of the spin is shown while the sword grows.");
+        Assert.IsTrue(reach.GetComponent<LineRenderer>().enabled);
+
+        giveUp = Time.realtimeSinceStartup + 3f;
+        while (!Field(p1, "giantSpinHitActive") && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.IsTrue(Field(p1, "giantSpinHitActive"));
+        Assert.AreEqual(baseScale * 6f, p1.transform.localScale.x, .01f, "The sword is fully grown before it turns.");
+        // 奥行きまで拡大すると、手前(z=-5)に置いた柄がカメラ(z=-10)の後ろへ回り込んで消える
+        Assert.AreEqual(baseDepth, p1.transform.localScale.z, .001f, "Growing must not stretch the depth.");
+        var hilt = p1.GetComponentsInChildren<Transform>().First(t => t.CompareTag("Handle"));
+        Assert.Greater(hilt.position.z, Camera.main.transform.position.z, "The hilt stays in front of the camera.");
+
+        // 回し終えたら縮み、ふらつく。ふらつきは無敵ではない
+        giveUp = Time.realtimeSinceStartup + 3f;
+        while (!Flag(p1, "IsStaggered") && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.IsTrue(Flag(p1, "IsStaggered"));
+        Assert.AreEqual(baseScale, p1.transform.localScale.x, .001f);
+        Assert.IsFalse(Field(p1, "isDashing"), "A staggering sword can be hit.");
+        Assert.IsFalse(reach.GetComponent<LineRenderer>().enabled);
+
+        giveUp = Time.realtimeSinceStartup + 2f;
+        while (Flag(p1, "IsStaggered") && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.IsFalse(Flag(p1, "IsStaggered"), "The stagger wears off.");
     }
 
     // ===== 大回転斬：倍率は×4、当たった物理ステップの間は無敵のまま、味方はすり抜ける =====

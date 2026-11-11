@@ -31,6 +31,18 @@ public class SwordCloneProjectile : MonoBehaviour
         if (multiplayerOwner != null && cloneId != null) multiplayerOwner.UnregisterClone(cloneId);
     }
 
+    // ▼【新規追加】巨大回転斬の剣は技の間だけ当たり判定がトリガーになり、分身がすり抜けていた。
+    // 巨大回転中の相手の剣に触れた分身は、ダメージを与えずに消える（味方の巨大回転斬では消えない）
+    void OnTriggerEnter2D(Collider2D other)
+    {
+        if (hasActed) return;
+        SwordBattle sword = other.GetComponentInParent<SwordBattle>();
+        if (sword == null || sword == owner || sword.currentDashType != 4) return;
+        if (owner != null && owner.MultiplayerOwner != null && owner.MultiplayerOwner.AreTeammates(owner.PlayerId, sword.PlayerId)) return;
+        hasActed = true;
+        Destroy(gameObject);
+    }
+
     void OnCollisionEnter2D(Collision2D collision)
     {
         if (hasActed) return;

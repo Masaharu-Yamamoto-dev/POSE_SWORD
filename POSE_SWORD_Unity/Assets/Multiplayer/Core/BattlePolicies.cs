@@ -48,6 +48,16 @@ namespace PoseSword.Multiplayer
             return sp >= ultimateSp ? "SwordDash" : null;
         }
 
+        // 巨大回転斬で何人目に当たったかに応じた威力の割合。1人目は等倍、2人目は secondRate、
+        // 3人目以降は laterRate。割合は0〜1に収める（範囲外を渡しても威力が増えたり負になったりしない）
+        public static float GiantSpinHitRate(int order, float secondRate, float laterRate)
+        {
+            if (order <= 1) return 1f;
+            float rate = order == 2 ? secondRate : laterRate;
+            if (float.IsNaN(rate) || float.IsInfinity(rate)) return 1f;
+            return Math.Max(0f, Math.Min(1f, rate));
+        }
+
         // ボスの制圧を撃てるか。ゲージ満タン(=maxSp)が条件で、通常必殺技の100とは別枠。
         // 制圧を受けている側は撃ち返せない。
         public static bool CanSuppress(float sp, float maxSp, bool started, bool alive, bool dashing,
