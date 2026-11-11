@@ -343,4 +343,77 @@ public class MultiplayerSceneTests
         Assert.AreEqual(baseScale, p1.transform.localScale.x, .001f, "The spin still ends after one full turn.");
     }
 
+    // ===== 大回転斬：倍率は×4、当たった物理ステップの間は無敵のまま、味方はすり抜ける =====
+
+    private static bool Field(Component sword, string name)
+    {
+        return (bool)sword.GetType().GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).GetValue(sword);
+    }
+
+    private static IEnumerator WaitUntilShooting(Component sword)
+    {
+        float giveUp = Time.realtimeSinceStartup + 3f;
+        while (!Field(sword, "isDashShooting") && Time.realtimeSinceStartup < giveUp) yield return null;
+    }
+
+    // 1vs3：p0がボス、p1〜p3がトリオ。強化はすべて等倍にして、陣営の違いだけを見る
+    private string SoloConfig(string id)
+    {
+        var config = Config(id, true);
+        for (int i = 0; i < 4; i++)
+            config = config.Replace("\"slotIndex\":" + i + ",", "\"slotIndex\":" + i + ",\"team\":" + (i == 0 ? 0 : 1) + ",");
+        string buff = "{\"hpMultiplier\":1,\"attackMultiplier\":1,\"spGainMultiplier\":1,\"scaleMultiplier\":1,\"maxSp\":200," +
+            "\"suppressRadius\":1,\"suppressDuration\":1,\"judgmentPullSeconds\":1,\"judgmentPullForce\":1," +
+            "\"judgmentDamageMultiplier\":1,\"judgmentKnockback\":1,\"judgmentSweepSeconds\":1,\"judgmentSweepSpin\":1,\"judgmentSweepScale\":1}";
+        return config.Replace("\"players\":[", "\"soloMode\":true,\"soloBuff\":" + buff + ",\"players\":[");
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashStaysProtectedUntilItsHitIsResolvedAndDropsItsBonusAfterwards()
+    {
+        Call("InitializeMultiplayer", Config("spin-end", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-end\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        var bonus = p0.GetType().GetField("dashDamageBonus", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        Assert.IsTrue(Field(p0, "isDashShooting"), "The dash has launched.");
+        Assert.AreEqual(4f, (float)bonus.GetValue(p0), .001f, "大回転斬 multiplies its hit by four.");
+
+        // 相手に当たって突進が終わった瞬間を再現する。同じ物理ステップの残りの衝突でダメージを受けないよう、無敵はまだ残る
+        p0.GetType().GetMethod("EndSwordDash").Invoke(p0, null);
+        Assert.IsTrue(Field(p0, "isDashing"), "The sword stays protected for the rest of the physics step.");
+        Assert.IsFalse(Field(p0, "isDashShooting"));
+
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        Assert.IsFalse(Field(p0, "isDashing"));
+        Assert.AreEqual(1f, (float)bonus.GetValue(p0), .001f, "An unused bonus must not carry over to the next ordinary hit.");
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashPassesThroughTeammatesOnlyWhileItLasts()
+    {
+        Call("InitializeMultiplayer", SoloConfig("spin-team"));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-team\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        Assert.IsTrue(Playing);
+        var p0 = Sword("p0"); var p1 = Sword("p1"); var p2 = Sword("p2");
+        var dasher = p1.GetComponentInChildren<Collider2D>();
+
+        FireUltimate(p1, "0");
+        yield return WaitUntilShooting(p1);
+        Assert.IsTrue(Field(p1, "isDashShooting"), "The dash has launched.");
+        Assert.IsTrue(p2.GetComponentsInChildren<Collider2D>().All(c => Physics2D.GetIgnoreCollision(dasher, c)), "Teammates are passed through.");
+        Assert.IsTrue(p0.GetComponentsInChildren<Collider2D>().All(c => !Physics2D.GetIgnoreCollision(dasher, c)), "The opposing side is still hit.");
+
+        float giveUp = Time.realtimeSinceStartup + 4f;
+        while (Field(p1, "isDashing") && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.IsFalse(Field(p1, "isDashing"));
+        Assert.IsTrue(p2.GetComponentsInChildren<Collider2D>().All(c => !Physics2D.GetIgnoreCollision(dasher, c)), "Teammates collide again once the dash is over.");
+    }
+
 }

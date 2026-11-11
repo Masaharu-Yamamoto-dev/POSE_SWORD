@@ -2483,6 +2483,7 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
+  spinDashDamageMultiplier: 4
   giantSpinScale: 6
   giantSpinDamageMultiplier: 8
   giantSpinRotationSpeed: 540
@@ -4035,6 +4036,7 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
+  spinDashDamageMultiplier: 4
   giantSpinScale: 6
   giantSpinDamageMultiplier: 8
   giantSpinRotationSpeed: 540

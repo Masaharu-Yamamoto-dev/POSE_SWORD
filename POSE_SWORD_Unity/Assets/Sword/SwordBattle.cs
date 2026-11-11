@@ -94,6 +94,7 @@ public static bool matchEnded = false;
     public float maxSp = 100f;         // SPの最大値
     public float passiveSpFill = 5f;   // 1秒間に自動で溜まる量
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
+    public float spinDashDamageMultiplier = 4f; // 大回転斬（hiltType:"0"）が相手の剣に当たった時の、通常の衝突ダメージへの倍率（以前は5）
     public float giantSpinScale = 6f; // 巨大化一回転（hiltType:"1"）の拡大率
     public float giantSpinDamageMultiplier = 8f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
     public float giantSpinRotationSpeed = 1080f; // 巨大化一回転の回転速度（度/秒）。小さくするとゆっくり回るようになる（一回転にかかる時間もこれに応じて伸びる）
@@ -465,6 +466,7 @@ public static bool matchEnded = false;
         hp = Mathf.Clamp(health, 0, maxHp); UpdateUI();
         if (hp > 0) return;
         isDead = true; isDashing = false; currentDashType = 0;
+        RestoreTeammateCollisions();
         StopUltimateAura();
         // ▼【修正】撃破に値する一撃(damage>=20等)は直前のPlayClientDamageEffectでHitStopRoutineを
         // 開始しており、Time.timeScaleを0.05にした直後にここのStopAllCoroutines()が
@@ -817,7 +819,12 @@ public static bool matchEnded = false;
 
     // 試合が終わる・撃破される・剣が消される時に、共有ボタンの見た目を元へ戻す。
     // このボタンはシーンに1つしか無く、次の試合へ持ち越されるため。
-    void OnDisable() { ApplySuppressButtonSkin(false); }
+    void OnDisable()
+    {
+        ApplySuppressButtonSkin(false);
+        // 突進の途中で剣が片付けられても、味方との当たり判定を切ったままにしない
+        RestoreTeammateCollisions();
+    }
 
     // ▼【新規追加】残機モード：HPパネル内の「あと何本あるか」アイコン列を、渡された残りの剣の
     // 画像で更新する。今戦っている剣は含まない配列を渡す想定。本数が足りない枠は非表示にする
@@ -2010,11 +2017,13 @@ public static bool matchEnded = false;
         if (spriteRenderer != null) spriteRenderer.color = new Color(0.5f, 1f, 1f); 
 
         currentSp = 0f;
-        dashDamageBonus = 5.0f; 
+        dashDamageBonus = spinDashDamageMultiplier;
 
         // カットインが抜けてから小ジャンプに入る（以前はカットインの裏でもうジャンプが始まっていた）
         yield return StartCoroutine(PlayUltimateCutinAndWait("大回転斬!!", new Color(0.5f, 1f, 1f)));
         if (UltimateCancelled) { CancelUltimate(); dashDamageBonus = 1.0f; yield break; }
+        // 味方（1vs3の同じ陣営）はすり抜ける。戻すのは EndSwordDash
+        IgnoreTeammateCollisions();
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
@@ -2053,25 +2062,28 @@ public static bool matchEnded = false;
         if (isDashing && !SwordController.isKomaMode)
         {
             EndSwordDash();
-            dashDamageBonus = 1.0f; 
         }
     }
 
     // ▼【修正】ダッシュ終了時
     public void EndSwordDash()
     {
-        if (!isDashing) return;
+        // 相手に当たって終わった後、同じ物理ステップでもう一度呼ばれても二重に止めない
+        if (!isDashing || currentDashType != 3) return;
 
-        isDashing = false;
+        // ▼【修正】無敵(isDashing)はここでは外さず、DelayEndDashFlagで物理ステップの後に外す。
+        // 以前はここでisDashing=falseにしていたため、相手に当たったその瞬間に無敵が切れ、
+        // 同じ衝突で相手側のOnCollisionEnter2Dが先に呼ばれなかった場合（ローカル対戦）に反撃をもらっていた
         currentDashType = 0;
-        isDashShooting = false; 
-        
+        isDashShooting = false;
+        RestoreTeammateCollisions();
+
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
-        
+
         // ▼【修正】停止処理もHostのみ
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
-            rb.linearVelocity = Vector2.zero; 
+            rb.linearVelocity = Vector2.zero;
             rb.angularVelocity = 0f;
             if (controller != null) controller.ApplyPhysicsMode();
         }
@@ -2081,8 +2093,36 @@ public static bool matchEnded = false;
     {
         // Unityの物理演算がこのフレームの処理を終えるまで待機する
         yield return new WaitForFixedUpdate();
-        
+
         // 計算が終わって安全になってから、無敵フラグを解除！
         isDashing = false;
+        // 突進の上乗せ倍率もここで外す。当たった衝突のダメージ計算（同じ物理ステップ）までは残しておき、
+        // 衝突の速さが足りずに使われなかった場合でも、次の通常攻撃に持ち越さない
+        dashDamageBonus = 1.0f;
+    }
+
+    // ▼【新規追加】大回転斬の間だけ、味方（1vs3の同じ陣営）の剣との当たり判定を切ってすり抜けさせる。
+    // 以前は味方に当たるとダメージ0のまま突進が終わっていた。切った組を覚えておき、突進の終わりに同じ組だけ戻す
+    readonly List<(Collider2D mine, Collider2D theirs)> ignoredTeammateContacts = new List<(Collider2D mine, Collider2D theirs)>();
+
+    void IgnoreTeammateCollisions()
+    {
+        RestoreTeammateCollisions();
+        if (MultiplayerOwner == null) return;
+        var mine = GetComponentsInChildren<Collider2D>();
+        foreach (var mate in MultiplayerOwner.TeammateSwordsOf(PlayerId))
+            foreach (var theirs in mate.GetComponentsInChildren<Collider2D>())
+                foreach (var own in mine)
+                {
+                    Physics2D.IgnoreCollision(own, theirs, true);
+                    ignoredTeammateContacts.Add((own, theirs));
+                }
+    }
+
+    void RestoreTeammateCollisions()
+    {
+        foreach (var pair in ignoredTeammateContacts)
+            if (pair.mine != null && pair.theirs != null) Physics2D.IgnoreCollision(pair.mine, pair.theirs, false);
+        ignoredTeammateContacts.Clear();
     }
 }
