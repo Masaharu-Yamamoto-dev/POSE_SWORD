@@ -1795,11 +1795,8 @@ public class MultiplayerManager : MonoBehaviour
         sr.color = color;
         sr.sortingLayerID = ownerSr.sortingLayerID;
         sr.sortingOrder = ownerSr.sortingOrder;
-        // ▼【新規追加】Host側(SwordBattle.CloneRushRoutine/LeafShieldRoutine)と同じ正規化。手持ちの剣は
-        // 元画像のピクセルサイズがバラバラなため、装備中の刀身と見た目の横幅が揃うようスケールを合わせる
-        float refWidth = ownerSr.sprite.bounds.size.x;
-        float width = sprite.bounds.size.x;
-        if (refWidth > 0f && width > 0f) obj.transform.localScale = Vector3.one * (refWidth / width);
+        // ▼【修正】Host側(SwordBattle.CloneRushRoutine/LeafShieldRoutine)と同じ大きさにする（SwordBattle.CloneVisualScale）
+        obj.transform.localScale = Vector3.one * SwordBattle.CloneVisualScale(ownerBattle, sprite);
         return obj;
     }
 

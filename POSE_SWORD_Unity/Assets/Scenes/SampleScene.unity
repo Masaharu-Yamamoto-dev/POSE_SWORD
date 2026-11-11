@@ -2504,6 +2504,12 @@ MonoBehaviour:
   cloneDamageMultiplier: 3
   cloneLifeTime: 3
   cloneSpawnStagger: 0.08
+  cloneSpawnFanSpread: 100
+  cloneAimTime: 0.25
+  cloneLaunchInterval: 0.18
+  cloneHomingTurnRate: 120
+  cloneHomingTime: 0.6
+  cloneLifestealRate: 0.2
   leafShieldCount: 5
   leafShieldDuration: 10
   leafShieldOrbitRadius: 5
@@ -4067,6 +4073,12 @@ MonoBehaviour:
   cloneDamageMultiplier: 3
   cloneLifeTime: 3
   cloneSpawnStagger: 0.08
+  cloneSpawnFanSpread: 100
+  cloneAimTime: 0.25
+  cloneLaunchInterval: 0.18
+  cloneHomingTurnRate: 120
+  cloneHomingTime: 0.6
+  cloneLifestealRate: 0.2
   leafShieldCount: 5
   leafShieldDuration: 10
   leafShieldOrbitRadius: 5
@@ -5024,7 +5036,7 @@ MonoBehaviour:
   debugRosterJsonFile: {fileID: 0}
   playerCount: 2
   gameMode: 0
-  localHiltTypeOverride: 
+  localHiltTypeOverride: 2
   ownedSwordCount: 1
   livesMode: 1
   isHost: 1

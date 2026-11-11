@@ -71,6 +71,20 @@ public class DamagePopup : MonoBehaviour
         return popup;
     }
 
+    // ▼【新規追加】ライフスティール（オレ達アタック）で回復した量。緑の「+数字」を、回復した剣の上に
+    // ダメージの数字より少し小さく出し、ダメージの数字と同じく剣についていく
+    public static DamagePopup SpawnHeal(GameObject prefab, SwordBattle healed, int amount, string healedId)
+    {
+        if (prefab == null || healed == null || amount <= 0) return null;
+        var obj = Instantiate(prefab, (Vector2)healed.currentCenterPosition + Vector2.up * 2f, Quaternion.identity);
+        var popup = obj.GetComponent<DamagePopup>();
+        if (popup == null) { Destroy(obj); return null; }
+        var style = new Style { fill = new Color32(120, 235, 140, 255), outline = new Color32(8, 48, 20, 255), outlineWidth = .28f,
+            size = 8f, life = 1.0f, alpha = 1f };
+        popup.Init(amount, false, style, healedId, healed, true, false, false, "+" + amount);
+        return popup;
+    }
+
     // ローカル対戦（TakeDamage）と旧NetworkManager経由の呼び出し用。自分が与えたダメージとして出す
     public void Setup(int damageAmount, bool isCrit)
     {
@@ -106,8 +120,9 @@ public class DamagePopup : MonoBehaviour
         }
     }
 
+    // label：数字の代わりに出す文字（回復の「+数字」など）。省略すると damage をそのまま出す
     void Init(int damage, bool isCrit, Style style, string target, SwordBattle followTarget, bool keepFollowing = false,
-        bool isLethal = false, bool keep = false)
+        bool isLethal = false, bool keep = false, string label = null)
     {
         textMesh = GetComponent<TextMeshPro>();
         if (textMesh == null) { Destroy(gameObject); return; }
@@ -118,7 +133,7 @@ public class DamagePopup : MonoBehaviour
         baseScale = cam != null && cam.orthographic ? Mathf.Clamp(cam.orthographicSize / ReferenceOrthoSize, .6f, 3f) : 1f;
 
         Material source = textMesh.fontSharedMaterial;
-        textMesh.text = isCrit ? damage + "!" : damage.ToString();
+        textMesh.text = label ?? (isCrit ? damage + "!" : damage.ToString());
         textMesh.fontSize = style.size;
         textMesh.color = style.fill;
         textMesh.textWrappingMode = TextWrappingModes.NoWrap;
