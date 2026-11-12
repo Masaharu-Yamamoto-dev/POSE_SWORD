@@ -25,6 +25,15 @@ public class CutinManager : MonoBehaviour
     public AudioClip cutinSound;     // カットイン専用の音
     private AudioSource audioSource; // スピーカー
 
+    // ▼【新規追加】必殺技の中身をカットインが抜けてから始めるための目印。
+    // PlayCutin のたびに番号を進め、その番号のカットインが終わった（または次のカットインに
+    // 置き換えられた）かを IsFinished で聞けるようにする
+    private int playSerial;
+    private bool playing;
+    // このカットインが Time.timeScale を下げている間 true。ヒットストップなどが
+    // 終わり際に等速へ戻す時、カットインのスローまで解いてしまわないように見る
+    public bool IsSlowingTime { get; private set; }
+
     void Awake()
     {
         Instance = this;
@@ -39,7 +48,8 @@ public class CutinManager : MonoBehaviour
     // ▼【新規追加】useSlowMotion：Time.timeScaleを使ったスローモーションを適用するかどうか。
     // マルチプレイ中はホストの物理シミュレーション頻度まで一緒に下がって全員の試合が止まってしまうため、
     // オンライン対戦時はfalseを渡し、演出（画像・テキスト・シェイク・効果音）だけを等速で再生する
-    public void PlayCutin(Sprite sprite, string swordName, string skillName, Color themeColor, Color playerColor, bool useSlowMotion = true)
+    // 戻り値は、このカットインの番号（IsFinished に渡す）
+    public int PlayCutin(Sprite sprite, string swordName, string skillName, Color themeColor, Color playerColor, bool useSlowMotion = true)
     {
         if (swordImage != null)
         {
@@ -65,8 +75,37 @@ public class CutinManager : MonoBehaviour
         // 後始末のコード（6.終了処理）が一切実行されずtimeScaleが遅いまま固まってしまう。
         // 新しいカットインを始める前に、念のため等速へ戻しておく
         StopAllCoroutines();
+        IsSlowingTime = false;
         if (Time.timeScale != 1f && !SwordBattle.matchEnded) Time.timeScale = 1f;
+        playSerial++;
+        playing = true;
         StartCoroutine(PersonaStyleCutinRoutine(useSlowMotion));
+        return playSerial;
+    }
+
+    // 演出の途中で止められた時（シーンの片付けなど）も、待っている必殺技が止まったままにならないようにする
+    void OnDisable()
+    {
+        playing = false;
+        IsSlowingTime = false;
+    }
+
+    // ▼【新規追加】外から再生中のカットインを打ち切る。StopAllCoroutinesを直接呼ぶと
+    // 「スロー中」「再生中」の印が立ったまま残り、ヒットストップ後に等速へ戻らなくなるため、こちらを使う。
+    // Time.timeScaleは呼び出し側で戻す
+    public void StopCutin()
+    {
+        StopAllCoroutines();
+        playing = false;
+        IsSlowingTime = false;
+        if (cutinCanvasGroup != null) cutinCanvasGroup.alpha = 0f;
+    }
+
+    // ▼【新規追加】serial のカットインが終わったか。後から別のカットインに置き換えられた場合も終わった扱いにする
+    // （置き換えた側のカットインを待つと、同時に撃った必殺技がいつまでも始まらなくなるため）
+    public bool IsFinished(int serial)
+    {
+        return serial != playSerial || !playing;
     }
 
     IEnumerator PersonaStyleCutinRoutine(bool useSlowMotion)
@@ -81,7 +120,11 @@ public class CutinManager : MonoBehaviour
         // ▼【修正】ここが決着シーンの一撃でなくても、matchEndedが既にtrue（＝他の対戦で
         // 試合がもう終わっている）ならスローを開始しない。開始してしまうと、このカットインの
         // 終了処理（6.）はmatchEnded中はtimeScaleを戻さない仕様のため、そのままスローで固まってしまう
-        if (useSlowMotion && !SwordBattle.matchEnded) Time.timeScale = timeScaleDuringCutin;
+        if (useSlowMotion && !SwordBattle.matchEnded)
+        {
+            Time.timeScale = timeScaleDuringCutin;
+            IsSlowingTime = true;
+        }
         cutinCanvasGroup.alpha = 1f;
 
         backgroundBar.anchoredPosition = new Vector2(1500f, 500f); 
@@ -153,9 +196,11 @@ public class CutinManager : MonoBehaviour
 
         // 6. 終了処理
         cutinCanvasGroup.alpha = 0f;
+        IsSlowingTime = false;
         if (useSlowMotion && !SwordBattle.matchEnded)
         {
             Time.timeScale = 1f;
         }
+        playing = false;
     }
 }

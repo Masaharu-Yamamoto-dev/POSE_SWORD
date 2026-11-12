@@ -2470,9 +2470,9 @@ MonoBehaviour:
   pointyAngleThreshold: 100
   critThreshold: 3000
   damagePopupPrefab: {fileID: 1265573088081304454, guid: ac1ed211887abce4c909f7a7bfa6e534, type: 3}
-  normalEffectPrehub: {fileID: 0}
+  normalEffectPrehub: {fileID: 4021103657954561960, guid: 5c755f9bc5253ea418e919994537dcc7, type: 3}
   critEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
-  guardEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
+  guardEffectPrefab: {fileID: 4021103657954561960, guid: 5c755f9bc5253ea418e919994537dcc7, type: 3}
   ultimateAuraPrefab: {fileID: 572615855}
   normalHitSound: {fileID: 8300000, guid: 86b0aa7415a27c643886df9c0a811202, type: 3}
   critHitSound: {fileID: 8300000, guid: 7a379e66c22b3de4aa1a4b697e38d3e0, type: 3}
@@ -2483,9 +2483,20 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
+  spinDashDamageMultiplier: 4
   giantSpinScale: 6
   giantSpinDamageMultiplier: 8
   giantSpinRotationSpeed: 540
+  giantSpinHiltGlowTime: 0.2
+  giantSpinGrowTime: 0.3
+  giantSpinWindupTime: 0.15
+  giantSpinWindupAngle: 30
+  giantSpinLingerTime: 0.2
+  giantSpinShrinkTime: 0.3
+  giantSpinSecondHitRate: 0.7
+  giantSpinLaterHitRate: 0.5
+  giantSpinStaggerOnHit: 0.3
+  giantSpinStaggerOnMiss: 1
   cloneCount: 3
   cloneSpawnMinRadius: 2
   cloneSpawnMaxRadius: 4
@@ -2493,16 +2504,32 @@ MonoBehaviour:
   cloneDamageMultiplier: 3
   cloneLifeTime: 3
   cloneSpawnStagger: 0.08
+  cloneSpawnFanSpread: 100
+  cloneAimTime: 0.25
+  cloneLaunchInterval: 0.18
+  cloneHomingTurnRate: 120
+  cloneHomingTime: 0.6
+  cloneLifestealRate: 0.2
   leafShieldCount: 5
   leafShieldDuration: 10
   leafShieldOrbitRadius: 5
   leafShieldRadius: 0.7
   leafShieldOrbitSpeed: 150
-  leafShieldHpRatio: 0.33333334
-  leafShieldReflectMultiplier: 2
+  leafShieldReflectMultiplier: 1
+  leafShieldDurability: 2
+  leafShieldSenseRadius: 8
+  leafShieldMaxOrbitRadius: 12
+  leafShieldReachDepth: 0.5
+  leafShieldChaseOrbitSpeed: 180
+  leafShieldReachTime: 0.15
+  leafShieldRadiusReturnSpeed: 3
+  leafShieldReachStartDelay: 0
+  leafShieldReachHoldTime: 0.4
+  leafShieldDamageTakenRate: 0.5
+  shieldRetaliateInterval: 0.3
+  leafShieldKnockbackRate: 0.3
   isDashing: 0
   isDashShooting: 0
-  activeLeafShieldCount: 0
   respawnInvincibleDuration: 3
   respawnBlinkInterval: 0.12
   currentDashType: 0
@@ -4022,9 +4049,9 @@ MonoBehaviour:
   pointyAngleThreshold: 100
   critThreshold: 3000
   damagePopupPrefab: {fileID: 1265573088081304454, guid: ac1ed211887abce4c909f7a7bfa6e534, type: 3}
-  normalEffectPrehub: {fileID: 0}
+  normalEffectPrehub: {fileID: 4021103657954561960, guid: 5c755f9bc5253ea418e919994537dcc7, type: 3}
   critEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
-  guardEffectPrefab: {fileID: 5880797563141009103, guid: 265d3a5ba69981a4698ceabcedf368b0, type: 3}
+  guardEffectPrefab: {fileID: 4021103657954561960, guid: 5c755f9bc5253ea418e919994537dcc7, type: 3}
   ultimateAuraPrefab: {fileID: 572615855}
   normalHitSound: {fileID: 8300000, guid: 86b0aa7415a27c643886df9c0a811202, type: 3}
   critHitSound: {fileID: 8300000, guid: 7a379e66c22b3de4aa1a4b697e38d3e0, type: 3}
@@ -4035,9 +4062,20 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
+  spinDashDamageMultiplier: 4
   giantSpinScale: 6
   giantSpinDamageMultiplier: 8
   giantSpinRotationSpeed: 540
+  giantSpinHiltGlowTime: 0.2
+  giantSpinGrowTime: 0.3
+  giantSpinWindupTime: 0.15
+  giantSpinWindupAngle: 30
+  giantSpinLingerTime: 0.2
+  giantSpinShrinkTime: 0.3
+  giantSpinSecondHitRate: 0.7
+  giantSpinLaterHitRate: 0.5
+  giantSpinStaggerOnHit: 0.3
+  giantSpinStaggerOnMiss: 1
   cloneCount: 3
   cloneSpawnMinRadius: 2
   cloneSpawnMaxRadius: 4
@@ -4045,16 +4083,32 @@ MonoBehaviour:
   cloneDamageMultiplier: 3
   cloneLifeTime: 3
   cloneSpawnStagger: 0.08
+  cloneSpawnFanSpread: 100
+  cloneAimTime: 0.25
+  cloneLaunchInterval: 0.18
+  cloneHomingTurnRate: 120
+  cloneHomingTime: 0.6
+  cloneLifestealRate: 0.2
   leafShieldCount: 5
   leafShieldDuration: 10
   leafShieldOrbitRadius: 5
   leafShieldRadius: 0.7
   leafShieldOrbitSpeed: 150
-  leafShieldHpRatio: 0.33333334
-  leafShieldReflectMultiplier: 2
+  leafShieldReflectMultiplier: 1
+  leafShieldDurability: 2
+  leafShieldSenseRadius: 8
+  leafShieldMaxOrbitRadius: 12
+  leafShieldReachDepth: 0.5
+  leafShieldChaseOrbitSpeed: 180
+  leafShieldReachTime: 0.15
+  leafShieldRadiusReturnSpeed: 3
+  leafShieldReachStartDelay: 0
+  leafShieldReachHoldTime: 0.4
+  leafShieldDamageTakenRate: 0.5
+  shieldRetaliateInterval: 0.3
+  leafShieldKnockbackRate: 0.3
   isDashing: 0
   isDashShooting: 0
-  activeLeafShieldCount: 0
   respawnInvincibleDuration: 3
   respawnBlinkInterval: 0.12
   currentDashType: 0

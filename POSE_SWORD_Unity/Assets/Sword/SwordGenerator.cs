@@ -250,6 +250,17 @@ public class SwordGenerator : MonoBehaviour
         if (generatedTexture != null) Destroy(generatedTexture);
     }
 
+    // ▼【新規追加】今の刀身の画像の持ち主を呼び出し側に移す（以後このコンポーネントは破棄しない）。
+    // 残機制の抜け殻は壊れた剣の刀身の画像をそのまま使うが、直後に次の剣を生成すると前の画像が破棄されて
+    // 抜け殻の刀身だけが消えてしまうため、抜け殻が引き取って自分が消えるときに破棄する
+    public (Sprite sprite, Texture2D texture) DetachGeneratedAssets()
+    {
+        var assets = (generatedSprite, generatedTexture);
+        generatedSprite = null;
+        generatedTexture = null;
+        return assets;
+    }
+
     // ▼【新規追加】残機モードの分身演出用：base64画像からSpriteだけを単体で生成する。
     // GenerateSwordFromJsonとは独立した用途(装備していない残機の剣の見た目を分身に流用する)のため、
     // どのGameObject/コライダーにも紐付けず、呼び出し側がSpriteRendererへ割り当てて使う

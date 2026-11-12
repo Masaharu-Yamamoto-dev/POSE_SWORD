@@ -1,0 +1,650 @@
+fileFormatVersion: 2
+guid: 8cccb01ba36894a0aa7499a844383016
+TextureImporter:
+  internalIDToNameTable:
+  - first:
+      213: 6928636911473110821
+    second: sumi_touka_0
+  - first:
+      213: -437070896628420743
+    second: sumi_touka_1
+  - first:
+      213: 3719211352351681068
+    second: sumi_touka_2
+  - first:
+      213: -835106313483180170
+    second: sumi_touka_3
+  - first:
+      213: -6338441498095945541
+    second: sumi_touka_4
+  - first:
+      213: 4398152250026789487
+    second: sumi_touka_5
+  - first:
+      213: -2311471251813904669
+    second: sumi_touka_6
+  - first:
+      213: -686299083551680930
+    second: sumi_touka_7
+  - first:
+      213: 8476018240009667110
+    second: sumi_touka_8
+  - first:
+      213: 6730402024379911182
+    second: sumi_touka_9
+  - first:
+      213: 5916704432012614863
+    second: sumi_touka_10
+  - first:
+      213: 2048288901888948287
+    second: sumi_touka_11
+  - first:
+      213: -1457752911801996594
+    second: sumi_touka_12
+  - first:
+      213: -5251998173543611615
+    second: sumi_touka_13
+  - first:
+      213: -5531991819946065306
+    second: sumi_touka_14
+  - first:
+      213: 3175127058157587255
+    second: sumi_touka_15
+  - first:
+      213: 1412972688594920003
+    second: sumi_touka_16
+  - first:
+      213: -5273405502365470377
+    second: sumi_touka_17
+  - first:
+      213: 6550092081139355832
+    second: sumi_touka_18
+  - first:
+      213: -6574305607496370809
+    second: sumi_touka_19
+  externalObjects: {}
+  serializedVersion: 13
+  mipmaps:
+    mipMapMode: 0
+    enableMipMap: 0
+    sRGBTexture: 1
+    linearTexture: 0
+    fadeOut: 0
+    borderMipMap: 0
+    mipMapsPreserveCoverage: 0
+    alphaTestReferenceValue: 0.5
+    mipMapFadeDistanceStart: 1
+    mipMapFadeDistanceEnd: 3
+  bumpmap:
+    convertToNormalMap: 0
+    externalNormalMap: 0
+    heightScale: 0.25
+    normalMapFilter: 0
+    flipGreenChannel: 0
+  isReadable: 0
+  streamingMipmaps: 0
+  streamingMipmapsPriority: 0
+  vTOnly: 0
+  ignoreMipmapLimit: 0
+  grayScaleToAlpha: 0
+  generateCubemap: 6
+  cubemapConvolution: 0
+  seamlessCubemap: 0
+  textureFormat: 1
+  maxTextureSize: 2048
+  textureSettings:
+    serializedVersion: 2
+    filterMode: 1
+    aniso: 1
+    mipBias: 0
+    wrapU: 1
+    wrapV: 1
+    wrapW: 1
+  nPOTScale: 0
+  lightmap: 0
+  compressionQuality: 50
+  spriteMode: 2
+  spriteExtrude: 1
+  spriteMeshType: 1
+  alignment: 0
+  spritePivot: {x: 0.5, y: 0.5}
+  spritePixelsToUnits: 100
+  spriteBorder: {x: 0, y: 0, z: 0, w: 0}
+  spriteGenerateFallbackPhysicsShape: 1
+  alphaUsage: 1
+  alphaIsTransparency: 1
+  spriteTessellationDetail: -1
+  textureType: 8
+  textureShape: 1
+  singleChannelComponent: 0
+  flipbookRows: 1
+  flipbookColumns: 1
+  maxTextureSizeSet: 0
+  compressionQualitySet: 0
+  textureFormatSet: 0
+  ignorePngGamma: 0
+  applyGammaDecoding: 0
+  swizzle: 50462976
+  cookieLightType: 0
+  platformSettings:
+  - serializedVersion: 4
+    buildTarget: DefaultTexturePlatform
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: Standalone
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  - serializedVersion: 4
+    buildTarget: WebGL
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    ignorePlatformSupport: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 0
+  spriteSheet:
+    serializedVersion: 2
+    sprites:
+    - serializedVersion: 2
+      name: sumi_touka_0
+      rect:
+        serializedVersion: 2
+        x: 54
+        y: 80
+        width: 526
+        height: 208
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 52fa30ebf86772060800000000000000
+      internalID: 6928636911473110821
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_1
+      rect:
+        serializedVersion: 2
+        x: 59
+        y: 282
+        width: 8
+        height: 9
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 97f2dc0d5563fe9f0800000000000000
+      internalID: -437070896628420743
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_2
+      rect:
+        serializedVersion: 2
+        x: 109
+        y: 286
+        width: 9
+        height: 9
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: c2aa58d050b4d9330800000000000000
+      internalID: 3719211352351681068
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_3
+      rect:
+        serializedVersion: 2
+        x: 117
+        y: 282
+        width: 8
+        height: 11
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 67726238b3b1964f0800000000000000
+      internalID: -835106313483180170
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_4
+      rect:
+        serializedVersion: 2
+        x: 133
+        y: 282
+        width: 20
+        height: 18
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: bb8756c3a055908a0800000000000000
+      internalID: -6338441498095945541
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_5
+      rect:
+        serializedVersion: 2
+        x: 45
+        y: 226
+        width: 8
+        height: 11
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: f6a8ee24b20690d30800000000000000
+      internalID: 4398152250026789487
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_6
+      rect:
+        serializedVersion: 2
+        x: 56
+        y: 229
+        width: 6
+        height: 6
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 3eeca17a4210cefd0800000000000000
+      internalID: -2311471251813904669
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_7
+      rect:
+        serializedVersion: 2
+        x: 567
+        y: 182
+        width: 14
+        height: 16
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: e56d933ae96c976f0800000000000000
+      internalID: -686299083551680930
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_8
+      rect:
+        serializedVersion: 2
+        x: 580
+        y: 108
+        width: 11
+        height: 12
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 62202817eadd0a570800000000000000
+      internalID: 8476018240009667110
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_9
+      rect:
+        serializedVersion: 2
+        x: 414
+        y: 70
+        width: 9
+        height: 11
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: e0c0cb26bf0376d50800000000000000
+      internalID: 6730402024379911182
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_10
+      rect:
+        serializedVersion: 2
+        x: 450
+        y: 80
+        width: 6
+        height: 6
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: fcc5717355b5c1250800000000000000
+      internalID: 5916704432012614863
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_11
+      rect:
+        serializedVersion: 2
+        x: 496
+        y: 75
+        width: 10
+        height: 9
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: f38377a67ebfc6c10800000000000000
+      internalID: 2048288901888948287
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_12
+      rect:
+        serializedVersion: 2
+        x: 534
+        y: 78
+        width: 13
+        height: 18
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: eca20c1437505cbe0800000000000000
+      internalID: -1457752911801996594
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_13
+      rect:
+        serializedVersion: 2
+        x: 534
+        y: 73
+        width: 10
+        height: 7
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 123cee8cc772d17b0800000000000000
+      internalID: -5251998173543611615
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_14
+      rect:
+        serializedVersion: 2
+        x: 460
+        y: 50
+        width: 13
+        height: 19
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 6628fbfdfba6a33b0800000000000000
+      internalID: -5531991819946065306
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_15
+      rect:
+        serializedVersion: 2
+        x: 478
+        y: 52
+        width: 9
+        height: 11
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 73bc632ac31501c20800000000000000
+      internalID: 3175127058157587255
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_16
+      rect:
+        serializedVersion: 2
+        x: 520
+        y: 58
+        width: 13
+        height: 16
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 342670d8c23eb9310800000000000000
+      internalID: 1412972688594920003
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_17
+      rect:
+        serializedVersion: 2
+        x: 548
+        y: 49
+        width: 30
+        height: 23
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 7517ae2a2a911d6b0800000000000000
+      internalID: -5273405502365470377
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_18
+      rect:
+        serializedVersion: 2
+        x: 471
+        y: 36
+        width: 11
+        height: 11
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 8b0196e3b0a96ea50800000000000000
+      internalID: 6550092081139355832
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: sumi_touka_19
+      rect:
+        serializedVersion: 2
+        x: 506
+        y: 23
+        width: 11
+        height: 23
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 785f154d1ef53c4a0800000000000000
+      internalID: -6574305607496370809
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    outline: []
+    customData: 
+    physicsShape: []
+    bones: []
+    spriteID: 
+    internalID: 0
+    vertices: []
+    indices: 
+    edges: []
+    weights: []
+    secondaryTextures: []
+    spriteCustomMetadata:
+      entries: []
+    nameFileIdTable:
+      sumi_touka_0: 6928636911473110821
+      sumi_touka_1: -437070896628420743
+      sumi_touka_10: 5916704432012614863
+      sumi_touka_11: 2048288901888948287
+      sumi_touka_12: -1457752911801996594
+      sumi_touka_13: -5251998173543611615
+      sumi_touka_14: -5531991819946065306
+      sumi_touka_15: 3175127058157587255
+      sumi_touka_16: 1412972688594920003
+      sumi_touka_17: -5273405502365470377
+      sumi_touka_18: 6550092081139355832
+      sumi_touka_19: -6574305607496370809
+      sumi_touka_2: 3719211352351681068
+      sumi_touka_3: -835106313483180170
+      sumi_touka_4: -6338441498095945541
+      sumi_touka_5: 4398152250026789487
+      sumi_touka_6: -2311471251813904669
+      sumi_touka_7: -686299083551680930
+      sumi_touka_8: 8476018240009667110
+      sumi_touka_9: 6730402024379911182
+  mipmapLimitGroupName: 
+  pSDRemoveMatte: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

@@ -57,6 +57,10 @@ public class SwordBattle : MonoBehaviour
     // 制圧の技番号。既存の1〜6と衝突しない値にして、色分けとカットインの同期にそのまま乗せる
     public const int SuppressDashType = 7;
     public const string SuppressSkillName = "オレ掌握斬!!";
+    // 巨大回転斬の後の「ふらつき」の技番号。技番号の同期に乗せて、ゲストの画面でも点滅させる。
+    // カットインは鳴らさない（TryPlayUltimateCutinの対象外）
+    public const int StaggerDashType = 8;
+    public bool IsStaggered => currentDashType == StaggerDashType;
     // ▼【新規追加】残機モード：HPパネル内に表示する「あと何本あるか」の小さいアイコン列。
     // 今戦っている剣は含めない(残りの手持ちの剣だけ)。MultiplayerManager.WireHudBarが実行時に生成して渡す
     [HideInInspector] public Image[] reserveSwordIcons;
@@ -94,9 +98,22 @@ public static bool matchEnded = false;
     public float maxSp = 100f;         // SPの最大値
     public float passiveSpFill = 5f;   // 1秒間に自動で溜まる量
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
+    public float spinDashDamageMultiplier = 4f; // 大回転斬（hiltType:"0"）が相手の剣に当たった時の、通常の衝突ダメージへの倍率（以前は5）
     public float giantSpinScale = 6f; // 巨大化一回転（hiltType:"1"）の拡大率
     public float giantSpinDamageMultiplier = 8f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
     public float giantSpinRotationSpeed = 1080f; // 巨大化一回転の回転速度（度/秒）。小さくするとゆっくり回るようになる（一回転にかかる時間もこれに応じて伸びる）
+    // ▼【新規追加】巨大回転斬の流れ（カットインの後）：柄が光る → 3段階で巨大化 → 振りかぶり → 一回転（攻撃判定はここだけ）
+    // → 余韻 → 縮む → ふらつき。秒数はゲーム内の時間で、撃破で止められている間は進まない（ふらつきを除く）
+    public float giantSpinHiltGlowTime = 0.2f;   // 柄が光る（技の出どころを見せる）
+    public float giantSpinGrowTime = 0.3f;       // 3段階で巨大化しきるまで
+    public float giantSpinWindupTime = 0.15f;    // 振りかぶり
+    public float giantSpinWindupAngle = 30f;     // 振りかぶりで回転と逆向きに引く角度（度）
+    public float giantSpinLingerTime = 0.2f;     // 一回転した後、大きいまま止まる余韻
+    public float giantSpinShrinkTime = 0.3f;     // 元の大きさに縮むまで
+    public float giantSpinSecondHitRate = 0.7f;  // 2人目に当たった時の威力の割合
+    public float giantSpinLaterHitRate = 0.5f;   // 3人目以降に当たった時の威力の割合
+    public float giantSpinStaggerOnHit = 0.3f;   // 誰かに当てた後のふらつき（操作できない・無敵ではない）
+    public float giantSpinStaggerOnMiss = 1.0f;  // 誰にも当たらなかった後のふらつき
     public int cloneCount = 3; // 分身突進（hiltType:"2"）の分身数
     public float cloneSpawnMinRadius = 2f; // 分身の出現位置：自分からの最小距離
     public float cloneSpawnMaxRadius = 4f; // 分身の出現位置：自分からの最大距離
@@ -104,13 +121,34 @@ public static bool matchEnded = false;
     public float cloneDamageMultiplier = 3f; // 分身1体が命中した時のダメージ倍率（attackへの倍率）
     public float cloneLifeTime = 3f; // 何にも当たらなかった場合に分身が自動的に消えるまでの秒数
     public float cloneSpawnStagger = 0.08f; // 分身が1体ずつ出現する間隔（秒）
+    // ▼【新規追加】出す → 構える → 1体ずつ撃つ。撃つ瞬間に相手を狙い直し、撃った後しばらくは弱く追尾する
+    public float cloneSpawnFanSpread = 100f;   // 分身を並べる扇の広さ（度）。相手と反対側（自分の背後）のやや上を中心にする
+    public float cloneAimTime = 0.25f;         // 出し終えてから、相手に切っ先を向けて構える時間
+    public float cloneLaunchInterval = 0.18f;  // 1体ずつ撃つ間隔
+    public float cloneHomingTurnRate = 120f;   // 追尾で曲がれる速さの上限（度/秒）
+    public float cloneHomingTime = 0.6f;       // 撃ってから追尾する時間。過ぎたらまっすぐ飛ぶ
+    public float cloneLifestealRate = 0.2f; // 分身が相手のHPを実際に減らした量のうち、本体が回復する割合（ライフスティール）
     public int leafShieldCount = 3; // リーフシールド（hiltType:"3"）の展開枚数
     public float leafShieldDuration = 15f; // リーフシールドの持続時間（秒）
     public float leafShieldOrbitRadius = 3.5f; // 本体からの周回半径（＝防御圏の広さ）
     public float leafShieldRadius = 0.7f; // シールド1枚あたりの当たり判定の大きさ
     public float leafShieldOrbitSpeed = 150f; // 周回速度（度/秒）
-    public float leafShieldHpRatio = 1f / 3f; // 各シールドのHP（本体の最大HPに対する割合）
-    public float leafShieldReflectMultiplier = 2f; // シールドが被弾した時、受けたダメージの何倍を相手に返すか
+    public float leafShieldReflectMultiplier = 1f; // 返すダメージの倍率（分身に触れた敵には自分の攻撃力、本体を殴ってきた敵にはその敵の攻撃力に掛ける）
+    // ▼【変更】オレ達シールドは防御寄りに：本体は無敵ではなく受けるダメージが減り、分身は回数で割れる
+    public int leafShieldDurability = 2;            // 分身1枚の耐久（触れられる・本体が被弾するたびに1減り、0で割れる）
+    // ▼ 輪の広がり方：普段は leafShieldOrbitRadius。一番近い敵が「感知射程」に入ったら広げ始め、広げた後は「実射程」まで追いかける。
+    // 始める距離（感知射程）とやめる距離（実射程）に差があるので、境目を敵が通っても広がったり戻ったりを繰り返さない
+    public float leafShieldSenseRadius = 8f;        // 感知射程：一番近い敵がここまで入ったら広げ始める
+    public float leafShieldMaxOrbitRadius = 12f;    // 実射程：広げた後は、敵がここまで離れても追いかける（輪の上限）
+    public float leafShieldReachDepth = .5f;        // 輪を「敵の一番近い点」よりこれだけ外に合わせ、分身が敵の体に食い込む位置を通るようにする
+    public float leafShieldChaseOrbitSpeed = 180f;  // 敵を追っている間の回る速さ（度/秒）。普段は leafShieldOrbitSpeed。敵の方向を通る回数を増やす
+    public float leafShieldReachTime = .15f;        // 広げる時に、どこまで広げてもほぼ届くまでの時間（着く直前はなめらかに減速）
+    public float leafShieldRadiusReturnSpeed = 3f;  // 輪を普段の半径へ戻す速さ（毎秒）。広げる時よりゆっくり戻して落ち着いて見せる
+    public float leafShieldReachStartDelay = 0f;    // 敵が感知射程にこの秒数いたら広げ始める（0ならすぐ。一瞬かすめただけで広げたくない時に上げる）
+    public float leafShieldReachHoldTime = .4f;     // 実射程から出ても、この秒数は広げたまま待ってから戻す
+    public float leafShieldDamageTakenRate = .5f;   // シールドが出ている間、本体が受けるダメージの割合
+    public float shieldRetaliateInterval = .3f;     // 同じ敵に返すのは、この秒数に1回まで
+    public float leafShieldKnockbackRate = .3f;     // シールドが出ている間、剣同士がぶつかった時に自分が弾かれる強さの割合（鎧で踏みとどまる）
 
     // 突進状態の管理用
 // 突進状態の管理用
@@ -122,17 +160,26 @@ public static bool matchEnded = false;
     // 何度も連続ヒットするのを防ぎたいだけなので、「すでに当てた相手の集合」で管理し、
     // 別の相手には引き続き当たるようにする
     private readonly HashSet<SwordBattle> giantSpinHitTargets = new HashSet<SwordBattle>();
+    // ▼【新規追加】巨大回転斬の攻撃判定が有効なのは一回転の間だけ（巨大化・振りかぶり・余韻・縮む間は当たらない）
+    private bool giantSpinHitActive;
+    // 1つの物理ステップで触れた相手をここに貯め、次のFixedUpdateで近い順に当てる（2人目以降の減衰の順番を決めるため）
+    private readonly List<(SwordBattle target, Collider2D part)> pendingGiantSpinHits = new List<(SwordBattle target, Collider2D part)>();
     // ▼【調査用】必殺技ボタンがでっぱなしになる不具合調査用の、一度きりログ発火フラグ
     private bool loggedUpdateStall = false;
     private bool loggedButtonGuardStall = false;
     private bool wasLocalControlledForButton = false;
 
-    // ▼【新規追加】オレ達シールド(旧リーフシールド)が展開されている間の本体無敵管理。
-    // シールドのCollider2DはisTrigger(=当たっても攻撃側の移動を止めない)なので、これが無いと
-    // シールドで反射ダメージを受けた直後にそのまま本体まで刺さって、本体側もダメージを受けてしまう。
-    // 展開中の枚(GameObject)の数をここで数え、1枚でも残っていれば本体への通常ダメージを無効化する
-    [HideInInspector] public int activeLeafShieldCount = 0;
-    public bool HasActiveLeafShield => activeLeafShieldCount > 0;
+    // ▼【変更】オレ達シールドが展開されている間の本体の守り。以前は1枚でも残っていれば本体が完全無敵だったが、
+    // 受けるダメージを減らす（leafShieldDamageTakenRate）だけにし、柄も弱点にならないようにした
+    readonly List<LeafShieldOrb> activeShieldOrbs = new List<LeafShieldOrb>();
+    public bool HasActiveLeafShield => activeShieldOrbs.Count > 0;
+    public void RegisterShieldOrb(LeafShieldOrb orb) { if (orb != null && !activeShieldOrbs.Contains(orb)) activeShieldOrbs.Add(orb); }
+    public void UnregisterShieldOrb(LeafShieldOrb orb) { activeShieldOrbs.Remove(orb); }
+    // 今の輪の半径。分身(LeafShieldOrb)はこれを見て回る
+    float leafShieldRadiusNow = -1f;
+    public float LeafShieldOrbitRadiusNow => leafShieldRadiusNow > 0f ? leafShieldRadiusNow : leafShieldOrbitRadius;
+    // 今の回る速さ（度/秒）。敵を追って輪を広げている間は速く回し、敵の方向を通る回数を増やす
+    public float LeafShieldOrbitSpeedNow => shieldReaching ? leafShieldChaseOrbitSpeed : leafShieldOrbitSpeed;
 
     // ▼【新規追加】残機モードでリスポーン(次の剣に持ち替え)した直後の無敵時間。
     // 無敵中はスプライトを点滅させて、見た目でも無敵中だと分かるようにする
@@ -246,7 +293,7 @@ public static bool matchEnded = false;
     {
         if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
         string action = PoseSword.Multiplayer.BattlePolicies.PrimaryAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, isDashing, right, MultiplayerOwner.IsSuppressed(PlayerId));
+            MultiplayerOwner.IsPlaying, IsAlive, InputBlockedBySkill, right, MultiplayerOwner.IsSuppressed(PlayerId) || IsStaggered);
         switch (action)
         {
             case "KomaDash": StartCoroutine(DashRoutine()); break;
@@ -264,7 +311,7 @@ public static bool matchEnded = false;
         // 閾値はUIと同じ ultimateSp を渡す。ここを固定値にすると、ボス(maxSp=200)で
         // 「ボタンは出ていないのに撃てる」ような食い違いが起きる。
         string action = PoseSword.Multiplayer.BattlePolicies.UltimateAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, isDashing, MultiplayerOwner.IsSuppressed(PlayerId), ultimateSp);
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing, MultiplayerOwner.IsSuppressed(PlayerId) || IsStaggered, ultimateSp);
         if (action == null) return;
         StartCoroutine(UltimateRoutine());
     }
@@ -318,35 +365,160 @@ public static bool matchEnded = false;
     IEnumerator JudgmentSweepRoutine(float seconds, float scale)
     {
         Vector3 originalScale = transform.localScale;
-        if (scale > 0f) transform.localScale = originalScale * scale;
+        // 奥行き(z)は拡大しない（柄がカメラの後ろに回り込んで消えるため。ScaledFlat参照）
+        if (scale > 0f) transform.localScale = ScaledFlat(originalScale, scale);
         yield return new WaitForSecondsRealtime(seconds);
         transform.localScale = originalScale;
         if (rb != null) rb.angularVelocity *= 0.25f;   // 回したままにせず、振り抜いたところで収める
     }
 
     // ▼【新規追加】剣本体以外（分身・リーフシールドなど）からも、TakeDamage/QueueHitへの正しい経路で
-    // ダメージを与えられるようにする共通口。ローカルではTakeDamageへ、オンラインではHost権威のQueueHitへ回す
-    public void DealDamageTo(SwordBattle target, int damage, Vector2 hitPoint, bool isCrit = false, bool isWeakPoint = false)
+    // ダメージを与えられるようにする共通口。ローカルではTakeDamageへ、オンラインではHost権威のQueueHitへ回す。
+    // byBody：剣の本体で当てたか（巨大回転斬は本体、分身・リーフシールドは本体ではない）
+    // lifestealRate：相手のHPを実際に減らした量のうち、自分が回復する割合（0〜1。オレ達アタックの分身が渡す）。
+    // オンラインではMatchRulesがダメージを確定した後に回復させ、ローカルではここで減った量を見て回復する
+    public void DealDamageTo(SwordBattle target, int damage, Vector2 hitPoint, bool isCrit = false, bool isWeakPoint = false, bool byBody = false,
+        float lifestealRate = 0f)
     {
         if (target == null || target == this || !target.IsAlive) return;
-        if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, isCrit || isWeakPoint);
-        else target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
+        if (MultiplayerOwner != null)
+        {
+            MultiplayerOwner.QueueHit(this, target, damage, hitPoint, isCrit || isWeakPoint, byBody, lifestealRate);
+            return;
+        }
+        int hpBefore = target.hp;
+        target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint, this, byBody);
+        int dealt = Mathf.Max(0, hpBefore - target.hp);
+        // 端数はMatchRulesと同じく四捨五入（0.5は切り上げ）
+        if (lifestealRate > 0f && dealt > 0) HealLocally((int)System.Math.Round(dealt * (double)Mathf.Clamp01(lifestealRate), System.MidpointRounding.AwayFromZero));
     }
 
-    // ▼【新規追加】残機モード：現在の剣が破壊された際、「倒された」状態だけを解除して次の剣に持ち替えさせる。
+    // ▼【新規追加】ローカル対戦のライフスティール。今の剣の最大HPを超えない
+    void HealLocally(int amount)
+    {
+        if (amount <= 0 || isDead) return;
+        int healed = Mathf.Min(amount, maxHp - hp);
+        if (healed <= 0) return;
+        hp += healed;
+        UpdateUI();
+        ShowHealPopup(healed);
+    }
+
+    void ShowHealPopup(int amount)
+    {
+        if (damagePopupPrefab != null) DamagePopup.SpawnHeal(damagePopupPrefab, this, amount, PlayerId);
+    }
+
+    // ▼【新規追加】オンライン対戦のダメージ1件ぶんの見た目（当たった場所の火花とダメージ数字）。
+    // HostとゲストのどちらもMultiplayerManagerのダメージ記録から呼ぶ。音・ヒットストップ・揺れは
+    // これまでどおりPlayClientDamageEffect（HPの減り）側で鳴らす
+    // persist：決着の一撃。数字と撃破演出の印を消さずに残す。出した数字を返す（決着のカメラが寄る先に使う）
+    public DamagePopup PlayHitVisual(Vector2 point, int damage, bool isCrit, bool lethal, bool persist, DamagePopup.Relation relation, Color attackerColor)
+    {
+        // 撃破の一撃は専用のヒットエフェクト（DefeatEffects）を出す。用意できなかった時は、
+        // 通常かクリティカルかに関わらず一番大きいヒットエフェクト（クリティカルの物）を出す
+        // ほかのヒットエフェクトと同じく、やられた剣より手前・撃破の数字と墨の印より後ろに出す
+        bool killHitPlayed = lethal && DefeatEffects.Current.PlayKillHit(point, DefeatGhost.HitEffectSortingOrder);
+        ParticleSystem effect = isCrit || lethal ? critEffectPrefab : normalEffectPrehub;
+        if (effect != null && !killHitPlayed)
+        {
+            // ダメージのヒットエフェクトは、手前に出したやられた剣より、さらに手前に出す
+            var spawned = Instantiate(effect, point, Quaternion.identity);
+            foreach (var r in spawned.GetComponentsInChildren<ParticleSystemRenderer>(true))
+                r.sortingOrder = DefeatGhost.HitEffectSortingOrder + r.sortingOrder;
+        }
+        if (damagePopupPrefab == null) return null;
+        return DamagePopup.Spawn(damagePopupPrefab, point, this, damage, isCrit, lethal, relation, attackerColor, PlayerId, persist);
+    }
+
+    // ▼【新規追加】撃破の見た目（オンライン対戦）。剣（刀身と柄）を撃破の見た目に変え、吹き飛んでから少しして
+    // 薄れながら消す。見た目そのもの（標準は墨）は DefeatEffects が担当し、ここはタイミングと後始末だけを持つ。
+    // 消え切るまではカメラの画角に含める。決着の時は FinishMultiplayer が StopAllCoroutines するので、消えずに残る
+    // 流れ：やられた瞬間に震え（デュクシ）→ とどめの印（墨の帯→一閃→飛沫）を書き終えて余韻が過ぎるまで、元の見た目のまま
+    // その場で止まる → 色が抜けて跳ね上がる → 少しして薄れながら消える。当たり判定はやられた時点で消えている。
+    // 止める・跳ね上げるのは物理を持つホストだけで、ゲストは位置の同期で同じ動きになる
+    bool defeatedSortingRaised;
+
+    void BeginDefeatVisual()
+    {
+        var renderers = GetComponentsInChildren<SpriteRenderer>();
+        // やられた剣は、撃破した側の剣に隠れないよう手前に出す（ヒットエフェクト・数字・墨よりは奥）
+        if (!defeatedSortingRaised)
+        {
+            defeatedSortingRaised = true;
+            foreach (var r in renderers) r.sortingOrder += DefeatGhost.DefeatedSortingOffset;
+        }
+        DefeatJitter.Play(gameObject, renderers);
+        if (MultiplayerOwner != null) MultiplayerOwner.AddCameraTarget(transform);
+        if (rb != null) { rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0f; rb.gravityScale = 0f; }
+        StartCoroutine(VanishRoutine(renderers));
+    }
+
+    IEnumerator VanishRoutine(SpriteRenderer[] renderers)
+    {
+        yield return new WaitForSeconds(DefeatEffects.Current.KillMarkDuration);
+        // 跳ね上がる瞬間に、倒された見た目（色が抜ける）にする
+        DefeatEffects.Current.ApplyDefeatedLook(renderers);
+        // 吹き飛ばす：質量に関係なく同じ速さで跳ね上げ、回転は控えめに（抜け殻 DefeatGhost も同じ値）
+        if (rb != null && (MultiplayerOwner == null || MultiplayerOwner.IsHost))
+        {
+            rb.gravityScale = DefeatGhost.GravityScale;
+            rb.linearVelocity = new Vector2(Random.Range(-DefeatGhost.KnockSide, DefeatGhost.KnockSide), DefeatGhost.KnockUp);
+            rb.angularVelocity = Random.value < .5f ? -DefeatGhost.Spin : DefeatGhost.Spin;
+        }
+        yield return new WaitForSeconds(DefeatGhost.VanishDelay);
+        var bounds = new Bounds(transform.position, Vector3.zero);
+        foreach (var r in renderers) if (r != null) bounds.Encapsulate(r.bounds);
+        DefeatEffects.Current.PlayVanish(bounds.center, 1f);
+        Vector3 start = transform.localScale;
+        var startAlpha = new float[renderers.Length];
+        for (int i = 0; i < renderers.Length; i++) startAlpha[i] = renderers[i] != null ? renderers[i].color.a : 0f;
+        float t = 0f;
+        while (t < DefeatGhost.VanishTime)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / DefeatGhost.VanishTime);
+            transform.localScale = new Vector3(start.x * (1f + .12f * k), start.y * (1f + .12f * k), start.z);
+            for (int i = 0; i < renderers.Length; i++)
+                if (renderers[i] != null) { var c = renderers[i].color; c.a = startAlpha[i] * (1f - k); renderers[i].color = c; }
+            DefeatEffects.Current.UpdateVanish(renderers, k);
+            yield return null;
+        }
+        foreach (var r in renderers) if (r != null) r.enabled = false;
+        DefeatEffects.Current.UpdateVanish(renderers, 1f);
+        if (MultiplayerOwner != null) MultiplayerOwner.RemoveCameraTarget(transform);
+    }
+
+    // ▼【新規追加】残機制で剣が1本壊れたとき、次に使うはずだった残機アイコンを墨の線で消してから、並びを更新する
+    public void CrossOutReserveIcon(System.Action updateIcons)
+    {
+        var icon = reserveSwordIcons != null && reserveSwordIcons.Length > 0 ? reserveSwordIcons[0] : null;
+        InkCrossOut.Play(icon, updateIcons);
+    }
+
+    // ▼【新規追加】残機モード：現在の剣が破壊され、待ち時間が明けた時に、「倒された」状態だけを解除して次の剣に持ち替えさせる。
+    // 壊れた剣は待っている間に撃破と同じやられ演出（ApplyMultiplayerHealth→BeginDefeatVisual）を済ませている。
     // ステータス(hp/maxHp/attack/hiltType)と見た目の刀身自体はMultiplayerManager側がこの直後に
     // SwordGenerator.GenerateSwordFromJsonを呼び直すことで更新するので、ここでは死亡時に無効化した
     // 見た目・当たり判定・操作を元に戻すだけでよい(ConfigureMultiplayerの死亡状態リセット部分と同等)
     public void ReviveFromDefeat()
     {
         if (MultiplayerOwner == null) return;
-        isDead = false; isDashing = false; isDashShooting = false;
+        isDead = false; isDashing = false; isDashShooting = false; skillAllowsMovement = false;
         currentDashType = 0; currentSp = 0;
         StopUltimateAura();
         StopAllCoroutines();
         controller.enabled = true;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = true;
-        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+        // 撃破演出で変えた見た目（色・非表示・描画順）を、刀身と柄の両方とも元に戻す。にじみ用の写しは消す
+        foreach (var r in GetComponentsInChildren<SpriteRenderer>(true))
+        {
+            if (r.name.StartsWith(InkDefeatEffect.BleedName)) { Destroy(r.gameObject); continue; }
+            r.enabled = true; r.color = Color.white;
+            if (defeatedSortingRaised) r.sortingOrder -= DefeatGhost.DefeatedSortingOffset;
+        }
+        defeatedSortingRaised = false;
+        if (MultiplayerOwner != null) MultiplayerOwner.RemoveCameraTarget(transform);
         // ▼【修正】Vector3.oneへ決め打ちで戻すと、テンプレート自体が1以外のスケールで作られている場合に
         // 本来の見た目より小さく(または大きく)なってしまっていた。ConfigureMultiplayerで記録した
         // このテンプレート本来のスケールへ戻す
@@ -365,9 +537,17 @@ public static bool matchEnded = false;
             PlayClientDamageEffect(damage, wasCrit);
             if (MultiplayerOwner.IsHost) currentSp = Mathf.Min(maxSp, currentSp + 100f * damage / maxHp * damageSpMultiplier);
         }
+        // ▼【新規追加】ライフスティールでHPが増えた時は、回復した量を出す（ホストもゲストも同じHPの同期から判断する）。
+        // 残機制の持ち替えは、新しい剣を作る時に先にHPが入れ直されるので、ここでは増えた扱いにならない
+        int healed = hp > 0 ? Mathf.Max(0, Mathf.Min(health, maxHp) - hp) : 0;
         hp = Mathf.Clamp(health, 0, maxHp); UpdateUI();
+        if (healed > 0) ShowHealPopup(healed);
         if (hp > 0) return;
-        isDead = true; isDashing = false; currentDashType = 0;
+        isDead = true; isDashing = false; currentDashType = 0; skillAllowsMovement = false;
+        RestoreTeammateCollisions();
+        SetHiltGlow(false);
+        giantSpinHitActive = false;
+        pendingGiantSpinHits.Clear();
         StopUltimateAura();
         // ▼【修正】撃破に値する一撃(damage>=20等)は直前のPlayClientDamageEffectでHitStopRoutineを
         // 開始しており、Time.timeScaleを0.05にした直後にここのStopAllCoroutines()が
@@ -375,22 +555,24 @@ public static bool matchEnded = false;
         // 一度も実行されず、3〜4人戦でまだ試合が終わっていない撃破でもスローのまま固まっていた。
         // 試合自体が終わった場合はMatchEndCinematicが改めてtimeScaleを制御するのでmatchEndedの時は触らない
         StopAllCoroutines();
-        if (!matchEnded) Time.timeScale = 1f;
+        // 必殺技のカットインがスローをかけている最中なら、等速へ戻すのはカットイン側に任せる
+        if (!matchEnded && !CutinSlowingTime) Time.timeScale = 1f;
+        // ▼【新規追加】倒された後はUpdate()が止まり、必殺技ボタンが更新されなくなる。SPが溜まったまま倒されると
+        // 撃てる見た目で固まるので、操作を外す前に一度だけ「撃てない」状態にしておく
+        // （残機制では次の剣が出るまで数秒あるので特に目立つ。次の剣が出ればUpdate()がまた更新する）
+        UpdateSpecialAttackButton();
         controller.enabled = false; controller.isLocalControlled = false;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = false;
-        if (spriteRenderer != null) spriteRenderer.color = new Color(.2f, .2f, .2f);
+        // ▼【変更】灰色にする代わりに撃破演出の見た目にし、少しして消す（刀身だけでなく柄も）
+        BeginDefeatVisual();
         if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
         // ▼【修正】ローカルのDefeatRoutineと同じく、その場で静止させず天高く吹き飛ばして回転させる
         // (以前はrb.simulated=falseで即座に静止させていたため、脱落の派手さがマルチプレイだけ失われていた)。
         // またローカルは脱落後も剣を消さず、倒れたままの姿を残して他の生存者の試合を続けるため、
         // 以前あった0.8秒後に非表示にする処理(HideEliminatedSword)も削除した
-        if (rb != null)
-        {
-            rb.gravityScale = 2f;
-            rb.linearVelocity = Vector2.zero;
-            rb.AddForce(new Vector2(Random.Range(-500f, 500f), 2000f), ForceMode2D.Impulse);
-            rb.AddTorque(5000f, ForceMode2D.Impulse);
-        }
+        // ▼【変更】以前はここで質量に関係なく同じ力で弾いていたため、軽い剣ほど天高く飛び、長い距離を落ちてきて、
+        // 生きている剣と見分けにくかった。今は BeginDefeatVisual がいったんその場に止め、とどめの印を書き終えてから
+        // 質量に関係なく同じ速さで跳ね上げる（VanishRoutine）
     }
 
     // ▼【修正】dashType 4(巨大化一回転)・5(分身突進)・6(リーフシールド発動)の色分けと、
@@ -418,13 +600,162 @@ public static bool matchEnded = false;
     }
 
     // 技の種別に対応する刀身の色。制圧の減光でも「本来の色」を引くのに使う。
+    // ▼【新規追加】巨大回転斬の「届く範囲の円」と、その後の「ふらつき」の点滅（どちらも仮の見た目）。
+    // 技番号と大きさはゲストにも同期されているので、ホストもゲストもそれぞれの画面でこれを見て描く
+    void LateUpdate()
+    {
+        UpdateGiantSpinReach();
+        UpdateStaggerBlink();
+        UpdateShieldRingGuide();
+    }
+
+    // ▼【新規追加】オレ達シールドの輪の大きさを確かめるための、仮の表示（薄い緑の円）。
+    // 分身はホスト側にしかないので、ホスト（とローカル対戦）の画面にだけ出る。演出の本番で差し替えるか消す
+    LineRenderer shieldRingLine;
+
+    void UpdateShieldRingGuide()
+    {
+        bool show = IsAlive && HasActiveLeafShield;
+        if (!show)
+        {
+            if (shieldRingLine != null) shieldRingLine.enabled = false;
+            return;
+        }
+        if (shieldRingLine == null)
+        {
+            shieldRingLine = CreateCircleLine("ShieldRingGuide_" + name, ColorForDashType(6), .35f);
+        }
+        float radius = LeafShieldOrbitRadiusNow;
+        Vector3 centre = transform.position;
+        for (int i = 0; i < ReachSegments; i++)
+        {
+            float a = i * Mathf.PI * 2f / ReachSegments;
+            shieldRingLine.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
+        }
+        shieldRingLine.startWidth = shieldRingLine.endWidth = .05f;
+        shieldRingLine.enabled = true;
+    }
+
+    const int ReachSegments = 64;
+    LineRenderer giantReachLine;
+    PolygonCollider2D[] bladeShapes;
+    int reachSeenDashType;
+    float giantSpinBaseScaleX;
+
+    void UpdateGiantSpinReach()
+    {
+        // 巨大回転斬が始まった瞬間（カットインの前で、まだ元の大きさ）の大きさを、巨大化したかどうかの基準にする
+        if (currentDashType == 4 && reachSeenDashType != 4)
+        {
+            giantSpinBaseScaleX = transform.localScale.x;
+            bladeShapes = GetComponentsInChildren<PolygonCollider2D>(true);
+        }
+        reachSeenDashType = currentDashType;
+
+        bool show = IsAlive && currentDashType == 4 && giantSpinBaseScaleX > 0f && transform.localScale.x > giantSpinBaseScaleX * 1.05f;
+        if (!show)
+        {
+            if (giantReachLine != null) giantReachLine.enabled = false;
+            return;
+        }
+        if (giantReachLine == null) giantReachLine = CreateReachLine();
+
+        float radius = CurrentReach();
+        Vector3 centre = transform.position;
+        for (int i = 0; i < ReachSegments; i++)
+        {
+            float a = i * Mathf.PI * 2f / ReachSegments;
+            giantReachLine.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
+        }
+        giantReachLine.startWidth = giantReachLine.endWidth = radius * 0.015f;
+        giantReachLine.enabled = true;
+    }
+
+    // 剣の中心から一番遠い刀身の点までの距離（回転しても変わらない、今の大きさでの届く範囲）
+    float CurrentReach()
+    {
+        Vector2 centre = transform.position;
+        float reach = 0f;
+        if (bladeShapes != null)
+            foreach (var shape in bladeShapes)
+            {
+                if (shape == null) continue;
+                for (int p = 0; p < shape.pathCount; p++)
+                    foreach (var point in shape.GetPath(p))
+                        reach = Mathf.Max(reach, ((Vector2)shape.transform.TransformPoint(point + shape.offset) - centre).magnitude);
+            }
+        if (reach <= 0f && spriteRenderer != null) reach = spriteRenderer.bounds.extents.magnitude;
+        return reach;
+    }
+
+    LineRenderer CreateReachLine()
+    {
+        return CreateCircleLine("GiantSpinReach_" + name, ColorForDashType(4), .55f);
+    }
+
+    // 円を描く線。剣の子にすると大きさに引きずられるので、独立したオブジェクトにして OnDestroy で片付ける
+    LineRenderer CreateCircleLine(string objectName, Color color, float alpha)
+    {
+        var line = new GameObject(objectName).AddComponent<LineRenderer>();
+        line.useWorldSpace = true;
+        line.loop = true;
+        line.positionCount = ReachSegments;
+        var shader = Shader.Find("Sprites/Default");
+        if (shader != null) line.material = new Material(shader);
+        Color c = color;
+        c.a = alpha;
+        line.startColor = line.endColor = c;
+        if (spriteRenderer != null)
+        {
+            line.sortingLayerID = spriteRenderer.sortingLayerID;
+            line.sortingOrder = spriteRenderer.sortingOrder - 1;
+        }
+        return line;
+    }
+
+    bool staggerBlinking;
+
+    void UpdateStaggerBlink()
+    {
+        if (spriteRenderer == null) return;
+        if (IsStaggered && IsAlive)
+        {
+            var c = spriteRenderer.color;
+            c.a = Mathf.FloorToInt(Time.time / 0.08f) % 2 == 0 ? 1f : .4f;
+            spriteRenderer.color = c;
+            staggerBlinking = true;
+        }
+        else if (staggerBlinking)
+        {
+            staggerBlinking = false;
+            // リスポーン直後の点滅中なら、そちらに任せる
+            if (respawnInvincibleTimer <= 0f)
+            {
+                var c = spriteRenderer.color;
+                c.a = 1f;
+                spriteRenderer.color = c;
+            }
+        }
+    }
+
+    void OnDestroy()
+    {
+        foreach (var line in new[] { giantReachLine, shieldRingLine })
+        {
+            if (line == null) continue;
+            if (line.material != null) Destroy(line.material);
+            Destroy(line.gameObject);
+        }
+    }
+
     public static Color ColorForDashType(int dashType)
     {
         return dashType == 1 ? new Color(1, .5f, .5f) :
             dashType == 2 ? new Color(1, .8f, .2f) : dashType == 3 ? new Color(.5f, 1, 1) :
             dashType == 4 ? new Color(1f, .3f, .3f) : dashType == 5 ? new Color(.3f, .6f, 1f) :
             dashType == 6 ? new Color(.4f, .95f, .5f) :
-            dashType == SuppressDashType ? new Color(.78f, .45f, 1f) : Color.white;
+            dashType == SuppressDashType ? new Color(.78f, .45f, 1f) :
+            dashType == StaggerDashType ? new Color(.7f, .66f, .66f) : Color.white;
     }
 
     // ▼【新規追加】1vs3：制圧のカットイン。技番号を一瞬だけ立てることで、同期を受け取った側の
@@ -504,6 +835,8 @@ public static bool matchEnded = false;
 
     void FixedUpdate()
     {
+        // 巨大回転斬：前の物理ステップで触れた相手に、近い順で当てる
+        FlushGiantSpinHits();
         trueVelocity = ((Vector2)transform.position - lastPosition) / Time.fixedDeltaTime;
         lastPosition = transform.position;
 
@@ -567,6 +900,7 @@ public static bool matchEnded = false;
                 $"currentSp={currentSp}, buttonActive={(specialAttackButton != null ? specialAttackButton.gameObject.activeSelf.ToString() : "no-button")}");
         }
         if (!isRoundStarted || isDead || matchEnded) return;
+        UpdateLeafShieldRadius();
 
         if (MultiplayerOwner == null || MultiplayerOwner.IsHost) currentSp += passiveSpFill * Time.deltaTime;
         currentSp = Mathf.Clamp(currentSp, 0f, maxSp);
@@ -632,7 +966,8 @@ public static bool matchEnded = false;
         wasLocalControlledForButton = true;
         // 制圧を受けている間はどの入力も通らないので、押せるように見せない
         bool suppressed = MultiplayerOwner != null && MultiplayerOwner.IsSuppressed(PlayerId);
-        bool shouldShow = !isDashing && !suppressed && currentSp >= UltimateThreshold;
+        // 倒された剣は撃てない（残機制で次の剣を待っている間も、ボタンを撃てる見た目のまま残さない）
+        bool shouldShow = IsAlive && !isDashing && !suppressed && currentSp >= UltimateThreshold;
         // ▼【新規追加】アイコン付きのボタン(SkillIconView)は、溜めている途中も出したままにして丸ゲージで
         // 溜まり具合を見せる。押せるのは撃てる時だけ。アイコンが無いボタンは従来どおり撃てる時だけ出す
         var iconView = SkillIconViewOfButton();
@@ -717,7 +1052,13 @@ public static bool matchEnded = false;
 
     // 試合が終わる・撃破される・剣が消される時に、共有ボタンの見た目を元へ戻す。
     // このボタンはシーンに1つしか無く、次の試合へ持ち越されるため。
-    void OnDisable() { ApplySuppressButtonSkin(false); }
+    void OnDisable()
+    {
+        ApplySuppressButtonSkin(false);
+        // 突進の途中で剣が片付けられても、味方との当たり判定を切ったままにしない
+        RestoreTeammateCollisions();
+        SetHiltGlow(false);
+    }
 
     // ▼【新規追加】残機モード：HPパネル内の「あと何本あるか」アイコン列を、渡された残りの剣の
     // 画像で更新する。今戦っている剣は含まない配列を渡す想定。本数が足りない枠は非表示にする
@@ -888,7 +1229,7 @@ public static bool matchEnded = false;
                 {
                     Vector2 clashBounce = (transform.position - target.transform.position).normalized;
                     clashBounce.y += 1.0f; // やや上方向に激しく弾く
-                    rb.AddForce(clashBounce * (bounceForce * rb.mass * 1.5f), ForceMode2D.Impulse);
+                    rb.AddForce(clashBounce * (bounceForce * rb.mass * 1.5f * KnockbackScale), ForceMode2D.Impulse);
                 }
                 return; // 鍔迫り合いなのでダメージ計算はせず終了
             }
@@ -901,7 +1242,7 @@ public static bool matchEnded = false;
                     if (!SwordController.isKomaMode) {
                         bounceDir.y += 0.5f; 
                     }
-                    rb.AddForce(bounceDir.normalized * (bounceForce * rb.mass), ForceMode2D.Impulse);
+                    rb.AddForce(bounceDir.normalized * (bounceForce * rb.mass * KnockbackScale), ForceMode2D.Impulse);
                 }
             }
 
@@ -1033,8 +1374,8 @@ public static bool matchEnded = false;
                         isCrit = true;
                     }
 
-                // 相手の柄（弱点）判定
-                    if (targetCollider.CompareTag("Handle"))
+                // 相手の柄（弱点）判定。オレ達シールドが出ている相手は、柄が弱点にならない
+                    if (targetCollider.CompareTag("Handle") && !target.HasActiveLeafShield)
                     {
                         damage *= 2;
                         isWeakPoint = true;
@@ -1042,8 +1383,8 @@ public static bool matchEnded = false;
                 }
                     // ▼変更：TakeDamageの結果（倒したかどうか）を受け取る
                     bool killedTarget = false;
-                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, isCrit || isWeakPoint);
-                    else killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
+                    if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, hitPoint, isCrit || isWeakPoint);
+                    else killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint, this, true);
 
                     // ▼追加：もし自分が勝者になったなら、弾き飛ぶのをキャンセル！
                     if (killedTarget)
@@ -1086,7 +1427,8 @@ public static bool matchEnded = false;
     }
 
     // ▼変更：void から bool に変更
-    public bool TakeDamage(int damage, Vector2 hitPos, bool isCrit, bool isWeakPoint)
+    // attacker：攻撃した剣（分かる時だけ）。byBody：剣の本体で当てたか。オレ達シールドの返しに使う
+    public bool TakeDamage(int damage, Vector2 hitPos, bool isCrit, bool isWeakPoint, SwordBattle attacker = null, bool byBody = true)
     {
         if (MultiplayerOwner != null) return false; // HP is committed once per physics step by MatchRules.
         if (isDead) return false; // 変更
@@ -1097,16 +1439,15 @@ public static bool matchEnded = false;
             // if (parrySound != null) audioSource.PlayOneShot(parrySound);
             return false;
         }
-        if (HasActiveLeafShield)
-        {
-            Debug.Log("🍃 オレ達シールド展開中につき本体無敵！攻撃はシールドの反射に任せる！");
-            return false;
-        }
         if (IsRespawnInvincible)
         {
             Debug.Log("✨ リスポーン直後につき無敵！攻撃を弾いた！");
             return false;
         }
+
+        // ▼【変更】オレ達シールドが出ている間は、受けるダメージを減らす（以前は完全無敵）
+        bool shielded = HasActiveLeafShield;
+        damage = ShieldedDamage(damage);
 
         float damagePercentage = ((float)damage / maxHp) * 100f; 
         currentSp = Mathf.Clamp(currentSp + (damagePercentage * damageSpMultiplier), 0f, maxSp);
@@ -1114,6 +1455,8 @@ public static bool matchEnded = false;
         hp -= damage;
         if (hp < 0) hp = 0;
         UpdateUI();
+        // 本体が被弾したら、分身の耐久を1減らし、本体で殴ってきた相手には返す
+        if (shielded && hp > 0) OnShieldedBodyHit(attacker, hitPos, byBody);
 
         // ▼【新規追加】ダメージ数値をポップアップさせる！
         if (damagePopupPrefab != null && damage > 0)
@@ -1184,7 +1527,9 @@ public static bool matchEnded = false;
         // 開始してからisDead=trueにするため、3〜4人戦で決着がついていない撃破でもここがfalseのままに
         // なり、Time.timeScaleが0.05に固まって戻らなくなっていた。本当に戻すべきでないのはmatchEnded
         // (＝試合全体の決着)の時だけなので、isDeadでの判定はやめる
-        if (!matchEnded)
+        // ▼【修正】必殺技のカットイン中に被弾すると、ここで等速に戻してカットインのスローを途中で解いていた。
+        // カットインがスローをかけている間は、終わりの等速化はカットイン側に任せる
+        if (!matchEnded && !CutinSlowingTime)
         {
             Time.timeScale = 1f;
         }
@@ -1250,19 +1595,22 @@ public static bool matchEnded = false;
         // ここでヒットエフェクトも出さないとマルチプレイでは誰の画面にも斬撃エフェクトが表示されなかった
         // ▼【修正】isCritはQueueHit経由でHostが判定した本物のクリティカル/弱点ヒット情報。
         // 以前はダメージ量(100以上)だけで代用しており、実際のクリティカル判定とズレていた
+        // ▼【修正】オンライン対戦では、火花とダメージ数字はMultiplayerManagerのダメージ記録から
+        // 当たった場所に出す（PlayHitVisual）。ここでは音だけ鳴らす。旧NetworkManager経由の時だけ従来どおり出す
+        bool legacyVisuals = MultiplayerOwner == null;
         if (isCrit || damage >= 100)
         {
             if (critHitSound != null) audioSource.PlayOneShot(critHitSound);
-            if (critEffectPrefab != null) Instantiate(critEffectPrefab, transform.position, Quaternion.identity);
+            if (legacyVisuals && critEffectPrefab != null) Instantiate(critEffectPrefab, transform.position, Quaternion.identity);
         }
         else
         {
             if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
-            if (normalEffectPrehub != null) Instantiate(normalEffectPrehub, transform.position, Quaternion.identity);
+            if (legacyVisuals && normalEffectPrehub != null) Instantiate(normalEffectPrehub, transform.position, Quaternion.identity);
         }
 
-        // ▼ 通信相手の画面にもダメージ数値を出す（ここはそのまま）
-        if (damagePopupPrefab != null && damage > 0)
+        // ▼ 通信相手の画面にもダメージ数値を出す（旧NetworkManager経由の時だけ）
+        if (legacyVisuals && damagePopupPrefab != null && damage > 0)
         {
             Vector3 spawnPos = transform.position + (Vector3)Random.insideUnitCircle * 1.5f;
             GameObject popup = Instantiate(damagePopupPrefab, spawnPos, Quaternion.identity);
@@ -1300,7 +1648,8 @@ public static bool matchEnded = false;
     public void TryAction(bool clickedRight = true)
     {
         if (MultiplayerOwner != null) { MultiplayerOwner.SubmitLocalInput(clickedRight); return; }
-        if (isDead || matchEnded || isDashing) return;
+        // 巨大回転斬の後のふらつき中は操作を受け付けない
+        if (isDead || matchEnded || InputBlockedBySkill || IsStaggered) return;
 
         string actionName = ""; // ★Webに送る用のアクション名
 
@@ -1343,7 +1692,7 @@ public static bool matchEnded = false;
             else MultiplayerOwner.SubmitLocalUltimate();
             return;
         }
-        if (isDead || matchEnded || isDashing || !isRoundStarted) return;
+        if (isDead || matchEnded || isDashing || IsStaggered || !isRoundStarted) return;
         if (currentSp < UltimateThreshold) return;
 
         StartCoroutine(UltimateRoutine());
@@ -1361,7 +1710,8 @@ public static bool matchEnded = false;
     // ▼【新規追加】通信相手のアクションを「強制発動」させる受信専用関数！
     public void ExecuteRemoteAction(string actionName)
     {
-        if (isDead || matchEnded || isDashing) return;
+        // 巨大回転斬の後のふらつき中は操作を受け付けない
+        if (isDead || matchEnded || InputBlockedBySkill || IsStaggered) return;
 
         Debug.Log($"📡 相手からの通信を受信！ 強制発動: {actionName}");
 
@@ -1416,10 +1766,63 @@ public static bool matchEnded = false;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
+    // ▼【新規追加】必殺技のカットインを出し、抜け切るまで待つ。技の中身はこの後に始める
+    // （以前はカットインと同時に始まり、0.05倍のスローの中でカットインの裏で少しずつ進んでいた）。
+    // マルチプレイでもカットイン中は全員の動きを止める演出にする(useSlowMotion常にtrue)。
+    // Host権威のPhysics2D.Simulateが実質停止するため、この間だけは意図的に全員が止まる
+    // (Client側は停止したSYNCデータをそのまま補間するので、こちらでも自然に止まって見える)。
+    // 待つのは実時間。別の剣のカットインに置き換えられたら、その時点で待つのをやめる
+    IEnumerator PlayUltimateCutinAndWait(string skillName, Color themeColor)
+    {
+        if (CutinManager.Instance == null || spriteRenderer == null) yield break;
+        int serial = CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, themeColor, PlayerMainColor, true);
+        // カットインが何かの理由で終わらなかった時に、技が始まらないまま固まらないための上限
+        float giveUpAt = Time.unscaledTime + 3f;
+        while (CutinManager.Instance != null && !CutinManager.Instance.IsFinished(serial) && Time.unscaledTime < giveUpAt)
+            yield return null;
+    }
+
+    // ▼【新規追加】本体で攻撃しない必殺技（オレ達アタック・オレ達シールド）は、カットインが抜けた後なら
+    // 無敵(isDashing)の間でも移動（ジャンプ）できる。大回転斬・巨大回転斬は剣そのものが動いて攻撃するので止めたまま
+    bool skillAllowsMovement;
+    bool InputBlockedBySkill => isDashing && !skillAllowsMovement;
+
+    // カットインを待っている間に倒された・試合が終わった時は、技を始めずに状態だけ戻す
+    bool UltimateCancelled => isDead || matchEnded;
+    void CancelUltimate()
+    {
+        skillAllowsMovement = false;
+        isDashing = false;
+        isDashShooting = false;
+        currentDashType = 0;
+        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【新規追加】必殺技の待ち時間。WaitForSecondsと同じくゲーム内の時間で数えるが、オンライン対戦で
+    // 撃破して短く止められている間（MultiplayerManager.FreezeKiller）は進めない。
+    // 以前は止まっている間も時間が進み、その分だけ技が削れていた（巨大回転斬はほぼ一回転分が消えていた）
+    bool SkillClockStopped => MultiplayerOwner != null && MultiplayerOwner.IsKillerFrozen(PlayerId);
+
+    IEnumerator WaitSkillTime(float seconds)
+    {
+        float elapsed = 0f;
+        while (elapsed < seconds)
+        {
+            yield return null;
+            if (!SkillClockStopped) elapsed += Time.deltaTime;
+        }
+    }
+
+    // カットインが時間をゆっくりにしている最中か。ヒットストップなどの後で等速に戻す時は、
+    // これがtrueなら戻さない（戻すとカットインのスローが途中で解け、技がカットインの裏で進んでしまう）
+    static bool CutinSlowingTime => CutinManager.Instance != null && CutinManager.Instance.IsSlowingTime;
+
     // ▼【新規追加】剣ごとのhiltType（JSON由来）に応じて必殺技の中身を振り分ける
     // 未対応のhiltType（未指定＝"0"を含む）は既存のデフォルト必殺技にフォールバック
     IEnumerator UltimateRoutine()
     {
+        // 前の技の「移動できる」を持ち越さない
+        skillAllowsMovement = false;
         // ▼ 独楽モードと剣モードで必殺技を完全に分けて管理する。
         // hiltType(柄の種類)ごとの技は、モードごとに別々のswitchで振り分ける。
         if (SwordController.isKomaMode)
@@ -1463,17 +1866,11 @@ public static bool matchEnded = false;
 
         Debug.Log($"🌪️ 独楽モード：超必殺【竜巻】発動！ (消費SP: {consumedSp:F0})");
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            // ▼【修正】マルチプレイでも必殺技カットイン中は全員の動きを止める演出にする(useSlowMotion常にtrue)。
-            // Host権威のPhysics2D.Simulateが実質停止するため、この間だけは意図的に両プレイヤーとも止まる
-            // (Client側は停止したSYNCデータをそのまま補間するので、こちらでも自然に止まって見える)
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "竜巻猛突!!", new Color(1f, 0.8f, 0.2f), PlayerMainColor, true);
-        }
-
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.8f, 0.2f);
+        yield return StartCoroutine(PlayUltimateCutinAndWait("竜巻猛突!!", new Color(1f, 0.8f, 0.2f)));
+        if (UltimateCancelled) { CancelUltimate(); yield break; }
 
-        float duration = 0.8f; 
+        float duration = 0.8f;
         float timer = 0f;
 
         while (timer < duration)
@@ -1493,8 +1890,9 @@ public static bool matchEnded = false;
                 Instantiate(guardEffectPrefab, transform.position + (Vector3)Random.insideUnitCircle * 1.5f, Quaternion.identity);
             }
 
-            timer += Time.deltaTime;
-            yield return null; 
+            // 撃破で止められている間は、竜巻の残り時間を減らさない
+            if (!SkillClockStopped) timer += Time.deltaTime;
+            yield return null;
         }
 
         // ▼【修正】ブレーキもHostのみ
@@ -1515,21 +1913,33 @@ public static bool matchEnded = false;
         currentDashType = 4;
         currentSp = 0f;
         giantSpinHitTargets.Clear();
+        pendingGiantSpinHits.Clear();
+        giantSpinHitActive = false;
+        Color giantColor = ColorForDashType(4);
 
-        // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
-        // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
-        if (CutinManager.Instance != null && spriteRenderer != null)
+        if (spriteRenderer != null) spriteRenderer.color = giantColor;
+        // カットインが抜けてから巨大化する（以前はカットインの裏で先に6倍になっていた）
+        yield return StartCoroutine(PlayUltimateCutinAndWait("巨大回転斬!!", giantColor));
+        if (UltimateCancelled) { CancelUltimate(); yield break; }
+
+        bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
+        float originalGravityScale = 0f;
+        if (controlsPhysics)
         {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "巨大回転斬!!", new Color(1f, 0.3f, 0.3f), PlayerMainColor, true);
+            // 技の間は床に落ちていかないよう、重力も一時的に切ってその場に留める
+            originalGravityScale = rb.gravityScale;
+            rb.gravityScale = 0f;
+            rb.linearVelocity = Vector2.zero;
+            rb.angularVelocity = 0f;
         }
 
-        if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.3f, 0.3f);
+        // 1. 柄が光る（技の種類を決めているのは柄なので、技の出どころを柄で見せる）
+        SetHiltGlow(true);
+        yield return StartCoroutine(WaitSkillTime(giantSpinHiltGlowTime));
+        SetHiltGlow(false);
 
-        Vector3 originalScale = transform.localScale;
-        transform.localScale = originalScale * giantSpinScale;
-
-        // 壁にも相手の剣にも物理的に引っかからず回転できるよう、回転中は当たり判定をトリガー化する
-        // （ダメージはOnTriggerEnter2D側で判定する）
+        // 壁にも相手の剣にも物理的に引っかからないよう、大きくなる前から当たり判定をトリガー化する。
+        // ダメージはOnTriggerEnter2D/Stay2D側で、一回転の間だけ判定する
         Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
         bool[] originalTriggerStates = new bool[myColliders.Length];
         for (int i = 0; i < myColliders.Length; i++)
@@ -1538,15 +1948,22 @@ public static bool matchEnded = false;
             myColliders[i].isTrigger = true;
         }
 
-        bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
-        float originalGravityScale = 0f;
-
-        if (controlsPhysics)
+        // 2. 3段階で巨大化する（各段の最後で少し行き過ぎてから戻る）。届く範囲の円は UpdateGiantSpinReach が出す
+        Vector3 originalScale = transform.localScale;
+        float stepTime = giantSpinGrowTime / 3f;
+        for (int step = 1; step <= 3; step++)
         {
-            // 回転中は床に落ちていかないよう、重力も一時的に切る
-            originalGravityScale = rb.gravityScale;
-            rb.gravityScale = 0f;
-            rb.linearVelocity = Vector2.zero;
+            Vector3 from = transform.localScale;
+            // 奥行き(z)は拡大しない（ScaledFlat参照）
+            Vector3 to = ScaledFlat(originalScale, Mathf.Lerp(1f, giantSpinScale, step / 3f));
+            float elapsed = 0f;
+            while (elapsed < stepTime)
+            {
+                yield return null;
+                if (!SkillClockStopped) elapsed += Time.deltaTime;
+                transform.localScale = Vector3.LerpUnclamped(from, to, EaseOutBack(Mathf.Clamp01(elapsed / stepTime)));
+            }
+            transform.localScale = to;
         }
 
         // 敵がいる方向に振りかぶるように回転方向を決める
@@ -1560,31 +1977,79 @@ public static bool matchEnded = false;
             }
         }
 
+        // 3. 振りかぶり：回る向きと逆に少し引く
+        if (controlsPhysics && giantSpinWindupTime > 0f) rb.angularVelocity = -spinDir * giantSpinWindupAngle / giantSpinWindupTime;
+        yield return StartCoroutine(WaitSkillTime(giantSpinWindupTime));
+
+        // 4. 一回転。攻撃判定があるのはここだけ
         float angularSpeed = giantSpinRotationSpeed * spinDir; // 度/秒
         float duration = 360f / Mathf.Abs(angularSpeed); // ちょうど一回転分の時間
+        if (controlsPhysics) rb.angularVelocity = angularSpeed;
+        giantSpinHitActive = true;
+        // 回転中に撃破して止められても、止まっている間は数えないので一回転しきる
+        yield return StartCoroutine(WaitSkillTime(duration));
+        giantSpinHitActive = false;
+        if (controlsPhysics) rb.angularVelocity = 0f;
 
-        if (controlsPhysics)
+        // 5. 余韻のあと縮む
+        yield return StartCoroutine(WaitSkillTime(giantSpinLingerTime));
+        Vector3 bigScale = transform.localScale;
+        float shrinkElapsed = 0f;
+        while (shrinkElapsed < giantSpinShrinkTime)
         {
-            rb.angularVelocity = angularSpeed;
+            yield return null;
+            if (!SkillClockStopped) shrinkElapsed += Time.deltaTime;
+            float k = Mathf.Clamp01(shrinkElapsed / giantSpinShrinkTime);
+            transform.localScale = Vector3.Lerp(bigScale, originalScale, k * k * (3f - 2f * k));
         }
-
-        yield return new WaitForSeconds(duration);
-
-        if (controlsPhysics)
-        {
-            rb.angularVelocity = 0f;
-            rb.gravityScale = originalGravityScale;
-        }
+        transform.localScale = originalScale;
 
         for (int i = 0; i < myColliders.Length; i++)
         {
             if (myColliders[i] != null) myColliders[i].isTrigger = originalTriggerStates[i];
         }
+        if (controlsPhysics) rb.gravityScale = originalGravityScale;
 
-        transform.localScale = originalScale;
+        // 6. ふらつき：操作を受け付けない（無敵ではない）。外した時は長い
+        bool hitSomeone = giantSpinHitTargets.Count > 0;
         isDashing = false;
-        currentDashType = 0;
-        if (spriteRenderer != null) spriteRenderer.color = Color.white;
+        currentDashType = StaggerDashType;
+        if (spriteRenderer != null) spriteRenderer.color = ColorForDashType(StaggerDashType);
+        yield return new WaitForSeconds(hitSomeone ? giantSpinStaggerOnHit : giantSpinStaggerOnMiss);
+        if (currentDashType == StaggerDashType) currentDashType = 0;
+        if (spriteRenderer != null && IsAlive) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【修正】剣を大きくする時は、x・yだけを拡大して奥行き(z)は元のままにする。
+    // 柄(Handle-A)は刀身より手前に描くため z=-5 に置かれており、zまで6倍にすると z=-30 になって
+    // z=-10 にあるカメラの後ろへ回り込み、映らなくなっていた（巨大化すると柄が消える不具合の原因）
+    static Vector3 ScaledFlat(Vector3 scale, float multiplier)
+    {
+        return new Vector3(scale.x * multiplier, scale.y * multiplier, scale.z);
+    }
+
+    // 少し行き過ぎてから止まる動き（巨大化の各段で使う）
+    static float EaseOutBack(float t)
+    {
+        const float c1 = 1.70158f, c3 = c1 + 1f;
+        return 1f + c3 * Mathf.Pow(t - 1f, 3f) + c1 * Mathf.Pow(t - 1f, 2f);
+    }
+
+    // ▼【新規追加】巨大回転斬の「柄が光る」。柄（Handleタグ）の見た目だけを金色にする。
+    // ゲストの画面には同期しない仮の見た目（演出の本番は別途差し替える）
+    readonly List<(SpriteRenderer renderer, Color color)> glowingHilts = new List<(SpriteRenderer renderer, Color color)>();
+
+    void SetHiltGlow(bool on)
+    {
+        foreach (var hilt in glowingHilts) if (hilt.renderer != null) hilt.renderer.color = hilt.color;
+        glowingHilts.Clear();
+        if (!on) return;
+        foreach (var r in GetComponentsInChildren<SpriteRenderer>())
+        {
+            if (r == spriteRenderer || !r.CompareTag("Handle")) continue;
+            glowingHilts.Add((r, r.color));
+            r.color = new Color(1f, .85f, .3f, r.color.a);
+        }
     }
 
     // ▼【新規追加】剣モード必殺技（hiltType:"2"）：分身を3体出現させ、相手へホーミング突進させる
@@ -1596,28 +2061,29 @@ public static bool matchEnded = false;
 
         Color cloneColor = new Color(0.3f, 0.6f, 1f);
 
-        // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
-        // Tornado/SwordDashと同様にローカル/テストモード時だけ再生する
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達アタック!!", cloneColor, PlayerMainColor, true);
-        }
-
         if (spriteRenderer != null) spriteRenderer.color = cloneColor;
+        // カットインが抜けてから分身を出す（以前は1体目がカットインの裏で出て、スローの中を進んでいた）
+        yield return StartCoroutine(PlayUltimateCutinAndWait("オレ達アタック!!", cloneColor));
+        if (UltimateCancelled) { CancelUltimate(); yield break; }
+        skillAllowsMovement = true;
 
         // ▼【重要】実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行う。
         // Client側の見た目再生（Kinematicコピー）では分身は出すが、ダメージは与えない。
         bool isAuthoritative = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
         int cloneDamage = Mathf.Max(Mathf.RoundToInt(attack * cloneDamageMultiplier), 1);
 
-        Vector3 enemyPos = (controller != null && controller.enemyTarget != null)
-            ? controller.enemyTarget.position
-            : transform.position + transform.right;
-
         Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
         List<Collider2D> spawnedColliders = new List<Collider2D>();
+        List<SwordCloneProjectile> clones = new List<SwordCloneProjectile>();
         const float cloneColliderRadius = 0.6f;
-        float sectorSize = 360f / cloneCount; // 各分身の出現方向を等間隔に散らすための区画角度
+
+        // ▼【変更】出す場所：相手と反対側（自分の背後）のやや上を中心にした扇に並べる。
+        // 以前は自分の周り360°に散らしていたため、壁の向こう側に出て、撃った瞬間に壁の裏に当たって消えることがあった
+        Vector2 awayFromEnemy = (Vector2)transform.position - CloneAimPosition();
+        if (awayFromEnemy.sqrMagnitude < .0001f) awayFromEnemy = Vector2.left;
+        Vector2 fanCentre = (awayFromEnemy.normalized + Vector2.up * .8f).normalized;
+        float fanCentreAngle = Mathf.Atan2(fanCentre.y, fanCentre.x) * Mathf.Rad2Deg;
+        float slotWidth = cloneCount > 0 ? cloneSpawnFanSpread / cloneCount : cloneSpawnFanSpread;
 
         for (int i = 0; i < cloneCount; i++)
         {
@@ -1625,11 +2091,12 @@ public static bool matchEnded = false;
             // 残りの分身の生成や末尾の状態リセットが必ず実行されるようにtry/catchで保護する
             try
             {
-                float baseAngle = i * sectorSize;
-                Vector3 spawnPos = FindCloneSpawnPosition(cloneColliderRadius, baseAngle, sectorSize);
+                float slotAngle = fanCentreAngle + (i - (cloneCount - 1) * .5f) * slotWidth;
+                Vector3 spawnPos = FindCloneSpawnPosition(cloneColliderRadius, slotAngle, slotWidth);
 
+                // 本体の位置で生まれ、持ち場（spawnPos）へ飛び出す（SwordCloneProjectile.BeginHold）
                 GameObject cloneObj = new GameObject("SwordClone");
-                cloneObj.transform.position = spawnPos;
+                cloneObj.transform.position = transform.position;
                 cloneObj.transform.rotation = transform.rotation;
 
                 // ▼【新規追加】分身たちに「今使っている自分の剣 + まだ使っていない手持ちの剣」の形を持たせる
@@ -1653,22 +2120,19 @@ public static bool matchEnded = false;
                     sr.color = cloneColor;
                     sr.sortingLayerID = spriteRenderer.sortingLayerID;
                     sr.sortingOrder = spriteRenderer.sortingOrder;
-                    // ▼【新規追加】手持ちの剣は元画像のピクセルサイズがバラバラなため、現在の刀身と
-                    // 見た目の横幅が揃うようスケールを正規化する。当たり判定(cloneColliderRadius)は
-                    // 形状に関わらず固定なので、これをしないと見た目と判定がズレて「当たらない」ように見えていた
-                    float refWidth = spriteRenderer.sprite != null ? spriteRenderer.sprite.bounds.size.x : 0f;
-                    float cloneWidth = cloneSprite != null ? cloneSprite.bounds.size.x : 0f;
-                    if (refWidth > 0f && cloneWidth > 0f) cloneObj.transform.localScale = Vector3.one * (refWidth / cloneWidth);
+                    // ▼【修正】大きさは CloneVisualScale で本体の刀身と同じ太さにそろえる（どの剣を装備していても同じ大きさ）
+                    cloneObj.transform.localScale = Vector3.one * CloneVisualScale(this, cloneSprite);
                 }
 
+                // 当たり判定の大きさは見た目の大きさに関わらず固定（cloneColliderRadius）。拡大縮小の分を打ち消しておく
                 CircleCollider2D cloneCollider = cloneObj.AddComponent<CircleCollider2D>();
-                cloneCollider.radius = cloneColliderRadius;
+                cloneCollider.radius = cloneColliderRadius / Mathf.Max(.0001f, cloneObj.transform.localScale.x);
 
                 Rigidbody2D cloneRb = cloneObj.AddComponent<Rigidbody2D>();
                 cloneRb.gravityScale = 0f;
 
-                Vector2 dirToEnemy = ((Vector2)enemyPos - (Vector2)spawnPos).normalized;
-                cloneRb.linearVelocity = dirToEnemy * cloneDashSpeed;
+                // 出てすぐは飛ばさず、その場で構える（撃ち出すのは下の発射の段）
+                cloneRb.linearVelocity = Vector2.zero;
 
                 // ▼【新規追加】オンライン対戦では、Host権威の分身だけをMultiplayerManagerに登録し、
                 // その位置をSYNCでクライアントへ配信して見た目を再現できるようにする
@@ -1676,6 +2140,8 @@ public static bool matchEnded = false;
 
                 SwordCloneProjectile clone = cloneObj.AddComponent<SwordCloneProjectile>();
                 clone.Setup(this, isAuthoritative, cloneDamage, cloneLifeTime, MultiplayerOwner, cloneId);
+                clone.BeginHold((Vector2)spawnPos - (Vector2)transform.position, i);
+                clones.Add(clone);
 
                 // 自分自身や他の分身とは当たらないようにする
                 foreach (Collider2D myCol in myColliders)
@@ -1706,12 +2172,45 @@ public static bool matchEnded = false;
             // 出現タイミングを1体ずつずらす（最後の1体の後は待たない）
             if (i < cloneCount - 1 && cloneSpawnStagger > 0f)
             {
-                yield return new WaitForSeconds(cloneSpawnStagger);
+                yield return StartCoroutine(WaitSkillTime(cloneSpawnStagger));
             }
         }
 
-        yield return new WaitForSeconds(0.3f);
+        // 本体の無敵は今までどおり、出し終えてから0.3秒で切る。構えと発射はその後も続き、本体は自由に動ける
+        StartCoroutine(EndCloneRushProtectionAfter(0.3f));
 
+        // 構え：1体ずつ時間差で相手へ振り向く（構える時間の終わりまでに全員向き終わる）
+        Transform aimTarget = controller != null ? controller.enemyTarget : null;
+        for (int i = 0; i < clones.Count; i++)
+            if (clones[i] != null) clones[i].BeginAim(aimTarget, cloneAimTime, cloneAimTime * .25f * i);
+        yield return StartCoroutine(WaitSkillTime(cloneAimTime));
+
+        // 発射：1体ずつ、撃つ瞬間の相手を狙い直して撃ち出す
+        for (int i = 0; i < clones.Count; i++)
+        {
+            if (clones[i] != null)
+            {
+                Transform target = controller != null ? controller.enemyTarget : null;
+                clones[i].Launch(target, cloneDashSpeed, cloneHomingTurnRate, cloneHomingTime, cloneLifeTime);
+            }
+            if (i < clones.Count - 1 && cloneLaunchInterval > 0f)
+                yield return StartCoroutine(WaitSkillTime(cloneLaunchInterval));
+        }
+    }
+
+    // 分身が狙う相手の位置（いなければ自分の正面）
+    Vector2 CloneAimPosition()
+    {
+        return controller != null && controller.enemyTarget != null
+            ? (Vector2)controller.enemyTarget.position
+            : (Vector2)(transform.position + transform.right);
+    }
+
+    IEnumerator EndCloneRushProtectionAfter(float seconds)
+    {
+        yield return StartCoroutine(WaitSkillTime(seconds));
+        if (currentDashType != 5) yield break;
+        skillAllowsMovement = false;
         isDashing = false;
         currentDashType = 0;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
@@ -1728,22 +2227,19 @@ public static bool matchEnded = false;
 
         Color shieldColor = new Color(0.4f, 0.95f, 0.5f);
 
-        // ▼ マルチプレイ中は演出のスローモーション(Time.timeScale変更)が全員の画面をブロックしてしまうため、
-        // 他の剣モード必殺技と同様にローカル/テストモード時だけ再生する
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "オレ達シールド!!", shieldColor, PlayerMainColor, true);
-        }
-
         if (spriteRenderer != null) spriteRenderer.color = shieldColor;
+        // カットインが抜けてからシールドを出す（以前はカットインの開始と同時に出て、もう回っていた）
+        yield return StartCoroutine(PlayUltimateCutinAndWait("オレ達シールド!!", shieldColor));
+        if (UltimateCancelled) { CancelUltimate(); yield break; }
+        skillAllowsMovement = true;
 
         // ▼【重要】実際にシールドを展開・判定するのはHost権威（またはローカル/テストモード）側のみ。
         // Client側の見た目再生（Kinematicコピー）では展開しない（見た目はSYNCで複製される）
         bool isAuthoritative = rb == null || rb.bodyType == RigidbodyType2D.Dynamic;
         if (isAuthoritative && spriteRenderer != null)
         {
-            float shieldHp = Mathf.Max(1f, maxHp * leafShieldHpRatio);
             float sectorSize = 360f / Mathf.Max(1, leafShieldCount);
+            leafShieldRadiusNow = leafShieldOrbitRadius;
 
             for (int i = 0; i < leafShieldCount; i++)
             {
@@ -1765,19 +2261,16 @@ public static bool matchEnded = false;
                 sr.color = shieldColor;
                 sr.sortingLayerID = spriteRenderer.sortingLayerID;
                 sr.sortingOrder = spriteRenderer.sortingOrder;
-                // ▼【新規追加】手持ちの剣は元画像のピクセルサイズがバラバラなため、現在の刀身と見た目の
-                // 横幅が揃うようスケールを正規化する。当たり判定(leafShieldRadius)は形状に関わらず固定なので、
-                // これをしないと見た目が大きい個体ほど「当たらない」ように見えていた
-                float shieldRefWidth = spriteRenderer.sprite != null ? spriteRenderer.sprite.bounds.size.x : 0f;
-                float shieldSpriteWidth = shieldSprite != null ? shieldSprite.bounds.size.x : 0f;
-                if (shieldRefWidth > 0f && shieldSpriteWidth > 0f) shieldObj.transform.localScale = Vector3.one * (shieldRefWidth / shieldSpriteWidth);
+                // ▼【修正】大きさは CloneVisualScale で本体の刀身と同じ太さにそろえる（どの剣を装備していても同じ大きさ）
+                shieldObj.transform.localScale = Vector3.one * CloneVisualScale(this, shieldSprite);
 
+                // 当たり判定の大きさは見た目の大きさに関わらず固定（leafShieldRadius）。拡大縮小の分を打ち消しておく
                 CircleCollider2D col = shieldObj.AddComponent<CircleCollider2D>();
                 col.isTrigger = true;
-                col.radius = leafShieldRadius;
+                col.radius = leafShieldRadius / Mathf.Max(.0001f, shieldObj.transform.localScale.x);
 
                 LeafShieldOrb orb = shieldObj.AddComponent<LeafShieldOrb>();
-                orb.Setup(this, i * sectorSize, leafShieldOrbitRadius, leafShieldOrbitSpeed, shieldHp, leafShieldReflectMultiplier, leafShieldDuration);
+                orb.Setup(this, i * sectorSize, leafShieldDurability, leafShieldDuration);
 
                 // ▼ オンライン対戦では、この分身をMultiplayerManagerに登録し、位置をSYNCでクライアントへ配信する
                 if (MultiplayerOwner != null)
@@ -1788,58 +2281,232 @@ public static bool matchEnded = false;
             }
         }
 
-        yield return new WaitForSeconds(0.2f);
+        yield return StartCoroutine(WaitSkillTime(0.2f));
 
+        skillAllowsMovement = false;
         isDashing = false;
         currentDashType = 0;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
-    // ▼【新規追加】分身の出現位置を決める。baseAngleを中心とした区画(sectorSize)内でランダムな方向・距離を選び、
-    // 壁・床と重なる場合は区画内で角度をずらしながら数回試行する。分身ごとに区画をずらすことで位置が偏らないようにする。
-    // 見つからなければ最後に試した場所を返す（呼び出し側でIgnoreCollisionの保険をかける）
-    // 画面端など、割り当てられた方向(baseAngle)がずっと壁で塞がっている場合に備え、
-    // 後半の試行では区画に関係なく全方位からも探す
-    private Vector3 FindCloneSpawnPosition(float colliderRadius, float baseAngle, float sectorSize)
-    {
-        const int attemptCount = 8;
-        const int sectorAttempts = 3; // 最初の数回は割り当てられた方向を優先して探す
+    // ▼【変更】分身の出現位置を決める。preferredAngle（度）を中心に searchWidth の範囲で、方向と距離を変えながら探す。
+    // 候補は「壁・床と重ならない」だけでなく「自分の中心との間に壁・床がない」ことも確かめる。
+    // 以前は重なりだけを見ていたため、薄い壁の向こう側（場外や床の下）にも出てしまい、撃った瞬間に壁の裏に当たって消えていた。
+    // 前半は割り当てられた方向を優先し、後半は上半分の全体から探す。見つからなければ自分のすぐ上に出す。
+    // ▼【修正】出す方向は上半分（水平から CloneSpawnMinAngle〜CloneSpawnMaxAngle）に限る。剣を地面に寝かせて撃つと、
+    // 扇の端の分身が寝ている剣より低い地面すれすれに出て、剣や地面の絵に隠れたうえ地面沿いに飛んでいた
+    const float CloneSpawnMinAngle = 15f, CloneSpawnMaxAngle = 165f;
 
-        Vector3 candidate = transform.position;
+    private Vector3 FindCloneSpawnPosition(float colliderRadius, float preferredAngle, float searchWidth)
+    {
+        const int attemptCount = 10;
+        const int preferredAttempts = 4;
+        Vector2 centre = transform.position;
+
         for (int attempt = 0; attempt < attemptCount; attempt++)
         {
-            float angle = attempt < sectorAttempts
-                ? baseAngle + Random.Range(-sectorSize * 0.5f, sectorSize * 0.5f)
-                : Random.Range(0f, 360f); // 割り当てられた区画が塞がっている場合は全方位から探す
+            // 1回目は扇の中のきれいな並び（割り当てられた方向ちょうど・どの分身も同じ距離）を試す。眷属が隊列を組んで見えるように
+            float angle = attempt == 0 ? Mathf.Clamp(preferredAngle, CloneSpawnMinAngle, CloneSpawnMaxAngle)
+                : attempt < preferredAttempts
+                ? Mathf.Clamp(preferredAngle + Random.Range(-searchWidth * 0.5f, searchWidth * 0.5f), CloneSpawnMinAngle, CloneSpawnMaxAngle)
+                : Random.Range(CloneSpawnMinAngle, CloneSpawnMaxAngle);
 
             // 半径も塞がっている場合に備え、徐々に自分に近い側も試す
             float minRadius = Mathf.Lerp(cloneSpawnMinRadius, 0.5f, (float)attempt / (attemptCount - 1));
-            float radius = Random.Range(Mathf.Min(minRadius, cloneSpawnMaxRadius), cloneSpawnMaxRadius);
+            float radius = attempt == 0 ? (cloneSpawnMinRadius + cloneSpawnMaxRadius) * .5f
+                : Random.Range(Mathf.Min(minRadius, cloneSpawnMaxRadius), cloneSpawnMaxRadius);
 
             Vector2 dir = new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad));
-            candidate = transform.position + (Vector3)(dir * radius);
-
-            bool blockedByWall = false;
-            foreach (Collider2D overlapped in Physics2D.OverlapCircleAll(candidate, colliderRadius))
-            {
-                if (overlapped.GetComponentInParent<SwordBattle>() == null)
-                {
-                    blockedByWall = true;
-                    break;
-                }
-            }
-
-            if (!blockedByWall) return candidate;
+            Vector2 candidate = centre + dir * radius;
+            if (IsClearCloneSpawn(centre, candidate, colliderRadius)) return candidate;
         }
-        return candidate;
+        Debug.Log($"⚠ 分身を出す場所が見つからず、本体の真上に出しました: 本体の位置={transform.position}, 向き={transform.eulerAngles.z:F0}°");
+        return centre + Vector2.up * Mathf.Min(1f, cloneSpawnMinRadius);
+    }
+
+    bool IsClearCloneSpawn(Vector2 centre, Vector2 candidate, float colliderRadius)
+    {
+        foreach (Collider2D overlapped in Physics2D.OverlapCircleAll(candidate, colliderRadius))
+            if (IsWallForClones(overlapped)) return false;
+        foreach (RaycastHit2D hit in Physics2D.LinecastAll(centre, candidate))
+            if (IsWallForClones(hit.collider)) return false;
+        return true;
+    }
+
+    // ▼【新規追加】オレ達シールドの守りと返し
+    // 剣同士がぶつかった時に自分が弾かれる強さの倍率。オレ達シールドが出ている間は弱める（相手側の弾かれ方は変えない）
+    public float KnockbackScale => HasActiveLeafShield ? leafShieldKnockbackRate : 1f;
+
+    // 受けるダメージ：シールドが出ていれば leafShieldDamageTakenRate を掛ける（1未満にはしない）
+    public int ShieldedDamage(int damage)
+    {
+        return HasActiveLeafShield ? Mathf.Max(1, Mathf.RoundToInt(damage * leafShieldDamageTakenRate)) : damage;
+    }
+
+    // 本体が実際にダメージを受けた時（ローカルはTakeDamage、オンラインはMatchRulesの確定後にMultiplayerManagerから）。
+    // 耐久が一番残っている分身を1削り、本体で殴ってきた相手には返す。分身や返しの攻撃（本体ではない）には返さないので、
+    // シールド同士で返し合いが続くことはない
+    public void OnShieldedBodyHit(SwordBattle attacker, Vector2 point, bool byBody)
+    {
+        if (!HasActiveLeafShield) return;
+        LeafShieldOrb sturdiest = null;
+        foreach (var orb in activeShieldOrbs)
+            if (orb != null && (sturdiest == null || orb.Durability > sturdiest.Durability)) sturdiest = orb;
+        if (sturdiest != null) sturdiest.Wear(1);
+        // 本体を殴ってきた相手には、相手自身の攻撃力ぶんを返す（殴るほど痛い）
+        if (byBody && attacker != null) TryShieldRetaliate(attacker, point, attacker.attack);
+    }
+
+    // 敵に「baseAttack×倍率」を返す。分身に触れた時と本体を殴られた時で共通の間隔（同じ敵には shieldRetaliateInterval 秒に1回まで）。
+    // ▼【変更】分身に触れた敵には自分の攻撃力、本体を殴ってきた敵にはその敵の攻撃力を基にする（呼び出し側が決める）。
+    // 分身の返しを相手の攻撃力で決めていた時は、攻撃力が低くHPの多い相手をほとんど削れず、相手によって強さが大きく変わっていた。
+    // 本体で当てた攻撃ではない扱いなので、倒しても撃破の停止はない
+    readonly Dictionary<SwordBattle, float> lastShieldRetaliation = new Dictionary<SwordBattle, float>();
+
+    public bool TryShieldRetaliate(SwordBattle enemy, Vector2 point, int baseAttack)
+    {
+        if (enemy == null || enemy == this || !enemy.IsAlive || !IsAlive) return false;
+        if (lastShieldRetaliation.TryGetValue(enemy, out var at) && Time.time - at < shieldRetaliateInterval) return false;
+        lastShieldRetaliation[enemy] = Time.time;
+        int damage = Mathf.Max(1, Mathf.RoundToInt(baseAttack * leafShieldReflectMultiplier));
+        DealDamageTo(enemy, damage, point, false, false, false);
+        return true;
+    }
+
+    // 輪の半径。普段は leafShieldOrbitRadius（近い敵には縮めなくても当たる）で、一番近い敵が少し離れている時だけ、
+    // その距離まで広げて分身を届かせる。一番近い敵が感知射程（leafShieldSenseRadius）に少しいたら広げ始め、
+    // 広げた後は実射程（leafShieldMaxOrbitRadius）まで追いかけ、そこから出て少し経ったら（または近くまで来たら）ゆっくり戻す。
+    // 距離は「輪の中心（自分の刀身の根元）から、敵の当たり判定の一番近い点まで」で測る（敵が傾いていても一番近い部分に届く）
+    bool shieldReaching;
+    float shieldReachInTime, shieldReachOutTime;
+
+    void UpdateLeafShieldRadius()
+    {
+        if (!HasActiveLeafShield)
+        {
+            leafShieldRadiusNow = -1f;
+            shieldReaching = false;
+            shieldReachInTime = shieldReachOutTime = 0f;
+            return;
+        }
+        float usual = leafShieldOrbitRadius;
+        float farthest = Mathf.Max(usual, leafShieldMaxOrbitRadius);
+        float sense = Mathf.Clamp(leafShieldSenseRadius, usual, farthest);
+        float nearest = NearestEnemyPartDistance();
+        if (!shieldReaching)
+        {
+            bool sensed = nearest > usual && nearest <= sense;
+            shieldReachInTime = sensed ? shieldReachInTime + Time.deltaTime : 0f;
+            // 感知射程の中にいることも条件にする（待ち時間が0の時に、敵がいなくても追い始めていた）
+            if (sensed && shieldReachInTime >= leafShieldReachStartDelay) { shieldReaching = true; shieldReachOutTime = 0f; }
+        }
+        else
+        {
+            // 近くまで来た（普段の半径で当たる）か、実射程の外へ出た
+            bool done = nearest < 0f || nearest <= usual || nearest > farthest;
+            shieldReachOutTime = done ? shieldReachOutTime + Time.deltaTime : 0f;
+            if (shieldReachOutTime >= leafShieldReachHoldTime) { shieldReaching = false; shieldReachInTime = 0f; }
+        }
+        float now = LeafShieldOrbitRadiusNow;
+        // 敵の一番近い点より少し外に合わせて、分身が敵の体に食い込む位置を通るようにする
+        float wanted = shieldReaching && nearest >= 0f ? Mathf.Clamp(nearest + leafShieldReachDepth, usual, farthest) : usual;
+        if (wanted > now)
+        {
+            // 広げる：残りの距離に比例した速さで近づける（どこまで広げても leafShieldReachTime でほぼ届き、着く直前は減速する）
+            float k = 1f - Mathf.Exp(-3f * Time.deltaTime / Mathf.Max(.01f, leafShieldReachTime));
+            leafShieldRadiusNow = Mathf.Lerp(now, wanted, k);
+        }
+        else
+        {
+            leafShieldRadiusNow = Mathf.MoveTowards(now, wanted, leafShieldRadiusReturnSpeed * Time.deltaTime);
+        }
+    }
+
+    // 輪が気にする敵：オンラインは生きている敵全員（1vs3の味方は除く）、ローカル対戦は狙っている相手
+    IEnumerable<SwordBattle> NearbyEnemies()
+    {
+        return MultiplayerOwner != null
+            ? MultiplayerOwner.OpponentSwordsOf(PlayerId)
+            : (controller != null && controller.enemyTarget != null
+                ? new[] { controller.enemyTarget.GetComponentInParent<SwordBattle>() }
+                : new SwordBattle[0]);
+    }
+
+    // 輪の中心から、一番近い敵の当たり判定の一番近い点までの距離。敵がいなければ -1。
+    // ▼【修正】オンラインでは「狙っている相手」に限らず、生きている敵（1vs3の味方は除く）全員から一番近いものを探す。
+    // 狙う相手は急に切り替わらないよう粘る作りなので、それだけを見ていると、届く範囲に別の敵がいても広がらなかった
+    public float NearestEnemyPartDistance()
+    {
+        Vector2 centre = transform.position;
+        float nearest = -1f;
+        foreach (var enemy in NearbyEnemies())
+        {
+            if (enemy == null || enemy == this || !enemy.IsAlive) continue;
+            foreach (var part in enemy.GetComponentsInChildren<Collider2D>())
+            {
+                if (part == null || !part.enabled) continue;
+                float distance = Vector2.Distance(part.ClosestPoint(centre), centre);
+                if (nearest < 0f || distance < nearest) nearest = distance;
+            }
+        }
+        return nearest;
+    }
+
+    // 巨大回転斬がオレ達シールドの分身に触れた時：この一回転でまだ victim（分身の持ち主）に当たっていなければ、
+    // 分身が身代わりになる（本体にはもう当たらない）。本体が先に触れていた（当てる順番待ちの）時は false
+    public bool TryUseGiantSpinHitOn(SwordBattle victim)
+    {
+        if (currentDashType != 4 || !giantSpinHitActive || victim == null) return false;
+        foreach (var pending in pendingGiantSpinHits) if (pending.target == victim) return false;
+        return giantSpinHitTargets.Add(victim);
+    }
+
+    // 大回転斬がオレ達シールドの分身に触れた時：分身から離れる向きへ跳ね返って、突進を続ける
+    public void BounceSpinDashOff(Vector2 from)
+    {
+        if (currentDashType != 3 || !isDashShooting || rb == null || rb.bodyType != RigidbodyType2D.Dynamic) return;
+        Vector2 velocity = rb.linearVelocity;
+        Vector2 normal = (Vector2)transform.position - from;
+        if (normal.sqrMagnitude < .0001f) normal = -velocity;
+        if (normal.sqrMagnitude < .0001f) return;
+        normal.Normalize();
+        Vector2 bounce = velocity.sqrMagnitude > .0001f ? Vector2.Reflect(velocity.normalized, normal) : normal;
+        // すれ違いざまで、反射してもまだ分身の方へ向かう時は、分身から離れる向きにする
+        if (Vector2.Dot(bounce, normal) < 0f) bounce = normal;
+        rb.linearVelocity = bounce * Mathf.Max(velocity.magnitude, 40f);
+        rb.angularVelocity = Mathf.Sign(bounce.x) * -2500f;
+    }
+
+    // ▼【修正】分身・シールドの見た目の大きさ。本体の刀身と同じく、元画像の横幅に関係なく
+    // 「刀身の太さ(SwordGenerator.targetBladeWidth) × 本体の大きさ」の横幅にそろえる倍率を返す。
+    // 以前は「今装備している剣の元画像の横幅」に合わせていたため、同じ画像の分身でも、装備中の剣の画像によって大きさが変わっていた。
+    // ホスト（分身・シールドを作る時）とゲスト（MultiplayerManager.CreateCloneVisual）の両方がこれを使う
+    public static float CloneVisualScale(SwordBattle owner, Sprite sprite)
+    {
+        if (owner == null || sprite == null || sprite.bounds.size.x <= 0f) return 1f;
+        var generator = owner.GetComponent<SwordGenerator>();
+        float bladeWidth = generator != null ? generator.targetBladeWidth : 1.5f;
+        return bladeWidth * Mathf.Abs(owner.transform.lossyScale.x) / sprite.bounds.size.x;
+    }
+
+    // 分身の行く手をふさぐ物（壁・床）。剣・分身・シールドなどの当たり判定は含めない
+    public static bool IsWallForClones(Collider2D collider)
+    {
+        return collider != null && !collider.isTrigger &&
+            collider.GetComponentInParent<SwordBattle>() == null && collider.GetComponent<SwordCloneProjectile>() == null;
     }
 
     // ▼【新規追加】巨大化一回転（currentDashType 4）専用のダメージ判定
-    // （回転中は当たり判定をトリガー化しているためOnCollisionEnter2Dではなくこちらで処理する）
-    void OnTriggerEnter2D(Collider2D other)
+    // （技の間は当たり判定をトリガー化しているためOnCollisionEnter2Dではなくこちらで処理する）。
+    // ▼【修正】攻撃判定は一回転の間だけ。巨大化の途中から重なっていた相手にも当たるよう、Enterに加えてStayでも拾う。
+    // 触れた相手はいったん貯め、次のFixedUpdateで近い順に当てる（2人目以降の減衰の順番を距離で決めるため）
+    void OnTriggerEnter2D(Collider2D other) { QueueGiantSpinHit(other); }
+    void OnTriggerStay2D(Collider2D other) { QueueGiantSpinHit(other); }
+
+    void QueueGiantSpinHit(Collider2D other)
     {
         if (isDead || matchEnded) return;
-        if (currentDashType != 4) return;
+        if (currentDashType != 4 || !giantSpinHitActive) return;
 
         // ▼【重要】トリガー判定はKinematic同士でも発火してしまう。
         // 他の必殺技と同様、実際のダメージ計算はDynamic（＝物理演算の権威を持つHost側）でのみ行い、
@@ -1847,22 +2514,39 @@ public static bool matchEnded = false;
         if (rb == null || rb.bodyType != RigidbodyType2D.Dynamic) return;
 
         SwordBattle target = other.GetComponentInParent<SwordBattle>();
-        if (target == null || target == this) return;
-        // ▼【修正】同じ相手への連続ヒット(回転中に何度もすれ違う)だけを防ぐ。Add()はこの相手が
-        // 初めてなら追加してtrueを返すので、既にヒット済みの相手ならここでreturnして二重ヒットを防止しつつ、
-        // 別の相手(初めて触れた相手)には引き続き当たるようにする
-        if (!giantSpinHitTargets.Add(target)) return;
+        if (target == null || target == this || !target.IsAlive) return;
+        // 味方（1vs3の同じ陣営）はダメージにならないので、減衰の人数にも数えない
+        if (MultiplayerOwner != null && MultiplayerOwner.AreTeammates(PlayerId, target.PlayerId)) return;
+        // 同じ相手には一度だけ当てる（回転中に何度もすれ違っても二重に当てない）。別の相手には引き続き当たる
+        if (giantSpinHitTargets.Contains(target)) return;
+        foreach (var pending in pendingGiantSpinHits) if (pending.target == target) return;
+        // 最初に触れた部分で当たり方を決める（相手の柄なら弱点で2倍）
+        pendingGiantSpinHits.Add((target, other));
+    }
 
-        bool isWeakPoint = other.CompareTag("Handle");
-        int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier);
-        if (isWeakPoint) damage *= 2;
-        damage = Mathf.Max(damage, 1);
+    void FlushGiantSpinHits()
+    {
+        if (pendingGiantSpinHits.Count == 0) return;
+        Vector2 centre = transform.position;
+        pendingGiantSpinHits.Sort((a, b) =>
+            ((Vector2)a.target.transform.position - centre).sqrMagnitude.CompareTo(((Vector2)b.target.transform.position - centre).sqrMagnitude));
+        foreach (var (target, part) in pendingGiantSpinHits)
+        {
+            if (target == null || !target.IsAlive || !giantSpinHitTargets.Add(target)) continue;
+            // 1人目は等倍、2人目・3人目以降は減らす
+            float rate = PoseSword.Multiplayer.BattlePolicies.GiantSpinHitRate(giantSpinHitTargets.Count, giantSpinSecondHitRate, giantSpinLaterHitRate);
+            bool isWeakPoint = part != null && part.CompareTag("Handle") && !target.HasActiveLeafShield;
+            int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier * rate);
+            if (isWeakPoint) damage *= 2;
+            damage = Mathf.Max(damage, 1);
 
-        Vector2 hitPoint = other.ClosestPoint(transform.position);
-        // ▼【修正】target.TakeDamage()を直接呼ぶと、target側がマルチプレイ中(MultiplayerOwner != null)の時に
-        // 何もせず握りつぶしてしまう（HPはQueueHit経由のMatchRulesでのみ確定するため）。
-        // DealDamageTo()を通すことで、オンラインでも正しくダメージが反映されるようにする
-        DealDamageTo(target, damage, hitPoint, true, isWeakPoint);
+            Vector2 hitPoint = part != null ? part.ClosestPoint(transform.position) : (Vector2)target.transform.position;
+            // ▼【修正】target.TakeDamage()を直接呼ぶと、target側がマルチプレイ中(MultiplayerOwner != null)の時に
+            // 何もせず握りつぶしてしまう（HPはQueueHit経由のMatchRulesでのみ確定するため）。
+            // DealDamageTo()を通すことで、オンラインでも正しくダメージが反映されるようにする
+            DealDamageTo(target, damage, hitPoint, true, isWeakPoint, true);
+        }
+        pendingGiantSpinHits.Clear();
     }
 
     // ▼【修正】剣モード専用「一直線ジャンプダッシュ」
@@ -1875,12 +2559,13 @@ public static bool matchEnded = false;
         if (spriteRenderer != null) spriteRenderer.color = new Color(0.5f, 1f, 1f); 
 
         currentSp = 0f;
-        dashDamageBonus = 5.0f; 
+        dashDamageBonus = spinDashDamageMultiplier;
 
-        if (CutinManager.Instance != null && spriteRenderer != null)
-        {
-            CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, "大回転斬!!", new Color(0.5f, 1f, 1f), PlayerMainColor, true);
-        }
+        // カットインが抜けてから小ジャンプに入る（以前はカットインの裏でもうジャンプが始まっていた）
+        yield return StartCoroutine(PlayUltimateCutinAndWait("大回転斬!!", new Color(0.5f, 1f, 1f)));
+        if (UltimateCancelled) { CancelUltimate(); dashDamageBonus = 1.0f; yield break; }
+        // 味方（1vs3の同じ陣営）はすり抜ける。戻すのは EndSwordDash
+        IgnoreTeammateCollisions();
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
@@ -1889,7 +2574,7 @@ public static bool matchEnded = false;
             rb.angularVelocity = 720f; 
         }
         
-        yield return new WaitForSeconds(0.2f);
+        yield return StartCoroutine(WaitSkillTime(0.2f));
 
         // ▼【修正】2. 空中で一瞬静止（Hostのみ）
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
@@ -1899,7 +2584,7 @@ public static bool matchEnded = false;
             rb.angularVelocity = 1440f;
         }
 
-        yield return new WaitForSeconds(0.1f);
+        yield return StartCoroutine(WaitSkillTime(0.1f));
 
         isDashShooting = true; 
 
@@ -1915,29 +2600,32 @@ public static bool matchEnded = false;
             Debug.Log($"⚔️ 剣モード：一直線ダッシュ発動！");
         }
 
-        yield return new WaitForSeconds(2.0f);
+        yield return StartCoroutine(WaitSkillTime(2.0f));
         if (isDashing && !SwordController.isKomaMode)
         {
             EndSwordDash();
-            dashDamageBonus = 1.0f; 
         }
     }
 
     // ▼【修正】ダッシュ終了時
     public void EndSwordDash()
     {
-        if (!isDashing) return;
+        // 相手に当たって終わった後、同じ物理ステップでもう一度呼ばれても二重に止めない
+        if (!isDashing || currentDashType != 3) return;
 
-        isDashing = false;
+        // ▼【修正】無敵(isDashing)はここでは外さず、DelayEndDashFlagで物理ステップの後に外す。
+        // 以前はここでisDashing=falseにしていたため、相手に当たったその瞬間に無敵が切れ、
+        // 同じ衝突で相手側のOnCollisionEnter2Dが先に呼ばれなかった場合（ローカル対戦）に反撃をもらっていた
         currentDashType = 0;
-        isDashShooting = false; 
-        
+        isDashShooting = false;
+        RestoreTeammateCollisions();
+
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
-        
+
         // ▼【修正】停止処理もHostのみ
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
-            rb.linearVelocity = Vector2.zero; 
+            rb.linearVelocity = Vector2.zero;
             rb.angularVelocity = 0f;
             if (controller != null) controller.ApplyPhysicsMode();
         }
@@ -1947,8 +2635,36 @@ public static bool matchEnded = false;
     {
         // Unityの物理演算がこのフレームの処理を終えるまで待機する
         yield return new WaitForFixedUpdate();
-        
+
         // 計算が終わって安全になってから、無敵フラグを解除！
         isDashing = false;
+        // 突進の上乗せ倍率もここで外す。当たった衝突のダメージ計算（同じ物理ステップ）までは残しておき、
+        // 衝突の速さが足りずに使われなかった場合でも、次の通常攻撃に持ち越さない
+        dashDamageBonus = 1.0f;
+    }
+
+    // ▼【新規追加】大回転斬の間だけ、味方（1vs3の同じ陣営）の剣との当たり判定を切ってすり抜けさせる。
+    // 以前は味方に当たるとダメージ0のまま突進が終わっていた。切った組を覚えておき、突進の終わりに同じ組だけ戻す
+    readonly List<(Collider2D mine, Collider2D theirs)> ignoredTeammateContacts = new List<(Collider2D mine, Collider2D theirs)>();
+
+    void IgnoreTeammateCollisions()
+    {
+        RestoreTeammateCollisions();
+        if (MultiplayerOwner == null) return;
+        var mine = GetComponentsInChildren<Collider2D>();
+        foreach (var mate in MultiplayerOwner.TeammateSwordsOf(PlayerId))
+            foreach (var theirs in mate.GetComponentsInChildren<Collider2D>())
+                foreach (var own in mine)
+                {
+                    Physics2D.IgnoreCollision(own, theirs, true);
+                    ignoredTeammateContacts.Add((own, theirs));
+                }
+    }
+
+    void RestoreTeammateCollisions()
+    {
+        foreach (var pair in ignoredTeammateContacts)
+            if (pair.mine != null && pair.theirs != null) Physics2D.IgnoreCollision(pair.mine, pair.theirs, false);
+        ignoredTeammateContacts.Clear();
     }
 }
