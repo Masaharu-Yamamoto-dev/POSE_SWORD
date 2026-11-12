@@ -17,7 +17,7 @@ export const SOLO_MODE_PLAYERS = 4;
 // ボス側の強化。全クライアントが同じ値を使う必要があるため、ここで決めて試合設定に載せて配る。
 // 数値はすべて調整中。ここだけを直せば全員に反映される。
 export const SOLO_BUFF = Object.freeze({
-  hpMultiplier: 2.5,        // MatchRules へ渡すHPと Unity 側の maxHp に掛ける
+  hpMultiplier: 2.0,        // MatchRules へ渡すHPと Unity 側の maxHp に掛ける
   // 攻撃力に掛ける。ボスの通常攻撃・必殺技・薙ぎ払いのすべてに効く。
   // 3人を相手にするので、通常攻撃1発でトリオの一撃を上回るくらいを狙っている。
   attackMultiplier: 3.5,
@@ -45,6 +45,25 @@ export const SOLO_BUFF = Object.freeze({
   // 720 × 0.4秒 ＝ 約0.8回転。ちょうど一回転させたいなら judgmentSweepSeconds を 0.5 にする。
   judgmentSweepSpin: 720.0,
   judgmentSweepScale: 2.0,     // 薙ぎ払い中の剣の大きさ（元の大きさに掛ける）
+});
+
+// ボスのHPの上限。Unity の MatchRules.MaxHitPoints と同じ値にすること。
+export const SOLO_MAX_HP = 4000;
+// Unity の Mathf.RoundToInt と同じ丸め（.5 は偶数側へ）。Math.round は .5 を切り上げるので、
+// 倍率 2.5 / 3.5 で奇数の値を掛けると試合の値と1ずれる。
+const roundHalfEven = value => {
+  const floor = Math.floor(value);
+  const diff = value - floor;
+  if (diff > 0.5) return floor + 1;
+  if (diff < 0.5) return floor;
+  return floor % 2 === 0 ? floor : floor + 1;
+};
+// 1vs3 のボスが試合で実際に戦う値（ロビーの表示用）。Unity 側の
+// MultiplayerManager.BuffedHp / ApplyBossBuff と必ず同じ式にすること。重さには倍率を掛けない。
+export const bossStats = stats => ({
+  hp: Math.min(SOLO_MAX_HP, Math.max(1, roundHalfEven(stats.hp * SOLO_BUFF.hpMultiplier))),
+  attack: Math.max(1, roundHalfEven(stats.attack * SOLO_BUFF.attackMultiplier)),
+  weight: stats.weight,
 });
 
 // 柄の補正を外した剣本体の値（錬成で出る範囲: hp 100〜1000 / attack・weight 1〜100）。

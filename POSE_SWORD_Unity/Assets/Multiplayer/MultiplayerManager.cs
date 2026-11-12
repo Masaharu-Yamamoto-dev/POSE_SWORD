@@ -1002,6 +1002,8 @@ public class MultiplayerManager : MonoBehaviour
 
     // ボスのHPは倍率ぶん増える。MatchRulesへ渡す値と、Unity側のmaxHp(=HPバーの上限)を
     // 必ず同じ計算で出すこと。片方だけ強化するとHPバーが頭打ちになって嘘の数値を表示する。
+    // ※ ロビーの表示用に、同じ式を JS 側（src/network/HostRoom.js の bossStats）でも持っている。
+    //    ここ・ApplyBossBuff の攻撃の式・MaxHitPoints を変えたら、あちらも合わせること。
     int BuffedHp(MultiplayerPlayerConfig player, int hp)
     {
         if (!IsBoss(player)) return hp;

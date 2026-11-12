@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { PLAYER_COLORS, styles, swordImageSource } from '../styles';
-import { MAX_PLAYERS, MIN_PLAYERS, SOLO_MODE_PLAYERS } from '../network/HostRoom';
+import { MAX_PLAYERS, MIN_PLAYERS, SOLO_MODE_PLAYERS, bossStats } from '../network/HostRoom';
 import { HILT_DATABASE } from './hiltDatabase.js';
 import InkButton from '../components/InkButton.jsx';
 import { ConfirmSheet, EnsoInk } from '../components/SwordForgeParts.jsx';
@@ -56,7 +56,7 @@ const SPECIAL_DESC = {
 const RADAR_MAX = { hp: 1000, attack: 100, weight: 100 };
 const RADAR_AXES = [[0, -1], [0.866, 0.5], [-0.866, 0.5]]; // 上：HP 右下：攻 左下：重
 
-const RadarChart = ({ stats, hidden }) => {
+const RadarChart = ({ stats }) => {
   const cx = 59, cy = 56, radius = 34;
   const point = (i, scale) =>
     `${(cx + RADAR_AXES[i][0] * radius * scale).toFixed(1)},${(cy + RADAR_AXES[i][1] * radius * scale).toFixed(1)}`;
@@ -66,7 +66,7 @@ const RadarChart = ({ stats, hidden }) => {
 
   return (
     <svg className="lobby-radar" viewBox="0 0 118 100" role="img"
-      aria-label={hidden ? 'ステータスは非公開' : `HP ${stats.hp}、攻 ${stats.attack}、重 ${stats.weight}`}>
+      aria-label={`HP ${Math.round(stats.hp)}、攻 ${Math.round(stats.attack)}、重 ${Math.round(stats.weight)}`}>
       <polygon className="lobby-radar__axis" points={ring(1)} />
       <polygon className="lobby-radar__axis" points={ring(0.5)} />
       {[0, 1, 2].map(i => {
@@ -81,27 +81,26 @@ const RadarChart = ({ stats, hidden }) => {
   );
 };
 
-const StatsList = ({ values, hidden }) => (
+const StatsList = ({ values }) => (
   <div className="lobby-stats__list">
     {values.map((value, i) => (
       <div key={STAT_LABELS[i]} className="lobby-stats__row">
         <span className="lobby-stats__label">{STAT_LABELS[i]}</span>
-        <span className="lobby-stats__value">{hidden ? '？？？' : Math.round(value)}</span>
+        <span className="lobby-stats__value">{Math.round(value)}</span>
       </div>
     ))}
   </div>
 );
 
 // 剣を持ち替えたときは、武器庫と同じく、チャートと数字を新しい値へなめらかに動かす
-// hidden（1vs3 のボス）：試合では HP・攻撃などに倍率が掛かり、ここの値は当てにならないので数字は伏せる。
-// チャートは外周いっぱいまで伸ばして、手の付けられない強さだけを見せる
-const StatsPanel = ({ stats, hidden }) => {
-  const target = hidden ? RADAR_MAX : stats;
-  const [hp, attack, weight] = useAnimatedValues([target.hp, target.attack, target.weight]);
+// 1vs3 のボスは、試合で倍率を掛けた後の値を受け取る（呼び出し側で bossStats を通す）。
+// チャートの上限は超えるので外周で止まる
+const StatsPanel = ({ stats }) => {
+  const [hp, attack, weight] = useAnimatedValues([stats.hp, stats.attack, stats.weight]);
   return (
     <div className="lobby-stats">
-      <RadarChart stats={{ hp, attack, weight }} hidden={hidden} />
-      <StatsList values={[hp, attack, weight]} hidden={hidden} />
+      <RadarChart stats={{ hp, attack, weight }} />
+      <StatsList values={[hp, attack, weight]} />
     </div>
   );
 };
@@ -475,11 +474,13 @@ export default function LobbyScreen({
     // 独楽モードは柄の補正を外して戦うので（HostRoom.js の swordForGameMode）、剣本体の値を出す。
     // 補正前の値を送ってこない古いクライアントの剣だけは、補正込みのまま出す（試合でもその値で戦う）。
     const sword = isMe && mySwordData ? mySwordData : player.swordData;
-    const stats = gameMode === "1"
+    const swordStats = gameMode === "1"
       ? (isMe && mySwordData ? getBaseStats(mySwordData) : sword.base ?? { hp: sword.hp, attack: sword.attack, weight: sword.weight })
       : isMe && mySwordData ? getFinalStats(mySwordData)
       : { hp: sword.hp, attack: sword.attack, weight: sword.weight };
     const isBoss = soloMode && player.playerId === bossPlayerId;
+    // 1vs3 のボスは試合で HP・攻撃に倍率が掛かるので、その値を出す（HostRoom.js の SOLO_BUFF）
+    const stats = isBoss ? bossStats(swordStats) : swordStats;
     const isPresent = player.connected && player.inLobby;
     const isReady = !auto && player.ready && isPresent;
     const waitLabel = !player.connected ? "切断" : !player.inLobby ? "結果\n確認中" : "準備\n中";
@@ -516,7 +517,7 @@ export default function LobbyScreen({
         <div className="lobby-stage">
           <SwordFigure sword={sword} blade={photo} spinCount={view.spins?.[player.playerId] ?? 0} onSpin={isMe ? onSpin : undefined}
             hiltOff={gameMode === "1"} />
-          <StatsPanel stats={stats} hidden={isBoss} />
+          <StatsPanel stats={stats} />
 
           <div className="lobby-side">
             {auto ? (
