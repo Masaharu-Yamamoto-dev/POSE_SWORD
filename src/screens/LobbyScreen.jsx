@@ -474,10 +474,14 @@ export default function LobbyScreen({
     // 独楽モードは柄の補正を外して戦うので（HostRoom.js の swordForGameMode）、剣本体の値を出す。
     // 補正前の値を送ってこない古いクライアントの剣だけは、補正込みのまま出す（試合でもその値で戦う）。
     const sword = isMe && mySwordData ? mySwordData : player.swordData;
-    const swordStats = gameMode === "1"
-      ? (isMe && mySwordData ? getBaseStats(mySwordData) : sword.base ?? { hp: sword.hp, attack: sword.attack, weight: sword.weight })
-      : isMe && mySwordData ? getFinalStats(mySwordData)
-      : { hp: sword.hp, attack: sword.attack, weight: sword.weight };
+    const isTopMode = gameMode === "1";
+    let swordStats;
+    if (isMe && mySwordData) {
+      swordStats = isTopMode ? getBaseStats(mySwordData) : getFinalStats(mySwordData);
+    } else {
+      const receivedStats = { hp: sword.hp, attack: sword.attack, weight: sword.weight };
+      swordStats = isTopMode ? (sword.base ?? receivedStats) : receivedStats;
+    }
     const isBoss = soloMode && player.playerId === bossPlayerId;
     // 1vs3 のボスは試合で HP・攻撃に倍率が掛かるので、その値を出す（HostRoom.js の SOLO_BUFF）
     const stats = isBoss ? bossStats(swordStats) : swordStats;

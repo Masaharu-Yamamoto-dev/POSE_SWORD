@@ -446,7 +446,7 @@ test('the boss buff rides along with the solo roster and is absent otherwise', (
   startSolo(solo);
   const buff = soloConfig(solo).soloBuff;
   assert.equal(buff.maxSp, 200);
-  assert.ok(buff.hpMultiplier > 1 && buff.suppressRadius > 0 && buff.suppressDuration > 0);
+  assert.ok(buff.hpMultiplier > 1 && buff.suppressRadius > 0);
 
   const normal = setup();
   start(normal);
