@@ -2515,11 +2515,21 @@ MonoBehaviour:
   leafShieldOrbitRadius: 5
   leafShieldRadius: 0.7
   leafShieldOrbitSpeed: 150
-  leafShieldHpRatio: 0.33333334
-  leafShieldReflectMultiplier: 2
+  leafShieldReflectMultiplier: 1
+  leafShieldDurability: 2
+  leafShieldSenseRadius: 8
+  leafShieldMaxOrbitRadius: 12
+  leafShieldReachDepth: 0.5
+  leafShieldChaseOrbitSpeed: 180
+  leafShieldReachTime: 0.15
+  leafShieldRadiusReturnSpeed: 3
+  leafShieldReachStartDelay: 0
+  leafShieldReachHoldTime: 0.4
+  leafShieldDamageTakenRate: 0.5
+  shieldRetaliateInterval: 0.3
+  leafShieldKnockbackRate: 0.3
   isDashing: 0
   isDashShooting: 0
-  activeLeafShieldCount: 0
   respawnInvincibleDuration: 3
   respawnBlinkInterval: 0.12
   currentDashType: 0
@@ -4084,11 +4094,21 @@ MonoBehaviour:
   leafShieldOrbitRadius: 5
   leafShieldRadius: 0.7
   leafShieldOrbitSpeed: 150
-  leafShieldHpRatio: 0.33333334
-  leafShieldReflectMultiplier: 2
+  leafShieldReflectMultiplier: 1
+  leafShieldDurability: 2
+  leafShieldSenseRadius: 8
+  leafShieldMaxOrbitRadius: 12
+  leafShieldReachDepth: 0.5
+  leafShieldChaseOrbitSpeed: 180
+  leafShieldReachTime: 0.15
+  leafShieldRadiusReturnSpeed: 3
+  leafShieldReachStartDelay: 0
+  leafShieldReachHoldTime: 0.4
+  leafShieldDamageTakenRate: 0.5
+  shieldRetaliateInterval: 0.3
+  leafShieldKnockbackRate: 0.3
   isDashing: 0
   isDashShooting: 0
-  activeLeafShieldCount: 0
   respawnInvincibleDuration: 3
   respawnBlinkInterval: 0.12
   currentDashType: 0
@@ -5036,7 +5056,7 @@ MonoBehaviour:
   debugRosterJsonFile: {fileID: 0}
   playerCount: 2
   gameMode: 0
-  localHiltTypeOverride: 2
+  localHiltTypeOverride: 
   ownedSwordCount: 1
   livesMode: 1
   isHost: 1

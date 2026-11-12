@@ -74,6 +74,14 @@ public class SwordCloneProjectile : MonoBehaviour
     }
 
     public bool Launched => launched;
+    public SwordBattle Owner => owner;
+
+    // オレ達シールドの分身と相打ちになった時など、何も起こさずに消える
+    public void Vanish()
+    {
+        hasActed = true;
+        Destroy(gameObject);
+    }
 
     // 生まれる：今いる場所（本体の位置）から、本体に対して slotOffset の持ち場へ飛び出し、以後は本体について漂う。
     // order は何体目か（漂う動きをずらすのに使う）

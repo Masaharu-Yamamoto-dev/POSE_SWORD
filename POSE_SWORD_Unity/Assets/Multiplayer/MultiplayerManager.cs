@@ -1331,7 +1331,8 @@ public class MultiplayerManager : MonoBehaviour
         // シールドの反射に加えて本体にも通常ダメージが通ってしまっていた。
         // ▼【新規追加】残機モードのリスポーン直後無敵(IsRespawnInvincible)もここに加える。
         // これが無いと見た目は点滅していても、Host権威のダメージ判定では素通しになってしまう
-        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing || p.Value.HasActiveLeafShield || p.Value.IsRespawnInvincible;
+        // ▼【変更】オレ達シールドは無敵ではなく、受けるダメージを減らす（QueueHit）
+        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing || p.Value.IsRespawnInvincible;
         UpdateKillerFreezes();
         Physics2D.Simulate(Time.fixedDeltaTime);
         if (!IsPlaying) return;
@@ -1386,6 +1387,8 @@ public class MultiplayerManager : MonoBehaviour
         // 発動済みの分身・シールドからダメージが通ってしまうので、与える側の経路をここで断つ。
         // 与えるダメージが消えるだけで、受ける側としては通常どおり成立する。
         if (IsSuppressed(attacker.PlayerId)) return;
+        // オレ達シールドが出ている相手は、受けるダメージが減る
+        damage = target.ShieldedDamage(damage);
         // Two dashes clashing in koma mode break each other's guard.
         bool blocked = invulnerable.ContainsKey(target.PlayerId) && invulnerable[target.PlayerId];
         bool clash = SwordController.isKomaMode && invulnerable.ContainsKey(attacker.PlayerId) && invulnerable[attacker.PlayerId];
@@ -1430,8 +1433,27 @@ public class MultiplayerManager : MonoBehaviour
             // 本体で剣を壊した側を短く止める。決着の一撃は試合全体のスロー（MatchEndCinematic）に任せ、
             // 同じ一撃で自分も倒れた（相打ち）時は止めない
             if (record.Lethal && !rules.Ended && detail.body && rules.Get(record.AttackerId).OnField) FreezeKiller(record.AttackerId);
+            // オレ達シールド：本体が実際にダメージを受けたら、分身の耐久を減らし、本体で殴ってきた相手に返す（下でまとめて）
+            if (record.Amount > 0 && swords.TryGetValue(record.TargetId, out var shielded) && shielded != null &&
+                shielded.IsAlive && shielded.HasActiveLeafShield)
+            {
+                swords.TryGetValue(record.AttackerId, out var attackerSword);
+                shieldedBodyHits.Add((shielded, attackerSword, detail.point, detail.body));
+            }
         }
         hitDetailsThisStep.Clear();
+        // 返しのダメージはこの時点で次の物理ステップ分として積む（このステップの記録を消した後に積むので、消されない）
+        foreach (var hit in shieldedBodyHits) hit.target.OnShieldedBodyHit(hit.attacker, hit.point, hit.byBody);
+        shieldedBodyHits.Clear();
+    }
+
+    private readonly List<(SwordBattle target, SwordBattle attacker, Vector2 point, bool byBody)> shieldedBodyHits =
+        new List<(SwordBattle target, SwordBattle attacker, Vector2 point, bool byBody)>();
+
+    // ▼【新規追加】分身の色を変える（オレ達シールドの分身が削れて半透明になった時など）。次のSYNCからゲストにも届く
+    public void SetCloneColor(string id, Color color)
+    {
+        if (id != null && activeClones.TryGetValue(id, out var entry)) activeClones[id] = (entry.obj, entry.ownerId, color, entry.spriteIndex);
     }
 
     void FreezeKiller(string playerId)
@@ -1458,6 +1480,16 @@ public class MultiplayerManager : MonoBehaviour
         {
             if (!AreTeammates(playerId, mate.playerId)) continue;
             if (swords.TryGetValue(mate.playerId, out var sword) && sword != null && sword.IsAlive) yield return sword;
+        }
+    }
+
+    // 敵の剣（自分と味方以外で、生きているもの）。オレ達シールドの輪が、一番近い敵を探すのに使う
+    public IEnumerable<SwordBattle> OpponentSwordsOf(string playerId)
+    {
+        foreach (var pair in swords)
+        {
+            if (pair.Key == playerId || pair.Value == null || !pair.Value.IsAlive || AreTeammates(playerId, pair.Key)) continue;
+            yield return pair.Value;
         }
     }
 
@@ -1765,6 +1797,9 @@ public class MultiplayerManager : MonoBehaviour
                     obj.transform.position = new Vector3(c.x, c.y, 0);
                     obj.transform.rotation = Quaternion.Euler(0, 0, c.rotation);
                 }
+                // 色が変わった時（オレ達シールドの分身が削れた時など）は見た目に反映する
+                var look = obj.GetComponent<SpriteRenderer>();
+                if (look != null && look.color != c.color) look.color = c.color;
                 cloneSyncTargets[c.id] = c;
             }
         }

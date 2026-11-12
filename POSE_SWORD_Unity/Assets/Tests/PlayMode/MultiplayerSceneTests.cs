@@ -598,6 +598,177 @@ public class MultiplayerSceneTests
             "A clone is as wide as its master's blade.");
     }
 
+    // ===== オレ達シールド：本体は半減、分身は2回で割れ、触れた敵・殴ってきた敵に返す =====
+
+    private IEnumerator RaiseShield(Component sword)
+    {
+        FireUltimate(sword, "3");
+        float giveUp = Time.realtimeSinceStartup + 3f;
+        while (!Flag(sword, "HasActiveLeafShield") && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.IsTrue(Flag(sword, "HasActiveLeafShield"), "The shields come out once the cutin is over.");
+        yield return new WaitForSecondsRealtime(.3f);
+    }
+
+    private static Component[] ShieldOrbs()
+    {
+        return UnityEngine.Object.FindObjectsByType(RuntimeType("LeafShieldOrb"), FindObjectsSortMode.None).Cast<Component>().ToArray();
+    }
+
+    private static int Durability(Component orb) { return (int)orb.GetType().GetProperty("Durability").GetValue(orb); }
+
+    [UnityTest]
+    public IEnumerator ShieldHalvesBodyDamageWearsAShieldAndHitsBack()
+    {
+        Call("InitializeMultiplayer", Config("shield-body", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"shield-body\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0"); var p1 = Sword("p1");
+        yield return RaiseShield(p0);
+        var orbs = ShieldOrbs();
+        Assert.AreEqual(5, orbs.Length);
+        // 自分の攻撃力を相手と違う値にして、本体の返しが「相手の攻撃力」で決まることを見分ける
+        p0.GetType().GetField("attack").SetValue(p0, 30);
+        Assert.IsTrue(orbs.All(o => Durability(o) == 2));
+        Assert.IsFalse(Field(p0, "isDashing"), "The master is no longer invincible behind its shields.");
+        float knockback = (float)p0.GetType().GetProperty("KnockbackScale").GetValue(p0);
+        Assert.AreEqual(.3f, knockback, .001f, "Behind its shields the master is knocked back far less.");
+        Assert.AreEqual(1f, (float)p1.GetType().GetProperty("KnockbackScale").GetValue(p1), .001f, "Others are knocked back as usual.");
+
+        QueueHit(p1, p0, 100);
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        Assert.AreEqual(950, Hp(p0), "Damage to the master is halved.");
+        Assert.AreEqual(1, ShieldOrbs().Count(o => Durability(o) == 1), "Each hit on the master wears one shield down.");
+
+        // 本体で殴ってきた相手には、相手の攻撃力ぶん（×1）を返す（自分の攻撃力30ではない）
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        int attack = (int)p1.GetType().GetField("attack").GetValue(p1);
+        Assert.AreEqual(1000 - attack, Hp(p1), "The attacker takes its own attack back.");
+    }
+
+    [UnityTest]
+    public IEnumerator ShieldOrbHitsBackOnTouchAndBreaksOnTheSecondTouch()
+    {
+        Call("InitializeMultiplayer", Config("shield-touch", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"shield-touch\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0"); var p1 = Sword("p1");
+        yield return RaiseShield(p0);
+        var orb = ShieldOrbs()[0];
+        var touch = orb.GetType().GetMethod("OnTriggerEnter2D", BindingFlags.NonPublic | BindingFlags.Instance);
+        var blade = p1.GetComponentsInChildren<Collider2D>().First(c => !c.CompareTag("Handle"));
+        var handle = p1.GetComponentsInChildren<Collider2D>().First(c => c.CompareTag("Handle"));
+        // 分身の返しは持ち主（自分）の攻撃力で決まる。相手の攻撃力（10）と違う値にして見分ける
+        p0.GetType().GetField("attack").SetValue(p0, 30);
+        int attack = 30;
+
+        touch.Invoke(orb, new object[] { blade });
+        touch.Invoke(orb, new object[] { handle }); // 刃と柄が続けて触れても1回に数える
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        Assert.AreEqual(1000 - attack, Hp(p1), "Touching a shield costs the enemy the master's attack.");
+        Assert.AreEqual(1, Durability(orb));
+
+        yield return new WaitForSecondsRealtime(.35f);
+        touch.Invoke(orb, new object[] { blade });
+        yield return null;
+        Assert.IsTrue(orb == null, "A shield breaks on its second touch.");
+        Assert.AreEqual(4, ShieldOrbs().Length);
+    }
+
+    [UnityTest]
+    public IEnumerator ShieldRingReachesOutToAnEnemyJustOutOfRange()
+    {
+        Call("InitializeMultiplayer", Config("shield-ring", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"shield-ring\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0"); var p1 = Sword("p1");
+        float sense = (float)p0.GetType().GetField("leafShieldSenseRadius").GetValue(p0);
+        float farthest = (float)p0.GetType().GetField("leafShieldMaxOrbitRadius").GetValue(p0);
+        float depth = (float)p0.GetType().GetField("leafShieldReachDepth").GetValue(p0);
+        float usualSpeed = (float)p0.GetType().GetField("leafShieldOrbitSpeed").GetValue(p0);
+        float chaseSpeed = (float)p0.GetType().GetField("leafShieldChaseOrbitSpeed").GetValue(p0);
+        var speed = p0.GetType().GetProperty("LeafShieldOrbitSpeedNow");
+        // 剣どうしが重なると物理で弾き飛ばされるので、確かめる間は2本とも物理で動かないよう止めておく
+        var enemy = p1.GetComponent<Rigidbody2D>();
+        p0.GetComponent<Rigidbody2D>().constraints = RigidbodyConstraints2D.FreezeAll;
+        enemy.linearVelocity = Vector2.zero;
+        enemy.constraints = RigidbodyConstraints2D.FreezeAll;
+        // 輪は「一番近い敵」を見るので、ほかの敵（p2・p3）はこのテストの間、実射程よりはるか遠くへ移して止めておく
+        for (int i = 2; i < 4; i++)
+        {
+            var other = Sword("p" + i).GetComponent<Rigidbody2D>();
+            other.position = (Vector2)p0.transform.position + Vector2.right * (farthest * 3f + i * 10f);
+            other.linearVelocity = Vector2.zero;
+            other.constraints = RigidbodyConstraints2D.FreezeAll;
+        }
+        var radius = p0.GetType().GetProperty("LeafShieldOrbitRadiusNow");
+        Func<float> nearest = () => p1.GetComponentsInChildren<Collider2D>().Where(c => c.enabled)
+            .Min(c => Vector2.Distance(c.ClosestPoint(p0.transform.position), p0.transform.position));
+        Func<string> state = () => $"距離={nearest():F2}, 輪の半径={(float)radius.GetValue(p0):F2}, 回る速さ={(float)speed.GetValue(p0):F0}";
+        // 追っている時の輪の半径：敵の一番近い点より depth だけ外（普段の半径5〜実射程の間）
+        Func<float> expected = () => Mathf.Clamp(nearest() + depth, 5f, farthest);
+        // 敵を「一番近い点までの距離が d」になる所へ置く（剣の中心と一番近い点の差は、はじめに測っておく）
+        float farOffset = farthest + 5f;
+        enemy.position = (Vector2)p0.transform.position + Vector2.right * farOffset;
+        yield return new WaitForFixedUpdate();
+        float gap = farOffset - nearest();
+        Action<float> placeAt = d => enemy.position = (Vector2)p0.transform.position + Vector2.right * (d + gap);
+
+        yield return RaiseShield(p0);
+        Debug.Log("[テスト] 実射程の外の敵：" + state());
+        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "An enemy beyond reach does not stretch the ring.");
+        Assert.AreEqual(usualSpeed, (float)speed.GetValue(p0), .01f);
+
+        // 感知射程の外（実射程の内側）にいるだけでは、広げ始めない
+        float between = (sense + farthest) * .5f;
+        placeAt(between);
+        yield return new WaitForSecondsRealtime(1f);
+        Debug.Log("[テスト] 感知射程の外：" + state());
+        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "An enemy outside sensing range does not start the ring.");
+
+        // 感知射程に入った敵には、その距離（の少し外）まで素早く広げ、速く回って何度も通る
+        placeAt((5f + sense) * .5f);
+        yield return new WaitForSecondsRealtime(.4f);
+        Debug.Log("[テスト] 感知射程の中：" + state());
+        Assert.AreEqual(expected(), (float)radius.GetValue(p0), .3f, "The ring quickly reaches out to a sensed enemy.");
+        Assert.AreEqual(chaseSpeed, (float)speed.GetValue(p0), .01f, "The shields spin faster while chasing an enemy.");
+        var guide = GameObject.Find("ShieldRingGuide_" + p0.name);
+        Assert.IsNotNull(guide, "The ring is drawn so its size can be checked.");
+        Assert.IsTrue(guide.GetComponent<LineRenderer>().enabled);
+
+        // 広げた後は、感知射程の外へ出ても実射程まで追いかける
+        placeAt(between);
+        yield return new WaitForSecondsRealtime(.6f);
+        Debug.Log("[テスト] 広げた後に感知射程の外へ：" + state());
+        Assert.AreEqual(expected(), (float)radius.GetValue(p0), .3f, "Once reaching, the ring follows the enemy out to its full reach.");
+
+        // 感知射程の境目を出入りしても、輪は戻ったり広がったりしない
+        for (int i = 0; i < 4; i++)
+        {
+            placeAt(i % 2 == 0 ? sense + .5f : sense - .5f);
+            yield return new WaitForSecondsRealtime(.25f);
+            Debug.Log("[テスト] 感知射程の境目を出入り：" + state());
+            Assert.Greater((float)radius.GetValue(p0), sense - 1.5f, "Brushing the edge of sensing range does not make the ring snap back.");
+        }
+
+        // 実射程の外へ離れたら、少し待ってからゆっくり普段の半径へ戻る
+        placeAt(farthest + 3f);
+        yield return new WaitForSecondsRealtime(.2f);
+        Assert.Greater((float)radius.GetValue(p0), sense - 1.5f, "The ring waits a moment before drawing back.");
+        yield return new WaitForSecondsRealtime(.6f + (farthest - 5f) / 3f);
+        Debug.Log("[テスト] 離れた後：" + state());
+        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "The ring returns to its usual size.");
+        Assert.AreEqual(usualSpeed, (float)speed.GetValue(p0), .01f, "The shields slow back down once they stop chasing.");
+
+        // 近い敵には縮めない（普段の半径のまま）
+        placeAt(2.5f);
+        yield return new WaitForSecondsRealtime(1f);
+        Debug.Log("[テスト] 近い敵：" + state());
+        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "The ring never shrinks below its usual size.");
+    }
+
     // ===== 大回転斬：倍率は×4、当たった物理ステップの間は無敵のまま、味方はすり抜ける =====
 
     private static bool Field(Component sword, string name)

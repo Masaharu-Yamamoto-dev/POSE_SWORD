@@ -133,8 +133,22 @@ public static bool matchEnded = false;
     public float leafShieldOrbitRadius = 3.5f; // 本体からの周回半径（＝防御圏の広さ）
     public float leafShieldRadius = 0.7f; // シールド1枚あたりの当たり判定の大きさ
     public float leafShieldOrbitSpeed = 150f; // 周回速度（度/秒）
-    public float leafShieldHpRatio = 1f / 3f; // 各シールドのHP（本体の最大HPに対する割合）
-    public float leafShieldReflectMultiplier = 2f; // シールドが被弾した時、受けたダメージの何倍を相手に返すか
+    public float leafShieldReflectMultiplier = 1f; // 返すダメージの倍率（分身に触れた敵には自分の攻撃力、本体を殴ってきた敵にはその敵の攻撃力に掛ける）
+    // ▼【変更】オレ達シールドは防御寄りに：本体は無敵ではなく受けるダメージが減り、分身は回数で割れる
+    public int leafShieldDurability = 2;            // 分身1枚の耐久（触れられる・本体が被弾するたびに1減り、0で割れる）
+    // ▼ 輪の広がり方：普段は leafShieldOrbitRadius。一番近い敵が「感知射程」に入ったら広げ始め、広げた後は「実射程」まで追いかける。
+    // 始める距離（感知射程）とやめる距離（実射程）に差があるので、境目を敵が通っても広がったり戻ったりを繰り返さない
+    public float leafShieldSenseRadius = 8f;        // 感知射程：一番近い敵がここまで入ったら広げ始める
+    public float leafShieldMaxOrbitRadius = 12f;    // 実射程：広げた後は、敵がここまで離れても追いかける（輪の上限）
+    public float leafShieldReachDepth = .5f;        // 輪を「敵の一番近い点」よりこれだけ外に合わせ、分身が敵の体に食い込む位置を通るようにする
+    public float leafShieldChaseOrbitSpeed = 180f;  // 敵を追っている間の回る速さ（度/秒）。普段は leafShieldOrbitSpeed。敵の方向を通る回数を増やす
+    public float leafShieldReachTime = .15f;        // 広げる時に、どこまで広げてもほぼ届くまでの時間（着く直前はなめらかに減速）
+    public float leafShieldRadiusReturnSpeed = 3f;  // 輪を普段の半径へ戻す速さ（毎秒）。広げる時よりゆっくり戻して落ち着いて見せる
+    public float leafShieldReachStartDelay = 0f;    // 敵が感知射程にこの秒数いたら広げ始める（0ならすぐ。一瞬かすめただけで広げたくない時に上げる）
+    public float leafShieldReachHoldTime = .4f;     // 実射程から出ても、この秒数は広げたまま待ってから戻す
+    public float leafShieldDamageTakenRate = .5f;   // シールドが出ている間、本体が受けるダメージの割合
+    public float shieldRetaliateInterval = .3f;     // 同じ敵に返すのは、この秒数に1回まで
+    public float leafShieldKnockbackRate = .3f;     // シールドが出ている間、剣同士がぶつかった時に自分が弾かれる強さの割合（鎧で踏みとどまる）
 
     // 突進状態の管理用
 // 突進状態の管理用
@@ -155,12 +169,17 @@ public static bool matchEnded = false;
     private bool loggedButtonGuardStall = false;
     private bool wasLocalControlledForButton = false;
 
-    // ▼【新規追加】オレ達シールド(旧リーフシールド)が展開されている間の本体無敵管理。
-    // シールドのCollider2DはisTrigger(=当たっても攻撃側の移動を止めない)なので、これが無いと
-    // シールドで反射ダメージを受けた直後にそのまま本体まで刺さって、本体側もダメージを受けてしまう。
-    // 展開中の枚(GameObject)の数をここで数え、1枚でも残っていれば本体への通常ダメージを無効化する
-    [HideInInspector] public int activeLeafShieldCount = 0;
-    public bool HasActiveLeafShield => activeLeafShieldCount > 0;
+    // ▼【変更】オレ達シールドが展開されている間の本体の守り。以前は1枚でも残っていれば本体が完全無敵だったが、
+    // 受けるダメージを減らす（leafShieldDamageTakenRate）だけにし、柄も弱点にならないようにした
+    readonly List<LeafShieldOrb> activeShieldOrbs = new List<LeafShieldOrb>();
+    public bool HasActiveLeafShield => activeShieldOrbs.Count > 0;
+    public void RegisterShieldOrb(LeafShieldOrb orb) { if (orb != null && !activeShieldOrbs.Contains(orb)) activeShieldOrbs.Add(orb); }
+    public void UnregisterShieldOrb(LeafShieldOrb orb) { activeShieldOrbs.Remove(orb); }
+    // 今の輪の半径。分身(LeafShieldOrb)はこれを見て回る
+    float leafShieldRadiusNow = -1f;
+    public float LeafShieldOrbitRadiusNow => leafShieldRadiusNow > 0f ? leafShieldRadiusNow : leafShieldOrbitRadius;
+    // 今の回る速さ（度/秒）。敵を追って輪を広げている間は速く回し、敵の方向を通る回数を増やす
+    public float LeafShieldOrbitSpeedNow => shieldReaching ? leafShieldChaseOrbitSpeed : leafShieldOrbitSpeed;
 
     // ▼【新規追加】残機モードでリスポーン(次の剣に持ち替え)した直後の無敵時間。
     // 無敵中はスプライトを点滅させて、見た目でも無敵中だと分かるようにする
@@ -368,7 +387,7 @@ public static bool matchEnded = false;
             return;
         }
         int hpBefore = target.hp;
-        target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
+        target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint, this, byBody);
         int dealt = Mathf.Max(0, hpBefore - target.hp);
         // 端数はMatchRulesと同じく四捨五入（0.5は切り上げ）
         if (lifestealRate > 0f && dealt > 0) HealLocally((int)System.Math.Round(dealt * (double)Mathf.Clamp01(lifestealRate), System.MidpointRounding.AwayFromZero));
@@ -587,6 +606,34 @@ public static bool matchEnded = false;
     {
         UpdateGiantSpinReach();
         UpdateStaggerBlink();
+        UpdateShieldRingGuide();
+    }
+
+    // ▼【新規追加】オレ達シールドの輪の大きさを確かめるための、仮の表示（薄い緑の円）。
+    // 分身はホスト側にしかないので、ホスト（とローカル対戦）の画面にだけ出る。演出の本番で差し替えるか消す
+    LineRenderer shieldRingLine;
+
+    void UpdateShieldRingGuide()
+    {
+        bool show = IsAlive && HasActiveLeafShield;
+        if (!show)
+        {
+            if (shieldRingLine != null) shieldRingLine.enabled = false;
+            return;
+        }
+        if (shieldRingLine == null)
+        {
+            shieldRingLine = CreateCircleLine("ShieldRingGuide_" + name, ColorForDashType(6), .35f);
+        }
+        float radius = LeafShieldOrbitRadiusNow;
+        Vector3 centre = transform.position;
+        for (int i = 0; i < ReachSegments; i++)
+        {
+            float a = i * Mathf.PI * 2f / ReachSegments;
+            shieldRingLine.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
+        }
+        shieldRingLine.startWidth = shieldRingLine.endWidth = .05f;
+        shieldRingLine.enabled = true;
     }
 
     const int ReachSegments = 64;
@@ -643,15 +690,20 @@ public static bool matchEnded = false;
 
     LineRenderer CreateReachLine()
     {
-        // 剣の子にすると大きさに引きずられるので、独立したオブジェクトにして OnDestroy で片付ける
-        var line = new GameObject("GiantSpinReach_" + name).AddComponent<LineRenderer>();
+        return CreateCircleLine("GiantSpinReach_" + name, ColorForDashType(4), .55f);
+    }
+
+    // 円を描く線。剣の子にすると大きさに引きずられるので、独立したオブジェクトにして OnDestroy で片付ける
+    LineRenderer CreateCircleLine(string objectName, Color color, float alpha)
+    {
+        var line = new GameObject(objectName).AddComponent<LineRenderer>();
         line.useWorldSpace = true;
         line.loop = true;
         line.positionCount = ReachSegments;
         var shader = Shader.Find("Sprites/Default");
         if (shader != null) line.material = new Material(shader);
-        Color c = ColorForDashType(4);
-        c.a = .55f;
+        Color c = color;
+        c.a = alpha;
         line.startColor = line.endColor = c;
         if (spriteRenderer != null)
         {
@@ -688,10 +740,11 @@ public static bool matchEnded = false;
 
     void OnDestroy()
     {
-        if (giantReachLine != null)
+        foreach (var line in new[] { giantReachLine, shieldRingLine })
         {
-            if (giantReachLine.material != null) Destroy(giantReachLine.material);
-            Destroy(giantReachLine.gameObject);
+            if (line == null) continue;
+            if (line.material != null) Destroy(line.material);
+            Destroy(line.gameObject);
         }
     }
 
@@ -847,6 +900,7 @@ public static bool matchEnded = false;
                 $"currentSp={currentSp}, buttonActive={(specialAttackButton != null ? specialAttackButton.gameObject.activeSelf.ToString() : "no-button")}");
         }
         if (!isRoundStarted || isDead || matchEnded) return;
+        UpdateLeafShieldRadius();
 
         if (MultiplayerOwner == null || MultiplayerOwner.IsHost) currentSp += passiveSpFill * Time.deltaTime;
         currentSp = Mathf.Clamp(currentSp, 0f, maxSp);
@@ -1175,7 +1229,7 @@ public static bool matchEnded = false;
                 {
                     Vector2 clashBounce = (transform.position - target.transform.position).normalized;
                     clashBounce.y += 1.0f; // やや上方向に激しく弾く
-                    rb.AddForce(clashBounce * (bounceForce * rb.mass * 1.5f), ForceMode2D.Impulse);
+                    rb.AddForce(clashBounce * (bounceForce * rb.mass * 1.5f * KnockbackScale), ForceMode2D.Impulse);
                 }
                 return; // 鍔迫り合いなのでダメージ計算はせず終了
             }
@@ -1188,7 +1242,7 @@ public static bool matchEnded = false;
                     if (!SwordController.isKomaMode) {
                         bounceDir.y += 0.5f; 
                     }
-                    rb.AddForce(bounceDir.normalized * (bounceForce * rb.mass), ForceMode2D.Impulse);
+                    rb.AddForce(bounceDir.normalized * (bounceForce * rb.mass * KnockbackScale), ForceMode2D.Impulse);
                 }
             }
 
@@ -1320,8 +1374,8 @@ public static bool matchEnded = false;
                         isCrit = true;
                     }
 
-                // 相手の柄（弱点）判定
-                    if (targetCollider.CompareTag("Handle"))
+                // 相手の柄（弱点）判定。オレ達シールドが出ている相手は、柄が弱点にならない
+                    if (targetCollider.CompareTag("Handle") && !target.HasActiveLeafShield)
                     {
                         damage *= 2;
                         isWeakPoint = true;
@@ -1330,7 +1384,7 @@ public static bool matchEnded = false;
                     // ▼変更：TakeDamageの結果（倒したかどうか）を受け取る
                     bool killedTarget = false;
                     if (MultiplayerOwner != null) MultiplayerOwner.QueueHit(this, target, damage, hitPoint, isCrit || isWeakPoint);
-                    else killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint);
+                    else killedTarget = target.TakeDamage(damage, hitPoint, isCrit, isWeakPoint, this, true);
 
                     // ▼追加：もし自分が勝者になったなら、弾き飛ぶのをキャンセル！
                     if (killedTarget)
@@ -1373,7 +1427,8 @@ public static bool matchEnded = false;
     }
 
     // ▼変更：void から bool に変更
-    public bool TakeDamage(int damage, Vector2 hitPos, bool isCrit, bool isWeakPoint)
+    // attacker：攻撃した剣（分かる時だけ）。byBody：剣の本体で当てたか。オレ達シールドの返しに使う
+    public bool TakeDamage(int damage, Vector2 hitPos, bool isCrit, bool isWeakPoint, SwordBattle attacker = null, bool byBody = true)
     {
         if (MultiplayerOwner != null) return false; // HP is committed once per physics step by MatchRules.
         if (isDead) return false; // 変更
@@ -1384,16 +1439,15 @@ public static bool matchEnded = false;
             // if (parrySound != null) audioSource.PlayOneShot(parrySound);
             return false;
         }
-        if (HasActiveLeafShield)
-        {
-            Debug.Log("🍃 オレ達シールド展開中につき本体無敵！攻撃はシールドの反射に任せる！");
-            return false;
-        }
         if (IsRespawnInvincible)
         {
             Debug.Log("✨ リスポーン直後につき無敵！攻撃を弾いた！");
             return false;
         }
+
+        // ▼【変更】オレ達シールドが出ている間は、受けるダメージを減らす（以前は完全無敵）
+        bool shielded = HasActiveLeafShield;
+        damage = ShieldedDamage(damage);
 
         float damagePercentage = ((float)damage / maxHp) * 100f; 
         currentSp = Mathf.Clamp(currentSp + (damagePercentage * damageSpMultiplier), 0f, maxSp);
@@ -1401,6 +1455,8 @@ public static bool matchEnded = false;
         hp -= damage;
         if (hp < 0) hp = 0;
         UpdateUI();
+        // 本体が被弾したら、分身の耐久を1減らし、本体で殴ってきた相手には返す
+        if (shielded && hp > 0) OnShieldedBodyHit(attacker, hitPos, byBody);
 
         // ▼【新規追加】ダメージ数値をポップアップさせる！
         if (damagePopupPrefab != null && damage > 0)
@@ -2182,8 +2238,8 @@ public static bool matchEnded = false;
         bool isAuthoritative = rb == null || rb.bodyType == RigidbodyType2D.Dynamic;
         if (isAuthoritative && spriteRenderer != null)
         {
-            float shieldHp = Mathf.Max(1f, maxHp * leafShieldHpRatio);
             float sectorSize = 360f / Mathf.Max(1, leafShieldCount);
+            leafShieldRadiusNow = leafShieldOrbitRadius;
 
             for (int i = 0; i < leafShieldCount; i++)
             {
@@ -2214,7 +2270,7 @@ public static bool matchEnded = false;
                 col.radius = leafShieldRadius / Mathf.Max(.0001f, shieldObj.transform.localScale.x);
 
                 LeafShieldOrb orb = shieldObj.AddComponent<LeafShieldOrb>();
-                orb.Setup(this, i * sectorSize, leafShieldOrbitRadius, leafShieldOrbitSpeed, shieldHp, leafShieldReflectMultiplier, leafShieldDuration);
+                orb.Setup(this, i * sectorSize, leafShieldDurability, leafShieldDuration);
 
                 // ▼ オンライン対戦では、この分身をMultiplayerManagerに登録し、位置をSYNCでクライアントへ配信する
                 if (MultiplayerOwner != null)
@@ -2277,6 +2333,150 @@ public static bool matchEnded = false;
         return true;
     }
 
+    // ▼【新規追加】オレ達シールドの守りと返し
+    // 剣同士がぶつかった時に自分が弾かれる強さの倍率。オレ達シールドが出ている間は弱める（相手側の弾かれ方は変えない）
+    public float KnockbackScale => HasActiveLeafShield ? leafShieldKnockbackRate : 1f;
+
+    // 受けるダメージ：シールドが出ていれば leafShieldDamageTakenRate を掛ける（1未満にはしない）
+    public int ShieldedDamage(int damage)
+    {
+        return HasActiveLeafShield ? Mathf.Max(1, Mathf.RoundToInt(damage * leafShieldDamageTakenRate)) : damage;
+    }
+
+    // 本体が実際にダメージを受けた時（ローカルはTakeDamage、オンラインはMatchRulesの確定後にMultiplayerManagerから）。
+    // 耐久が一番残っている分身を1削り、本体で殴ってきた相手には返す。分身や返しの攻撃（本体ではない）には返さないので、
+    // シールド同士で返し合いが続くことはない
+    public void OnShieldedBodyHit(SwordBattle attacker, Vector2 point, bool byBody)
+    {
+        if (!HasActiveLeafShield) return;
+        LeafShieldOrb sturdiest = null;
+        foreach (var orb in activeShieldOrbs)
+            if (orb != null && (sturdiest == null || orb.Durability > sturdiest.Durability)) sturdiest = orb;
+        if (sturdiest != null) sturdiest.Wear(1);
+        // 本体を殴ってきた相手には、相手自身の攻撃力ぶんを返す（殴るほど痛い）
+        if (byBody && attacker != null) TryShieldRetaliate(attacker, point, attacker.attack);
+    }
+
+    // 敵に「baseAttack×倍率」を返す。分身に触れた時と本体を殴られた時で共通の間隔（同じ敵には shieldRetaliateInterval 秒に1回まで）。
+    // ▼【変更】分身に触れた敵には自分の攻撃力、本体を殴ってきた敵にはその敵の攻撃力を基にする（呼び出し側が決める）。
+    // 分身の返しを相手の攻撃力で決めていた時は、攻撃力が低くHPの多い相手をほとんど削れず、相手によって強さが大きく変わっていた。
+    // 本体で当てた攻撃ではない扱いなので、倒しても撃破の停止はない
+    readonly Dictionary<SwordBattle, float> lastShieldRetaliation = new Dictionary<SwordBattle, float>();
+
+    public bool TryShieldRetaliate(SwordBattle enemy, Vector2 point, int baseAttack)
+    {
+        if (enemy == null || enemy == this || !enemy.IsAlive || !IsAlive) return false;
+        if (lastShieldRetaliation.TryGetValue(enemy, out var at) && Time.time - at < shieldRetaliateInterval) return false;
+        lastShieldRetaliation[enemy] = Time.time;
+        int damage = Mathf.Max(1, Mathf.RoundToInt(baseAttack * leafShieldReflectMultiplier));
+        DealDamageTo(enemy, damage, point, false, false, false);
+        return true;
+    }
+
+    // 輪の半径。普段は leafShieldOrbitRadius（近い敵には縮めなくても当たる）で、一番近い敵が少し離れている時だけ、
+    // その距離まで広げて分身を届かせる。一番近い敵が感知射程（leafShieldSenseRadius）に少しいたら広げ始め、
+    // 広げた後は実射程（leafShieldMaxOrbitRadius）まで追いかけ、そこから出て少し経ったら（または近くまで来たら）ゆっくり戻す。
+    // 距離は「輪の中心（自分の刀身の根元）から、敵の当たり判定の一番近い点まで」で測る（敵が傾いていても一番近い部分に届く）
+    bool shieldReaching;
+    float shieldReachInTime, shieldReachOutTime;
+
+    void UpdateLeafShieldRadius()
+    {
+        if (!HasActiveLeafShield)
+        {
+            leafShieldRadiusNow = -1f;
+            shieldReaching = false;
+            shieldReachInTime = shieldReachOutTime = 0f;
+            return;
+        }
+        float usual = leafShieldOrbitRadius;
+        float farthest = Mathf.Max(usual, leafShieldMaxOrbitRadius);
+        float sense = Mathf.Clamp(leafShieldSenseRadius, usual, farthest);
+        float nearest = NearestEnemyPartDistance();
+        if (!shieldReaching)
+        {
+            bool sensed = nearest > usual && nearest <= sense;
+            shieldReachInTime = sensed ? shieldReachInTime + Time.deltaTime : 0f;
+            // 感知射程の中にいることも条件にする（待ち時間が0の時に、敵がいなくても追い始めていた）
+            if (sensed && shieldReachInTime >= leafShieldReachStartDelay) { shieldReaching = true; shieldReachOutTime = 0f; }
+        }
+        else
+        {
+            // 近くまで来た（普段の半径で当たる）か、実射程の外へ出た
+            bool done = nearest < 0f || nearest <= usual || nearest > farthest;
+            shieldReachOutTime = done ? shieldReachOutTime + Time.deltaTime : 0f;
+            if (shieldReachOutTime >= leafShieldReachHoldTime) { shieldReaching = false; shieldReachInTime = 0f; }
+        }
+        float now = LeafShieldOrbitRadiusNow;
+        // 敵の一番近い点より少し外に合わせて、分身が敵の体に食い込む位置を通るようにする
+        float wanted = shieldReaching && nearest >= 0f ? Mathf.Clamp(nearest + leafShieldReachDepth, usual, farthest) : usual;
+        if (wanted > now)
+        {
+            // 広げる：残りの距離に比例した速さで近づける（どこまで広げても leafShieldReachTime でほぼ届き、着く直前は減速する）
+            float k = 1f - Mathf.Exp(-3f * Time.deltaTime / Mathf.Max(.01f, leafShieldReachTime));
+            leafShieldRadiusNow = Mathf.Lerp(now, wanted, k);
+        }
+        else
+        {
+            leafShieldRadiusNow = Mathf.MoveTowards(now, wanted, leafShieldRadiusReturnSpeed * Time.deltaTime);
+        }
+    }
+
+    // 輪が気にする敵：オンラインは生きている敵全員（1vs3の味方は除く）、ローカル対戦は狙っている相手
+    IEnumerable<SwordBattle> NearbyEnemies()
+    {
+        return MultiplayerOwner != null
+            ? MultiplayerOwner.OpponentSwordsOf(PlayerId)
+            : (controller != null && controller.enemyTarget != null
+                ? new[] { controller.enemyTarget.GetComponentInParent<SwordBattle>() }
+                : new SwordBattle[0]);
+    }
+
+    // 輪の中心から、一番近い敵の当たり判定の一番近い点までの距離。敵がいなければ -1。
+    // ▼【修正】オンラインでは「狙っている相手」に限らず、生きている敵（1vs3の味方は除く）全員から一番近いものを探す。
+    // 狙う相手は急に切り替わらないよう粘る作りなので、それだけを見ていると、届く範囲に別の敵がいても広がらなかった
+    public float NearestEnemyPartDistance()
+    {
+        Vector2 centre = transform.position;
+        float nearest = -1f;
+        foreach (var enemy in NearbyEnemies())
+        {
+            if (enemy == null || enemy == this || !enemy.IsAlive) continue;
+            foreach (var part in enemy.GetComponentsInChildren<Collider2D>())
+            {
+                if (part == null || !part.enabled) continue;
+                float distance = Vector2.Distance(part.ClosestPoint(centre), centre);
+                if (nearest < 0f || distance < nearest) nearest = distance;
+            }
+        }
+        return nearest;
+    }
+
+    // 巨大回転斬がオレ達シールドの分身に触れた時：この一回転でまだ victim（分身の持ち主）に当たっていなければ、
+    // 分身が身代わりになる（本体にはもう当たらない）。本体が先に触れていた（当てる順番待ちの）時は false
+    public bool TryUseGiantSpinHitOn(SwordBattle victim)
+    {
+        if (currentDashType != 4 || !giantSpinHitActive || victim == null) return false;
+        foreach (var pending in pendingGiantSpinHits) if (pending.target == victim) return false;
+        return giantSpinHitTargets.Add(victim);
+    }
+
+    // 大回転斬がオレ達シールドの分身に触れた時：分身から離れる向きへ跳ね返って、突進を続ける
+    public void BounceSpinDashOff(Vector2 from)
+    {
+        if (currentDashType != 3 || !isDashShooting || rb == null || rb.bodyType != RigidbodyType2D.Dynamic) return;
+        Vector2 velocity = rb.linearVelocity;
+        Vector2 normal = (Vector2)transform.position - from;
+        if (normal.sqrMagnitude < .0001f) normal = -velocity;
+        if (normal.sqrMagnitude < .0001f) return;
+        normal.Normalize();
+        Vector2 bounce = velocity.sqrMagnitude > .0001f ? Vector2.Reflect(velocity.normalized, normal) : normal;
+        // すれ違いざまで、反射してもまだ分身の方へ向かう時は、分身から離れる向きにする
+        if (Vector2.Dot(bounce, normal) < 0f) bounce = normal;
+        rb.linearVelocity = bounce * Mathf.Max(velocity.magnitude, 40f);
+        rb.angularVelocity = Mathf.Sign(bounce.x) * -2500f;
+    }
+
     // ▼【修正】分身・シールドの見た目の大きさ。本体の刀身と同じく、元画像の横幅に関係なく
     // 「刀身の太さ(SwordGenerator.targetBladeWidth) × 本体の大きさ」の横幅にそろえる倍率を返す。
     // 以前は「今装備している剣の元画像の横幅」に合わせていたため、同じ画像の分身でも、装備中の剣の画像によって大きさが変わっていた。
@@ -2335,7 +2535,7 @@ public static bool matchEnded = false;
             if (target == null || !target.IsAlive || !giantSpinHitTargets.Add(target)) continue;
             // 1人目は等倍、2人目・3人目以降は減らす
             float rate = PoseSword.Multiplayer.BattlePolicies.GiantSpinHitRate(giantSpinHitTargets.Count, giantSpinSecondHitRate, giantSpinLaterHitRate);
-            bool isWeakPoint = part != null && part.CompareTag("Handle");
+            bool isWeakPoint = part != null && part.CompareTag("Handle") && !target.HasActiveLeafShield;
             int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier * rate);
             if (isWeakPoint) damage *= 2;
             damage = Mathf.Max(damage, 1);
