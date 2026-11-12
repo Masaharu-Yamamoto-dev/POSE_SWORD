@@ -83,6 +83,8 @@ private ParticleSystem ultimateAuraInstance;
 private bool ultimateAuraActive;
 private SpriteRenderer spriteRenderer;
 private SwordController controller;
+// 刀身の絵。必殺技の演出（SkillEffects）が描画順や残像の元に使う
+public SpriteRenderer BodyRenderer => spriteRenderer;
 
 [Header("サウンド")]
     public AudioClip normalHitSound; // 通常ヒット音
@@ -99,7 +101,17 @@ public static bool matchEnded = false;
     public float passiveSpFill = 5f;   // 1秒間に自動で溜まる量
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
     public float spinDashDamageMultiplier = 4f; // 大回転斬（hiltType:"0"）が相手の剣に当たった時の、通常の衝突ダメージへの倍率（以前は5）
-    public float giantSpinScale = 6f; // 巨大化一回転（hiltType:"1"）の拡大率
+    // ▼【新規追加】大回転斬の終わり方。以前はその場で速さも回転も0になって落ちていた。
+    // 外れた（2秒たった）時は減速しながら回転がゆるみ、敵に当たった時は反動で少し弾かれてから、どちらもゆっくり降りる。
+    // 減速・弾かれている間は操作を受け付けず、ゆっくり降りる間は操作でき、ジャンプするとすぐ普通の動きに戻る
+    public float spinMissSlowTime = 0.45f;      // 外れた時：減速して回転がゆるむまで
+    public float spinHitRecoilTime = 0.25f;     // 当たった時：弾かれて回転がゆるむまで
+    public float spinHitRecoilDistance = 2f;    // 当たった時に弾かれる距離（突進と反対向き）
+    public float spinDescendTime = 0.5f;        // ゆっくり降りる：重力をこの秒数かけて元に戻す
+    // 突進中に床や壁へこの角度（度）より浅く触れた時は、跳ね返さずにその面に沿って滑る。
+    // 地上どうしで撃つと、回る刀身が床に触れるたびに跳ね返って、凸凹と這うように見えていた
+    public float spinGrazeAngle = 30f;
+    public float giantSpinScale = 5f; // 巨大化一回転（hiltType:"1"）の拡大率（以前は6）
     public float giantSpinDamageMultiplier = 8f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
     public float giantSpinRotationSpeed = 1080f; // 巨大化一回転の回転速度（度/秒）。小さくするとゆっくり回るようになる（一回転にかかる時間もこれに応じて伸びる）
     // ▼【新規追加】巨大回転斬の流れ（カットインの後）：柄が光る → 3段階で巨大化 → 振りかぶり → 一回転（攻撃判定はここだけ）
@@ -154,6 +166,11 @@ public static bool matchEnded = false;
 // 突進状態の管理用
     [HideInInspector] public bool isDashing = false;
     [HideInInspector] public bool isDashShooting = false;
+    // ▼【新規追加】大回転斬の段階（SpinDashStage の値）。演出の切り替えと、終わり際の操作の受け付けに使う。
+    // オンライン対戦ではホストが決めてゲストへ同期する
+    [HideInInspector] public int spinDashPhase = 0;
+    // ▼【新規追加】巨大回転斬の段階（GiantSpinStage の値。ふらつきは含まない）。演出の切り替えに使い、ホストからゲストへ同期する
+    [HideInInspector] public int giantSpinPhase = 0;
     private float dashDamageBonus = 1.0f;
     // ▼【修正】単一のboolだと「最初に当てた1人」以降、他の誰にも一切ヒットしなくなってしまい、
     // 3〜4人戦で2人目・3人目に必殺技が当たらない不具合の原因になっていた。回転中に同じ相手へ
@@ -276,7 +293,7 @@ public static bool matchEnded = false;
         MultiplayerOwner = owner; PlayerId = playerId;
         InitializeComponents(); StopAllCoroutines();
         enabled = true; isDead = false; isDashing = false; isDashShooting = false;
-        currentDashType = 0; currentSp = 0;
+        currentDashType = 0; currentSp = 0; spinDashPhase = 0; giantSpinPhase = 0;
         ApplyPlayerColor();
         controller.enabled = true;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = true;
@@ -297,8 +314,8 @@ public static bool matchEnded = false;
         switch (action)
         {
             case "KomaDash": StartCoroutine(DashRoutine()); break;
-            case "JumpRight": controller.NetworkJump(true); break;
-            case "JumpLeft": controller.NetworkJump(false); break;
+            case "JumpRight": Jump(true); break;
+            case "JumpLeft": Jump(false); break;
         }
     }
 
@@ -505,7 +522,7 @@ public static bool matchEnded = false;
     {
         if (MultiplayerOwner == null) return;
         isDead = false; isDashing = false; isDashShooting = false; skillAllowsMovement = false;
-        currentDashType = 0; currentSp = 0;
+        currentDashType = 0; currentSp = 0; spinDashPhase = 0; giantSpinPhase = 0;
         StopUltimateAura();
         StopAllCoroutines();
         controller.enabled = true;
@@ -543,7 +560,7 @@ public static bool matchEnded = false;
         hp = Mathf.Clamp(health, 0, maxHp); UpdateUI();
         if (healed > 0) ShowHealPopup(healed);
         if (hp > 0) return;
-        isDead = true; isDashing = false; currentDashType = 0; skillAllowsMovement = false;
+        isDead = true; isDashing = false; currentDashType = 0; skillAllowsMovement = false; spinDashPhase = 0; giantSpinPhase = 0;
         RestoreTeammateCollisions();
         SetHiltGlow(false);
         giantSpinHitActive = false;
@@ -577,9 +594,11 @@ public static bool matchEnded = false;
 
     // ▼【修正】dashType 4(巨大化一回転)・5(分身突進)・6(リーフシールド発動)の色分けと、
     // 巨大化のスケールをクライアント側にも反映する
-    public void ApplyMultiplayerVisuals(float sp, bool dashing, int dashType, float scale)
+    public void ApplyMultiplayerVisuals(float sp, bool dashing, int dashType, float scale, int spinPhase = 0, int giantPhase = 0)
     {
         if (!IsAlive) return;
+        spinDashPhase = spinPhase;
+        giantSpinPhase = giantPhase;
         // ▼【新規追加】Client側はUltimateRoutine()自体をローカル実行しない（Host権威でのみ実行される）ため、
         // カットインもここで再生する。dashTypeが必殺技の値に変わった瞬間（0/1→2〜6）だけ発火させる
         int previousDashType = currentDashType;
@@ -604,9 +623,9 @@ public static bool matchEnded = false;
     // 技番号と大きさはゲストにも同期されているので、ホストもゲストもそれぞれの画面でこれを見て描く
     void LateUpdate()
     {
-        UpdateGiantSpinReach();
-        UpdateStaggerBlink();
+        UpdateGiantSpinLook();
         UpdateShieldRingGuide();
+        UpdateSpinDashLook();
     }
 
     // ▼【新規追加】オレ達シールドの輪の大きさを確かめるための、仮の表示（薄い緑の円）。
@@ -637,39 +656,59 @@ public static bool matchEnded = false;
     }
 
     const int ReachSegments = 64;
-    LineRenderer giantReachLine;
     PolygonCollider2D[] bladeShapes;
-    int reachSeenDashType;
-    float giantSpinBaseScaleX;
 
-    void UpdateGiantSpinReach()
+    // ▼【変更】巨大回転斬の演出。以前は仮の見た目（赤い円・ふらつきの点滅・ホストだけの柄の金色）だった。
+    // 段階（giantSpinPhase、ゲストへ同期）の変わり目を見て、見た目（SkillEffects.GiantSpin）を切り替える。
+    // ふらつきは技番号（StaggerDashType）から決める
+    IGiantSpinLook giantSpinLook;
+    GiantSpinStage giantSpinLookStage;
+
+    void UpdateGiantSpinLook()
     {
-        // 巨大回転斬が始まった瞬間（カットインの前で、まだ元の大きさ）の大きさを、巨大化したかどうかの基準にする
-        if (currentDashType == 4 && reachSeenDashType != 4)
+        GiantSpinStage stage = !IsAlive || SwordController.isKomaMode ? GiantSpinStage.None
+            : giantSpinPhase != 0 ? (GiantSpinStage)giantSpinPhase
+            : IsStaggered ? GiantSpinStage.Stagger : GiantSpinStage.None;
+        if (stage != giantSpinLookStage)
         {
-            giantSpinBaseScaleX = transform.localScale.x;
-            bladeShapes = GetComponentsInChildren<PolygonCollider2D>(true);
+            // 技を始めた時の刀身の形で届く範囲を測る（持ち替えで刀身が変わることがあるので毎回取り直す）
+            if (stage == GiantSpinStage.HiltGlow || bladeShapes == null) bladeShapes = GetComponentsInChildren<PolygonCollider2D>(true);
+            if (giantSpinLook == null && stage != GiantSpinStage.None) giantSpinLook = SkillEffects.GiantSpin.Create(this);
+            // 柄が光る：柄を金色にする（演出の部品は光のにじみと粒を足す）
+            SetHiltGlow(stage == GiantSpinStage.HiltGlow);
+            if (giantSpinLook != null) giantSpinLook.SetStage(stage, GiantStageDuration(stage));
+            giantSpinLookStage = stage;
         }
-        reachSeenDashType = currentDashType;
-
-        bool show = IsAlive && currentDashType == 4 && giantSpinBaseScaleX > 0f && transform.localScale.x > giantSpinBaseScaleX * 1.05f;
-        if (!show)
-        {
-            if (giantReachLine != null) giantReachLine.enabled = false;
-            return;
-        }
-        if (giantReachLine == null) giantReachLine = CreateReachLine();
-
-        float radius = CurrentReach();
-        Vector3 centre = transform.position;
-        for (int i = 0; i < ReachSegments; i++)
-        {
-            float a = i * Mathf.PI * 2f / ReachSegments;
-            giantReachLine.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
-        }
-        giantReachLine.startWidth = giantReachLine.endWidth = radius * 0.015f;
-        giantReachLine.enabled = true;
+        if (giantSpinLook != null && stage != GiantSpinStage.None) giantSpinLook.Tick(Time.deltaTime);
     }
+
+    float GiantStageDuration(GiantSpinStage stage)
+    {
+        switch (stage)
+        {
+            case GiantSpinStage.HiltGlow: return giantSpinHiltGlowTime;
+            case GiantSpinStage.Grow: return giantSpinGrowTime;
+            case GiantSpinStage.Windup: return giantSpinWindupTime;
+            case GiantSpinStage.Spin: return 360f / Mathf.Max(1f, Mathf.Abs(giantSpinRotationSpeed));
+            case GiantSpinStage.Linger: return giantSpinLingerTime;
+            case GiantSpinStage.Shrink: return giantSpinShrinkTime;
+            case GiantSpinStage.Stagger: return giantSpinStaggerOnMiss;
+            default: return 0f;
+        }
+    }
+
+    // 今の大きさでの、剣の中心から一番遠い刀身の点までの距離（巨大回転斬の届く範囲。演出が使う）
+    public float GiantSpinReachNow
+    {
+        get
+        {
+            if (bladeShapes == null) bladeShapes = GetComponentsInChildren<PolygonCollider2D>(true);
+            return CurrentReach();
+        }
+    }
+
+    // 演出が「当たったか」を見るための相手（ホストもゲストも同じ顔ぶれ）
+    public IEnumerable<SwordBattle> EffectOpponents() => NearbyEnemies();
 
     // 剣の中心から一番遠い刀身の点までの距離（回転しても変わらない、今の大きさでの届く範囲）
     float CurrentReach()
@@ -686,11 +725,6 @@ public static bool matchEnded = false;
             }
         if (reach <= 0f && spriteRenderer != null) reach = spriteRenderer.bounds.extents.magnitude;
         return reach;
-    }
-
-    LineRenderer CreateReachLine()
-    {
-        return CreateCircleLine("GiantSpinReach_" + name, ColorForDashType(4), .55f);
     }
 
     // 円を描く線。剣の子にすると大きさに引きずられるので、独立したオブジェクトにして OnDestroy で片付ける
@@ -713,34 +747,11 @@ public static bool matchEnded = false;
         return line;
     }
 
-    bool staggerBlinking;
-
-    void UpdateStaggerBlink()
-    {
-        if (spriteRenderer == null) return;
-        if (IsStaggered && IsAlive)
-        {
-            var c = spriteRenderer.color;
-            c.a = Mathf.FloorToInt(Time.time / 0.08f) % 2 == 0 ? 1f : .4f;
-            spriteRenderer.color = c;
-            staggerBlinking = true;
-        }
-        else if (staggerBlinking)
-        {
-            staggerBlinking = false;
-            // リスポーン直後の点滅中なら、そちらに任せる
-            if (respawnInvincibleTimer <= 0f)
-            {
-                var c = spriteRenderer.color;
-                c.a = 1f;
-                spriteRenderer.color = c;
-            }
-        }
-    }
-
     void OnDestroy()
     {
-        foreach (var line in new[] { giantReachLine, shieldRingLine })
+        if (spinDashLook != null) { spinDashLook.Dispose(); spinDashLook = null; }
+        if (giantSpinLook != null) { giantSpinLook.Dispose(); giantSpinLook = null; }
+        foreach (var line in new[] { shieldRingLine })
         {
             if (line == null) continue;
             if (line.material != null) Destroy(line.material);
@@ -837,6 +848,23 @@ public static bool matchEnded = false;
     {
         // 巨大回転斬：前の物理ステップで触れた相手に、近い順で当てる
         FlushGiantSpinHits();
+        // 大回転斬：当たった時に弾かれる向きを決めるため、突進中の速さと回転を覚えておく
+        // （当たった衝突の中では、速さがもう衝突で変わっているため）
+        if (spinDashPhase == (int)SpinDashStage.Dash && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
+        {
+            // ▼【新規追加】突進中は、撃ち出した（跳ね返った）時の速さと回転を保つ。回っている刀身が天井や壁をかすると、
+            // まさつで車輪のように天井をつかんで蹴り出され、進む向きと速さが変わっていた。
+            // 向きが変わるのは、壁での跳ね返り・シールドでの跳ね返りの時だけにする。撃破で止められている間は触らない
+            if (isDashShooting && !SkillClockStopped) ReaimAfterSkimmingOffAnEdge();
+            if (isDashShooting && !SkillClockStopped && spinDashVelocity.sqrMagnitude > .01f)
+            {
+                rb.linearVelocity = spinDashVelocity;
+                rb.angularVelocity = spinDashAngular;
+            }
+            spinTravelVelocity = rb.linearVelocity;
+            spinTravelAngular = rb.angularVelocity;
+            TrackSpinDashClosestApproach();
+        }
         trueVelocity = ((Vector2)transform.position - lastPosition) / Time.fixedDeltaTime;
         lastPosition = transform.position;
 
@@ -1167,6 +1195,18 @@ public static bool matchEnded = false;
         
         SwordBattle target = collision.gameObject.GetComponent<SwordBattle>();
 
+        // ▼【新規追加】大回転斬の終わり際（減速・弾かれている間）：壁や床では進む向きだけ跳ね返し、
+        // 敵の剣とぶつかったらそこで打ち切って、普通の当たり方（弾かれる力など）に任せる。
+        // 当たって弾かれている最中の、その当たった相手の別の部分（刀身と柄）との衝突では打ち切らない
+        if (SpinSettleLocked && !SwordController.isKomaMode)
+        {
+            if (target == null)
+            {
+                if (collision.contactCount > 0) spinSettleVelocity = Vector2.Reflect(spinSettleVelocity, collision.GetContact(0).normal);
+            }
+            else if (target != this && target != spinHitTarget) EndSpinSettle();
+        }
+
         // ==========================================
         // ▼【修正1】剣モード：必殺技ダッシュ中の「地形バウンド」
         // ==========================================
@@ -1180,6 +1220,39 @@ public static bool matchEnded = false;
                 {
                     Vector2 inDirection = rb.linearVelocity.normalized;
                     Vector2 normal = collision.contacts[0].normal;
+
+                    // ▼【修正】回っている刀身が、進んでいる向きの後ろ側の壁をかすっただけの時（天井ぎわから真下へ撃った時の天井など）は、
+                    // 跳ね返さずにそのまま進む。以前はこれも跳ね返していたため、真下へ進んでいたのに天井の方へ折り返して、突進が乱れていた。
+                    // 法線は壁からこの剣の側を向くので、ぶつかる前の進む向き（FixedUpdateで覚えた速さ）と同じ側なら、壁から離れている
+                    if (spinDashVelocity.sqrMagnitude > 1f && Vector2.Dot(spinDashVelocity, normal) > 0f)
+                    {
+                        rb.linearVelocity = spinDashVelocity;
+                        rb.angularVelocity = spinDashAngular;
+                        return;
+                    }
+
+                    // ▼【新規追加】浅い角度で触れた時（地上どうしで撃って床をこすった時など）は、跳ね返さずに面に沿って滑る。
+                    // 速さと回転はそのまま。火花・音・揺れも出さない
+                    if (spinDashVelocity.sqrMagnitude > 1f)
+                    {
+                        Vector2 heading = spinDashVelocity.normalized;
+                        float into = -Vector2.Dot(heading, normal);
+                        if (into < Mathf.Sin(spinGrazeAngle * Mathf.Deg2Rad))
+                        {
+                            Vector2 along = heading + into * normal;
+                            if (along.sqrMagnitude > .0001f)
+                            {
+                                // 滑っている面を覚える。その面の端を越えたら、狙っていた相手へ向かい直す（FixedUpdate）
+                                spinSkimSurface = collision.collider;
+                                spinSkimNormal = normal;
+                                spinSkimHeight = Mathf.Max(0f, Vector2.Dot(rb.worldCenterOfMass - collision.contacts[0].point, normal));
+                                spinDashVelocity = along.normalized * spinDashVelocity.magnitude;
+                                rb.linearVelocity = spinDashVelocity;
+                                rb.angularVelocity = spinDashAngular;
+                                return;
+                            }
+                        }
+                    }
                     Vector2 bounceDir = Vector2.Reflect(inDirection, normal);
                     
                     // スピードを維持して反射（最低40fは担保して超高速をキープ）
@@ -1188,7 +1261,11 @@ public static bool matchEnded = false;
                     
                     // 回転も進行方向に合わせる
                     rb.angularVelocity = Mathf.Sign(bounceDir.x) * -2500f;
+                    spinSkimSurface = null;
+                    spinDashVelocity = rb.linearVelocity;
+                    spinDashAngular = rb.angularVelocity;
 
+                    if (spinDashPhase == (int)SpinDashStage.Dash) spinWallBounces++;
                     // 壁に当たった音とエフェクト
                     if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
                     if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
@@ -1203,8 +1280,9 @@ public static bool matchEnded = false;
             }
             else
             {
-                // 相手の剣に当たった時は突き刺さってダッシュ終了
-                EndSwordDash();
+                // 相手の剣に当たった時はダッシュ終了（反動で少し弾かれる）
+                spinHitTarget = target;
+                EndSwordDash(true);
             }
         }
 
@@ -1663,7 +1741,7 @@ public static bool matchEnded = false;
         }
         else if (controller != null)
         {
-            controller.NetworkJump(clickedRight);
+            Jump(clickedRight);
             actionName = clickedRight ? "JumpRight" : "JumpLeft";
         }
 
@@ -1732,11 +1810,11 @@ public static bool matchEnded = false;
         }
         else if (actionName == "JumpRight")
         {
-            if (controller != null) controller.NetworkJump(true);
+            if (controller != null) Jump(true);
         }
         else if (actionName == "JumpLeft")
         {
-            if (controller != null) controller.NetworkJump(false);
+            if (controller != null) Jump(false);
         }
     }
 
@@ -1785,7 +1863,16 @@ public static bool matchEnded = false;
     // ▼【新規追加】本体で攻撃しない必殺技（オレ達アタック・オレ達シールド）は、カットインが抜けた後なら
     // 無敵(isDashing)の間でも移動（ジャンプ）できる。大回転斬・巨大回転斬は剣そのものが動いて攻撃するので止めたまま
     bool skillAllowsMovement;
-    bool InputBlockedBySkill => isDashing && !skillAllowsMovement;
+    // 大回転斬の終わり際（減速・弾かれている間）も受け付けない
+    bool InputBlockedBySkill => (isDashing && !skillAllowsMovement) || SpinSettleLocked;
+    bool SpinSettleLocked => spinDashPhase == (int)SpinDashStage.SlowMiss || spinDashPhase == (int)SpinDashStage.SlowHit;
+
+    // ジャンプ。大回転斬の後のゆっくり降りる途中なら、そこで打ち切って普通の動きに戻してから跳ぶ
+    void Jump(bool right)
+    {
+        if (spinDashPhase == (int)SpinDashStage.Descend) EndSpinSettle();
+        controller.NetworkJump(right);
+    }
 
     // カットインを待っている間に倒された・試合が終わった時は、技を始めずに状態だけ戻す
     bool UltimateCancelled => isDead || matchEnded;
@@ -1795,6 +1882,7 @@ public static bool matchEnded = false;
         isDashing = false;
         isDashShooting = false;
         currentDashType = 0;
+        giantSpinPhase = 0;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
@@ -1823,6 +1911,7 @@ public static bool matchEnded = false;
     {
         // 前の技の「移動できる」を持ち越さない
         skillAllowsMovement = false;
+        if (spinDashPhase != 0) EndSpinSettle();
         // ▼ 独楽モードと剣モードで必殺技を完全に分けて管理する。
         // hiltType(柄の種類)ごとの技は、モードごとに別々のswitchで振り分ける。
         if (SwordController.isKomaMode)
@@ -1933,10 +2022,9 @@ public static bool matchEnded = false;
             rb.angularVelocity = 0f;
         }
 
-        // 1. 柄が光る（技の種類を決めているのは柄なので、技の出どころを柄で見せる）
-        SetHiltGlow(true);
+        // 1. 柄が光る（技の種類を決めているのは柄なので、技の出どころを柄で見せる）。見た目は UpdateGiantSpinLook
+        giantSpinPhase = (int)GiantSpinStage.HiltGlow;
         yield return StartCoroutine(WaitSkillTime(giantSpinHiltGlowTime));
-        SetHiltGlow(false);
 
         // 壁にも相手の剣にも物理的に引っかからないよう、大きくなる前から当たり判定をトリガー化する。
         // ダメージはOnTriggerEnter2D/Stay2D側で、一回転の間だけ判定する
@@ -1948,7 +2036,8 @@ public static bool matchEnded = false;
             myColliders[i].isTrigger = true;
         }
 
-        // 2. 3段階で巨大化する（各段の最後で少し行き過ぎてから戻る）。届く範囲の円は UpdateGiantSpinReach が出す
+        // 2. 3段階で巨大化する（各段の最後で少し行き過ぎてから戻る）。届く範囲の円などは UpdateGiantSpinLook が出す
+        giantSpinPhase = (int)GiantSpinStage.Grow;
         Vector3 originalScale = transform.localScale;
         float stepTime = giantSpinGrowTime / 3f;
         for (int step = 1; step <= 3; step++)
@@ -1978,6 +2067,7 @@ public static bool matchEnded = false;
         }
 
         // 3. 振りかぶり：回る向きと逆に少し引く
+        giantSpinPhase = (int)GiantSpinStage.Windup;
         if (controlsPhysics && giantSpinWindupTime > 0f) rb.angularVelocity = -spinDir * giantSpinWindupAngle / giantSpinWindupTime;
         yield return StartCoroutine(WaitSkillTime(giantSpinWindupTime));
 
@@ -1985,6 +2075,7 @@ public static bool matchEnded = false;
         float angularSpeed = giantSpinRotationSpeed * spinDir; // 度/秒
         float duration = 360f / Mathf.Abs(angularSpeed); // ちょうど一回転分の時間
         if (controlsPhysics) rb.angularVelocity = angularSpeed;
+        giantSpinPhase = (int)GiantSpinStage.Spin;
         giantSpinHitActive = true;
         // 回転中に撃破して止められても、止まっている間は数えないので一回転しきる
         yield return StartCoroutine(WaitSkillTime(duration));
@@ -1992,7 +2083,9 @@ public static bool matchEnded = false;
         if (controlsPhysics) rb.angularVelocity = 0f;
 
         // 5. 余韻のあと縮む
+        giantSpinPhase = (int)GiantSpinStage.Linger;
         yield return StartCoroutine(WaitSkillTime(giantSpinLingerTime));
+        giantSpinPhase = (int)GiantSpinStage.Shrink;
         Vector3 bigScale = transform.localScale;
         float shrinkElapsed = 0f;
         while (shrinkElapsed < giantSpinShrinkTime)
@@ -2010,7 +2103,8 @@ public static bool matchEnded = false;
         }
         if (controlsPhysics) rb.gravityScale = originalGravityScale;
 
-        // 6. ふらつき：操作を受け付けない（無敵ではない）。外した時は長い
+        // 6. ふらつき：操作を受け付けない（無敵ではない）。外した時は長い。見た目は技番号から UpdateGiantSpinLook が出す
+        giantSpinPhase = 0;
         bool hitSomeone = giantSpinHitTargets.Count > 0;
         isDashing = false;
         currentDashType = StaggerDashType;
@@ -2036,7 +2130,7 @@ public static bool matchEnded = false;
     }
 
     // ▼【新規追加】巨大回転斬の「柄が光る」。柄（Handleタグ）の見た目だけを金色にする。
-    // ゲストの画面には同期しない仮の見た目（演出の本番は別途差し替える）
+    // 段階（giantSpinPhase）を見て UpdateGiantSpinLook が呼ぶので、ゲストの画面でも光る
     readonly List<(SpriteRenderer renderer, Color color)> glowingHilts = new List<(SpriteRenderer renderer, Color color)>();
 
     void SetHiltGlow(bool on)
@@ -2475,6 +2569,8 @@ public static bool matchEnded = false;
         if (Vector2.Dot(bounce, normal) < 0f) bounce = normal;
         rb.linearVelocity = bounce * Mathf.Max(velocity.magnitude, 40f);
         rb.angularVelocity = Mathf.Sign(bounce.x) * -2500f;
+        spinDashVelocity = rb.linearVelocity;
+        spinDashAngular = rb.angularVelocity;
     }
 
     // ▼【修正】分身・シールドの見た目の大きさ。本体の刀身と同じく、元画像の横幅に関係なく
@@ -2568,6 +2664,7 @@ public static bool matchEnded = false;
         IgnoreTeammateCollisions();
 
         // ▼【修正】1. 小ジャンプの予備動作（Hostのみ）
+        spinDashPhase = (int)SpinDashStage.Hop;
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             rb.linearVelocity = new Vector2(0f, 15f); 
@@ -2577,6 +2674,7 @@ public static bool matchEnded = false;
         yield return StartCoroutine(WaitSkillTime(0.2f));
 
         // ▼【修正】2. 空中で一瞬静止（Hostのみ）
+        spinDashPhase = (int)SpinDashStage.Charge;
         if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             rb.linearVelocity = Vector2.zero; 
@@ -2587,15 +2685,28 @@ public static bool matchEnded = false;
         yield return StartCoroutine(WaitSkillTime(0.1f));
 
         isDashShooting = true; 
+        spinDashPhase = (int)SpinDashStage.Dash;
+        spinDashVelocity = Vector2.zero;
+        spinDashAngular = 0f;
+        spinSkimSurface = null;
+        spinAimTarget = controller != null ? controller.enemyTarget : null;
+        spinClosestEnemy = null;
+        spinClosestGap = -1f;
+        spinGapByEnemy.Clear();
+        spinWallBounces = 0;
+        spinAimNote = "狙う相手なし";
 
         // ▼【修正】3. 敵に向かって一直線に発射！（Hostのみ）
         if (controller != null && controller.enemyTarget != null && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
             rb.linearVelocity = dirToEnemy * 50f; 
+            spinAimNote = $"{controller.enemyTarget.name} {(Vector2)controller.enemyTarget.position:F2} へ、自分{(Vector2)transform.position:F2} から向き{dirToEnemy:F2}";
             
             float spinDir = Mathf.Sign(dirToEnemy.x) * -1f; 
             rb.angularVelocity = spinDir * 2500f; 
+            spinDashVelocity = rb.linearVelocity;
+            spinDashAngular = rb.angularVelocity;
 
             Debug.Log($"⚔️ 剣モード：一直線ダッシュ発動！");
         }
@@ -2603,15 +2714,16 @@ public static bool matchEnded = false;
         yield return StartCoroutine(WaitSkillTime(2.0f));
         if (isDashing && !SwordController.isKomaMode)
         {
-            EndSwordDash();
+            EndSwordDash(false);
         }
     }
 
-    // ▼【修正】ダッシュ終了時
-    public void EndSwordDash()
+    // ▼【修正】ダッシュ終了時。hitTarget：敵の剣に当たって終わった（false なら2秒たって外れた）
+    public void EndSwordDash(bool hitTarget = true)
     {
         // 相手に当たって終わった後、同じ物理ステップでもう一度呼ばれても二重に止めない
         if (!isDashing || currentDashType != 3) return;
+        if (!hitTarget) { spinHitTarget = null; LogSpinDashMiss(); }
 
         // ▼【修正】無敵(isDashing)はここでは外さず、DelayEndDashFlagで物理ステップの後に外す。
         // 以前はここでisDashing=falseにしていたため、相手に当たったその瞬間に無敵が切れ、
@@ -2622,14 +2734,181 @@ public static bool matchEnded = false;
 
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
 
-        // ▼【修正】停止処理もHostのみ
-        if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
-        {
-            rb.linearVelocity = Vector2.zero;
-            rb.angularVelocity = 0f;
-            if (controller != null) controller.ApplyPhysicsMode();
-        }
+        // ▼【変更】以前はここで速さと回転を0にして重力を戻していた。今は終わり際の動き（SpinDashSettleRoutine）に任せる。
+        // 外れた時は今の速さのまま減速を始め、当たった時は突進していた向きと反対へ弾かれる
+        bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
+        // 撃ち出した直後で、まだ突進中の速さを覚えていない時は今の速さを使う
+        bool remembered = hitTarget && spinTravelVelocity.sqrMagnitude > .01f;
+        Vector2 velocity = controlsPhysics ? (remembered ? spinTravelVelocity : rb.linearVelocity) : Vector2.zero;
+        float angular = controlsPhysics ? (remembered ? spinTravelAngular : rb.angularVelocity) : 0f;
+        spinTravelVelocity = Vector2.zero;
+        if (spinSettleRoutine != null) StopCoroutine(spinSettleRoutine);
+        spinSettleRoutine = StartCoroutine(SpinDashSettleRoutine(hitTarget, velocity, angular));
         StartCoroutine(DelayEndDashFlag());
+    }
+
+    // ▼【調査用】大回転斬が外れた時に、一番近づいた相手とその時のすき間（当たり判定どうしの距離）をログに出す。
+    // 狙いは合っているのに空振りする原因を探すためのもの。分かったら消す
+    SwordBattle spinClosestEnemy;
+    float spinClosestGap = -1f;
+    string spinClosestParts;
+    // 相手ごとの一番近づいたすき間と、撃ち出した時に狙った相手・向き
+    readonly Dictionary<SwordBattle, float> spinGapByEnemy = new Dictionary<SwordBattle, float>();
+    string spinAimNote;
+    int spinWallBounces;
+
+    void TrackSpinDashClosestApproach()
+    {
+        var mine = GetComponentsInChildren<Collider2D>();
+        foreach (var enemy in NearbyEnemies())
+        {
+            if (enemy == null || enemy == this || !enemy.IsAlive) continue;
+            foreach (var theirs in enemy.GetComponentsInChildren<Collider2D>())
+            {
+                if (theirs == null || !theirs.enabled || theirs.isTrigger) continue;
+                foreach (var own in mine)
+                {
+                    if (own == null || !own.enabled || own.isTrigger) continue;
+                    var d = Physics2D.Distance(own, theirs);
+                    if (!d.isValid) continue;
+                    if (!spinGapByEnemy.TryGetValue(enemy, out var best) || d.distance < best) spinGapByEnemy[enemy] = d.distance;
+                    if (spinClosestGap >= 0f && d.distance >= spinClosestGap) continue;
+                    spinClosestGap = d.distance;
+                    spinClosestEnemy = enemy;
+                    spinClosestParts = $"{own.name}↔{theirs.name}, 自分{(Vector2)transform.position:F2} 相手{(Vector2)enemy.transform.position:F2}, " +
+                        $"速さ{rb.linearVelocity.magnitude:F1}, 当たり判定を無視中={Physics2D.GetIgnoreCollision(own, theirs)}";
+                }
+            }
+        }
+    }
+
+    void LogSpinDashMiss()
+    {
+        if (spinClosestEnemy != null)
+            Debug.Log($"🌀 [調査用] 大回転斬が外れた: {name} → 一番近づいた相手 {spinClosestEnemy.name}、すき間 {spinClosestGap:F2}" +
+                $"（{spinClosestParts}）、相手の無敵={spinClosestEnemy.isDashing}" +
+                $"\n  狙い: {spinAimNote}\n  壁・足場で跳ねた回数: {spinWallBounces}\n  相手ごとの一番近いすき間: " +
+                string.Join(", ", System.Linq.Enumerable.Select(spinGapByEnemy, kv => $"{(kv.Key != null ? kv.Key.name : "?")}={kv.Value:F2}")));
+        else
+            Debug.Log($"🌀 [調査用] 大回転斬が外れた: {name} → 近くに相手がいなかった（狙い: {spinAimNote}）");
+        spinClosestEnemy = null;
+        spinClosestGap = -1f;
+        spinGapByEnemy.Clear();
+    }
+
+    Vector2 spinTravelVelocity, spinSettleVelocity;
+    float spinTravelAngular;
+    // 突進中に保つ速さと回転。撃ち出した時に決まり、壁やシールドで跳ね返った時だけ変わる
+    Vector2 spinDashVelocity;
+    float spinDashAngular;
+    // 撃ち出した時に狙った相手と、浅い角度で触れて沿って滑っている面（リフトの上面など）
+    Transform spinAimTarget;
+    Collider2D spinSkimSurface;
+    Vector2 spinSkimNormal;
+    float spinSkimHeight;
+
+    // ▼【新規追加】面に沿って滑っていて、その面の端を越えた（足元からその面がなくなった）時に、一度だけ狙っていた相手へ向かい直す。
+    // リフトの上から地上の相手へ撃つと、リフトに浅く触れて真横に滑り出し、端を越えてもそのまま真横へ飛んでいっていた。
+    // 地上どうしでは床がずっと足元にあるので向かい直さず、床すれすれを滑り続ける。飛んでいる間ずっと追う追尾はしない
+    void ReaimAfterSkimmingOffAnEdge()
+    {
+        if (spinSkimSurface == null) return;
+        if (!spinSkimSurface.enabled || !spinSkimSurface.gameObject.activeInHierarchy) { spinSkimSurface = null; return; }
+        Vector2 pivot = rb.worldCenterOfMass;
+        float probe = spinSkimHeight + 1.5f;
+        foreach (var hit in Physics2D.RaycastAll(pivot, -spinSkimNormal, probe))
+            if (hit.collider == spinSkimSurface) return; // まだ面の上
+        spinSkimSurface = null;
+        var target = spinAimTarget != null ? spinAimTarget.GetComponentInParent<SwordBattle>() : null;
+        if (spinAimTarget == null || (target != null && !target.IsAlive)) return;
+        Vector2 toTarget = (Vector2)spinAimTarget.position - pivot;
+        if (toTarget.sqrMagnitude < .0001f) return;
+        Vector2 dir = toTarget.normalized;
+        spinDashVelocity = dir * spinDashVelocity.magnitude;
+        spinDashAngular = Mathf.Sign(dir.x) * -1f * Mathf.Abs(spinDashAngular);
+    }
+    SwordBattle spinHitTarget;
+    Coroutine spinSettleRoutine;
+
+    // 大回転斬の終わり際の動き。減速（当たった時は弾かれる）→ ゆっくり降りる。
+    // 速さと回転は (1-k)^2 で0へ近づける（モックと同じ。当たった時に弾かれる距離が spinHitRecoilDistance になる）
+    IEnumerator SpinDashSettleRoutine(bool hit, Vector2 velocity, float angular)
+    {
+        bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
+        float slowTime = Mathf.Max(.01f, hit ? spinHitRecoilTime : spinMissSlowTime);
+        spinDashPhase = (int)(hit ? SpinDashStage.SlowHit : SpinDashStage.SlowMiss);
+        Vector2 travel = velocity.sqrMagnitude > .0001f ? velocity.normalized : Vector2.zero;
+        spinSettleVelocity = hit ? -travel * (3f * spinHitRecoilDistance / slowTime) : velocity;
+        if (controlsPhysics) rb.gravityScale = 0f;
+
+        float elapsed = 0f;
+        while (elapsed < slowTime)
+        {
+            float left = 1f - elapsed / slowTime;
+            if (controlsPhysics)
+            {
+                rb.linearVelocity = spinSettleVelocity * (left * left);
+                rb.angularVelocity = angular * (left * left);
+            }
+            yield return null;
+            if (!SkillClockStopped) elapsed += Time.deltaTime;
+        }
+        if (controlsPhysics) { rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0f; }
+        spinHitTarget = null;
+
+        // ゆっくり降りる：重力を0から元へ戻していく。ここからは操作でき、ジャンプすると Jump() が打ち切る
+        spinDashPhase = (int)SpinDashStage.Descend;
+        float descendTime = Mathf.Max(.01f, spinDescendTime);
+        elapsed = 0f;
+        while (elapsed < descendTime)
+        {
+            if (controlsPhysics) rb.gravityScale = Mathf.SmoothStep(0f, 1f, elapsed / descendTime);
+            yield return null;
+            if (!SkillClockStopped) elapsed += Time.deltaTime;
+        }
+        spinSettleRoutine = null;
+        EndSpinSettle();
+    }
+
+    // 大回転斬の終わり際を打ち切って、普通の動き（重力など）に戻す
+    void EndSpinSettle()
+    {
+        if (spinSettleRoutine != null) { StopCoroutine(spinSettleRoutine); spinSettleRoutine = null; }
+        spinHitTarget = null;
+        bool wasSettling = spinDashPhase >= (int)SpinDashStage.SlowMiss;
+        spinDashPhase = 0;
+        if (wasSettling && !isDead && rb != null && rb.bodyType == RigidbodyType2D.Dynamic && controller != null) controller.ApplyPhysicsMode();
+    }
+
+    // ▼【新規追加】大回転斬の演出。段階（spinDashPhase）の変わり目を見て見た目を切り替える。
+    // ゲストは段階の同期を受け取るだけなので、ホストもゲストも同じ流れで描く
+    ISpinDashLook spinDashLook;
+    int spinDashLookPhase;
+
+    void UpdateSpinDashLook()
+    {
+        int phase = IsAlive && !SwordController.isKomaMode ? spinDashPhase : 0;
+        if (phase != spinDashLookPhase)
+        {
+            if (spinDashLook == null && phase != 0) spinDashLook = SkillEffects.SpinDash.Create(this);
+            if (spinDashLook != null) spinDashLook.SetStage((SpinDashStage)phase, SpinStageDuration((SpinDashStage)phase));
+            spinDashLookPhase = phase;
+        }
+        if (spinDashLook != null && phase != 0) spinDashLook.Tick(Time.deltaTime);
+    }
+
+    float SpinStageDuration(SpinDashStage stage)
+    {
+        switch (stage)
+        {
+            case SpinDashStage.Hop: return .2f;
+            case SpinDashStage.Charge: return .1f;
+            case SpinDashStage.Dash: return 2f;
+            case SpinDashStage.SlowMiss: return spinMissSlowTime;
+            case SpinDashStage.SlowHit: return spinHitRecoilTime;
+            case SpinDashStage.Descend: return spinDescendTime;
+            default: return 0f;
+        }
     }
     IEnumerator DelayEndDashFlag()
     {

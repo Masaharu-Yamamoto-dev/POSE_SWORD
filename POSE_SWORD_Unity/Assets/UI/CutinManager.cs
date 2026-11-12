@@ -18,7 +18,18 @@ public class CutinManager : MonoBehaviour
 
     [Header("演出設定")]
     public float timeScaleDuringCutin = 0.05f; 
-    public float cutinDuration = 0.8f;         
+    // ▼【変更】キメ（帯と剣が入ってから抜けるまで）の秒数。技名が止まって見えるのは、これとほぼ同じ約0.9秒
+    // （以前は約0.6秒で、誰が何を撃ったか読み切る前に消えていた）
+    public float cutinDuration = 0.95f;
+
+    // ▼【新規追加】見やすさの調整。デザイン（傾いた帯・剣の画像・剣の名前・技名）はそのまま
+    [Header("見やすさ")]
+    public float swordImageOffsetX = -170f;  // 剣の画像を左へ寄せて、技名に重ならないようにする
+    public Color textOutlineColor = Color.black; // 剣の名前と技名の縁取り。帯と技の色が近くても読めるように
+    public float skillNameOutlineWidth = 0f;   // 縁取りの太さ（0で縁取りなし）
+    public float swordNameOutlineWidth = 0f;
+    public Color skillNameShadowColor = new Color(0.08f, 0.07f, 0.1f, 0.45f); // 技名の影（後ろに同じ文字を1枚重ねる）
+    public Vector2 skillNameShadowOffset = new Vector2(5f, -5f);
 
     // ▼【新規追加】サウンド設定
     [Header("サウンド")]
@@ -34,10 +45,16 @@ public class CutinManager : MonoBehaviour
     // 終わり際に等速へ戻す時、カットインのスローまで解いてしまわないように見る
     public bool IsSlowingTime { get; private set; }
 
+    // 技名の影（技名を複製して後ろに置く）。TextMeshProの影(Underlay)は、ビルドで削られる機能を使うため使わない
+    private TextMeshProUGUI skillNameShadow;
+    private Vector2 swordNameBasePosition, skillNameBasePosition;
+    private Color skillColor = Color.white;
+
     void Awake()
     {
         Instance = this;
         if (cutinCanvasGroup != null) cutinCanvasGroup.alpha = 0f;
+        SetupTextLook();
 
         // ▼【新規追加】スピーカーを自動で準備
         audioSource = GetComponent<AudioSource>();
@@ -61,8 +78,10 @@ public class CutinManager : MonoBehaviour
         if (skillNameText != null)
         {
             skillNameText.text = skillName;
+            skillColor = themeColor;
             skillNameText.color = themeColor;
         }
+        if (skillNameShadow != null) skillNameShadow.text = skillName;
 
         if (backgroundBar != null && backgroundBar.GetComponent<Image>() != null)
         {
@@ -81,6 +100,31 @@ public class CutinManager : MonoBehaviour
         playing = true;
         StartCoroutine(PersonaStyleCutinRoutine(useSlowMotion));
         return playSerial;
+    }
+
+    // ▼【新規追加】文字の見え方を整える：剣の名前と技名に灰色の縁取り、技名の後ろに影を1枚。
+    // 文字は剣の画像より手前に描く（剣の画像を左へ寄せても、重なった所で文字が隠れないように）
+    void SetupTextLook()
+    {
+        if (textContainer != null) textContainer.SetAsLastSibling();
+        if (swordNameText != null)
+        {
+            swordNameBasePosition = swordNameText.rectTransform.anchoredPosition;
+            swordNameText.outlineColor = textOutlineColor;
+            swordNameText.outlineWidth = swordNameOutlineWidth;
+        }
+        if (skillNameText == null) return;
+        skillNameBasePosition = skillNameText.rectTransform.anchoredPosition;
+        skillNameShadow = Instantiate(skillNameText, skillNameText.transform.parent);
+        skillNameShadow.name = "CutinSkillNameShadow";
+        skillNameShadow.transform.SetSiblingIndex(skillNameText.transform.GetSiblingIndex());
+        skillNameShadow.rectTransform.anchoredPosition = skillNameBasePosition + skillNameShadowOffset;
+        skillNameShadow.color = skillNameShadowColor;
+        // 影も縁取りの分だけ太らせ、技名の形どおりに後ろへ落ちて見えるようにする
+        skillNameShadow.outlineColor = skillNameShadowColor;
+        skillNameShadow.outlineWidth = skillNameOutlineWidth;
+        skillNameText.outlineColor = textOutlineColor;
+        skillNameText.outlineWidth = skillNameOutlineWidth;
     }
 
     // 演出の途中で止められた時（シーンの片付けなど）も、待っている必殺技が止まったままにならないようにする
@@ -126,75 +170,91 @@ public class CutinManager : MonoBehaviour
             IsSlowingTime = true;
         }
         cutinCanvasGroup.alpha = 1f;
-
-        backgroundBar.anchoredPosition = new Vector2(1500f, 500f); 
-        swordImageRect.anchoredPosition = new Vector2(-1500f, -500f); 
-        swordImageRect.localScale = new Vector3(2f, 2f, 1f); 
-        
-        if (textContainer != null) {
-            textContainer.localScale = new Vector3(4f, 4f, 1f); 
-            textContainer.gameObject.SetActive(false);
-        }
-
-        // 2. 帯と剣が交差するようにシュバッ！と入る
-        float timer = 0f;
-        float slideInTime = 0.15f; 
-        while (timer < slideInTime)
+        if (textContainer != null)
         {
-            timer += Time.unscaledDeltaTime;
-            float progress = timer / slideInTime;
-            float easeOut = 1f - Mathf.Pow(1f - progress, 4f); 
-
-            backgroundBar.anchoredPosition = Vector2.Lerp(new Vector2(1500f, 500f), Vector2.zero, easeOut);
-            swordImageRect.anchoredPosition = Vector2.Lerp(new Vector2(-1500f, -500f), Vector2.zero, easeOut);
-            swordImageRect.localScale = Vector3.Lerp(new Vector3(2f, 2f, 1f), Vector3.one, easeOut);
-            
-            yield return null;
-        }
-
-        // 3. テキストが「ドンッ！」と叩きつけられる
-        if (textContainer != null) {
             textContainer.gameObject.SetActive(true);
-            timer = 0f;
-            float textSlamTime = 0.1f;
-            while (timer < textSlamTime)
+            textContainer.localScale = Vector3.one;
+        }
+
+        // ▼【変更】見やすさのための流れ（デザインはそのまま）。時間はすべて実時間：
+        //   0〜0.15秒   帯と剣が反対側から滑り込む（今までどおり）
+        //   0.05〜0.15秒 技名を帯の入りに重ねて出し、1.8倍から等倍へ（以前は帯が入りきってから4倍から）
+        //   0.1〜0.18秒  剣の名前が少し遅れて出る
+        //   キメ（cutinDuration）：帯は止めたまま（以前は流れていた）。剣の画像だけゆっくり流れる
+        //   最後の0.15秒：帯・剣・文字がまとめて抜ける
+        const float slideInTime = 0.15f, slideOutTime = 0.15f;
+        const float skillAppearAt = 0.05f, skillSettleTime = 0.1f, nameAppearAt = 0.1f, nameFadeTime = 0.08f;
+        Vector2 swordRest = new Vector2(swordImageOffsetX, 0f);
+        Vector2 bandFrom = new Vector2(1500f, 500f), bandTo = new Vector2(-1500f, -500f);
+        Vector2 swordFrom = swordRest + new Vector2(-1500f, -500f), swordTo = swordRest + new Vector2(1500f, 500f);
+        Vector2 swordDrift = new Vector2(60f, 30f); // キメの間、剣の画像だけがゆっくり流れる速さ（毎秒）
+        float outStart = slideInTime + cutinDuration, total = outStart + slideOutTime;
+        bool shook = false;
+        float timer = 0f;
+        while (timer < total)
+        {
+            timer += Time.unscaledDeltaTime;
+            float t = Mathf.Min(timer, total);
+
+            // 帯：入ったらその場で止める
+            if (t < slideInTime)
+                backgroundBar.anchoredPosition = Vector2.Lerp(bandFrom, Vector2.zero, EaseOut4(t / slideInTime));
+            else if (t < outStart)
+                backgroundBar.anchoredPosition = Vector2.zero;
+            else
+                backgroundBar.anchoredPosition = Vector2.Lerp(Vector2.zero, bandTo, EaseIn3((t - outStart) / slideOutTime));
+
+            // 剣の画像：左へ寄せた位置へ入り、キメの間はゆっくり流れる
+            Vector2 swordHeld = swordRest + swordDrift * Mathf.Max(0f, Mathf.Min(t, outStart) - slideInTime);
+            if (t < slideInTime)
             {
-                timer += Time.unscaledDeltaTime;
-                float progress = timer / textSlamTime;
-                textContainer.localScale = Vector3.Lerp(new Vector3(4f, 4f, 1f), Vector3.one, progress);
-                yield return null;
+                float e = EaseOut4(t / slideInTime);
+                swordImageRect.anchoredPosition = Vector2.Lerp(swordFrom, swordRest, e);
+                swordImageRect.localScale = Vector3.Lerp(new Vector3(2f, 2f, 1f), Vector3.one, e);
             }
-            
-            BattleCamera cam = Camera.main.GetComponent<BattleCamera>();
-            if (cam != null) cam.TriggerShake(0.2f, 0.6f);
-        }
+            else
+            {
+                swordImageRect.localScale = Vector3.one;
+                swordImageRect.anchoredPosition = t < outStart ? swordHeld : Vector2.Lerp(swordHeld, swordTo, EaseIn3((t - outStart) / slideOutTime));
+            }
 
-        // 4. キメの静止時間
-        timer = 0f;
-        while (timer < cutinDuration)
-        {
-            timer += Time.unscaledDeltaTime;
-            swordImageRect.anchoredPosition += new Vector2(100f, 50f) * Time.unscaledDeltaTime; 
-            backgroundBar.anchoredPosition += new Vector2(-50f, -25f) * Time.unscaledDeltaTime; 
+            // 技名：帯の入りに重ねて早めに出し、1.8倍から等倍へ
+            if (skillNameText != null)
+            {
+                float k = Mathf.Clamp01((t - skillAppearAt) / skillSettleTime);
+                float alpha = Mathf.Clamp01(k * 3f);
+                Vector3 scale = Vector3.one * Mathf.Lerp(1.8f, 1f, EaseOut4(k));
+                Color c = skillColor; c.a = skillColor.a * alpha;
+                skillNameText.color = c;
+                skillNameText.rectTransform.localScale = scale;
+                if (skillNameShadow != null)
+                {
+                    Color sc = skillNameShadowColor; sc.a *= alpha;
+                    skillNameShadow.color = sc;
+                    skillNameShadow.rectTransform.localScale = scale;
+                }
+            }
+            // 剣の名前：少し遅れて、横から少し滑りながら出る
+            if (swordNameText != null)
+            {
+                float a = Mathf.Clamp01((t - nameAppearAt) / nameFadeTime);
+                Color c = swordNameText.color; c.a = a;
+                swordNameText.color = c;
+                swordNameText.rectTransform.anchoredPosition = swordNameBasePosition + new Vector2((1f - a) * 20f, 0f);
+            }
+            // 技名が落ち着いたところで、今までどおり画面を揺らす
+            if (!shook && t >= skillAppearAt + skillSettleTime)
+            {
+                shook = true;
+                BattleCamera cam = Camera.main != null ? Camera.main.GetComponent<BattleCamera>() : null;
+                if (cam != null) cam.TriggerShake(0.2f, 0.6f);
+            }
+            // 抜ける時は全体を薄くする
+            if (t >= outStart) cutinCanvasGroup.alpha = 1f - Mathf.Clamp01((t - outStart) / slideOutTime);
             yield return null;
         }
 
-        // 5. 画面外へシュバッ！と消える
-        timer = 0f;
-        float slideOutTime = 0.1f;
-        while (timer < slideOutTime)
-        {
-            timer += Time.unscaledDeltaTime;
-            float progress = timer / slideOutTime;
-            float easeIn = progress * progress * progress; 
-
-            backgroundBar.anchoredPosition = Vector2.Lerp(backgroundBar.anchoredPosition, new Vector2(-1500f, -500f), easeIn); 
-            swordImageRect.anchoredPosition = Vector2.Lerp(swordImageRect.anchoredPosition, new Vector2(1500f, 500f), easeIn);
-            cutinCanvasGroup.alpha = 1f - progress;
-            yield return null;
-        }
-
-        // 6. 終了処理
+        // 終了処理
         cutinCanvasGroup.alpha = 0f;
         IsSlowingTime = false;
         if (useSlowMotion && !SwordBattle.matchEnded)
@@ -203,4 +263,7 @@ public class CutinManager : MonoBehaviour
         }
         playing = false;
     }
+
+    static float EaseOut4(float t) { t = Mathf.Clamp01(t); return 1f - Mathf.Pow(1f - t, 4f); }
+    static float EaseIn3(float t) { t = Mathf.Clamp01(t); return t * t * t; }
 }

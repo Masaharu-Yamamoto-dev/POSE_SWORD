@@ -75,6 +75,10 @@ using UnityEngine;
     // ▼【新規追加】1vs3：ボスの制圧を受けている残り秒数。0なら通常。ゲストはこの値から
     // 操作不能の表示を出し、自分の必殺技ボタンを隠す
     public float suppressedRemaining;
+    // ▼【新規追加】大回転斬の段階（SpinDashStage）。ゲストはこれを見て、跳ぶ・溜める・撃ち出す・終わり際の演出を出す
+    public int spinPhase;
+    // ▼【新規追加】巨大回転斬の段階（GiantSpinStage。ふらつきは含まない）。ゲストはこれを見て、柄が光る・巨大化・一回転などの演出を出す
+    public int giantPhase;
 }
 // ▼【新規追加】分身突進（hiltType:"2"）・リーフシールド（hiltType:"3"）など、
 // 本体以外に複数体表示する"付随体"1体分の見た目同期用データ

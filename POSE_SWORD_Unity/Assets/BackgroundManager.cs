@@ -26,13 +26,14 @@ public class BackgroundManager : MonoBehaviour
     void Awake()
     {
         Instance = this;
-    }
-
-    void Start()
-    {
+        // ▼【修正】以前は Start で作っていた。オンライン対戦では MultiplayerManager.InitializeMultiplayer がこの部品を
+        // 無効にするが、読み込みが速いとそれが最初のフレームより先に届き、無効にされた部品の Start は呼ばれないため、
+        // 右側の色が元の四角い絵のまま画面全体を覆って、背景が黄色一色になっていた。Awake は無効にされていても必ず呼ばれる。
+        // 傾きも Update でしか付けていなかったので、ここで最初の角度を付けておく
         if (rightColorTransform != null)
         {
             GenerateHalfGradientSprite();
+            rightColorTransform.rotation = Quaternion.Euler(0, 0, baseAngle);
         }
     }
 

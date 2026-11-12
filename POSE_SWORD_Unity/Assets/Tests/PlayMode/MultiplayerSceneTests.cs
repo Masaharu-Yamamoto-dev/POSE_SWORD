@@ -312,8 +312,8 @@ public class MultiplayerSceneTests
         Assert.AreEqual(.05f, Time.timeScale, .001f, "A hit stop must not cut the cutin's slow motion short.");
         Assert.IsFalse((bool)p0.GetType().GetField("isDashShooting").GetValue(p0));
 
-        // カットインが抜けた後で、跳んで止まって発射する
-        yield return new WaitForSecondsRealtime(1.1f);
+        // カットイン（約1.35秒）が抜けた後で、跳んで止まって発射する
+        yield return new WaitForSecondsRealtime(1.5f);
         Assert.AreEqual(1f, Time.timeScale, .001f);
         Assert.IsTrue((bool)p0.GetType().GetField("isDashShooting").GetValue(p0) ||
             !(bool)p0.GetType().GetField("isDashing").GetValue(p0), "The dash starts once the cutin is over.");
@@ -357,7 +357,16 @@ public class MultiplayerSceneTests
         yield return new WaitForSecondsRealtime(.5f);
         Assert.AreEqual(baseScale, p1.transform.localScale.x, .001f, "Nothing grows while the cutin plays.");
 
+        // 柄が光る：段階が同期用の値に出て、柄のまわりに光のにじみが出る
         float giveUp = Time.realtimeSinceStartup + 3f;
+        while (GiantPhase(p1) != 1 && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.AreEqual(1, GiantPhase(p1), "The hilt glows first.");
+        yield return null;
+        var halo = GameObject.Find("GiantSpinHiltHalo");
+        Assert.IsNotNull(halo, "The glowing hilt has a halo.");
+        Assert.IsTrue(halo.GetComponent<SpriteRenderer>().enabled);
+
+        giveUp = Time.realtimeSinceStartup + 3f;
         while (p1.transform.localScale.x < baseScale * 1.05f && Time.realtimeSinceStartup < giveUp) yield return null;
         Assert.Greater(p1.transform.localScale.x, baseScale * 1.05f, "The sword grows once the cutin is over.");
         Assert.IsFalse(Field(p1, "giantSpinHitActive"), "Growing does not hit anyone yet.");
@@ -370,7 +379,14 @@ public class MultiplayerSceneTests
         giveUp = Time.realtimeSinceStartup + 3f;
         while (!Field(p1, "giantSpinHitActive") && Time.realtimeSinceStartup < giveUp) yield return null;
         Assert.IsTrue(Field(p1, "giantSpinHitActive"));
-        Assert.AreEqual(baseScale * 6f, p1.transform.localScale.x, .01f, "The sword is fully grown before it turns.");
+        float giantScale = (float)p1.GetType().GetField("giantSpinScale").GetValue(p1);
+        Assert.AreEqual(5f, giantScale, .001f, "The sword grows five times as big.");
+        Assert.AreEqual(baseScale * giantScale, p1.transform.localScale.x, .01f, "The sword is fully grown before it turns.");
+        Assert.AreEqual(4, GiantPhase(p1), "The turning stage is shared with guests.");
+        yield return new WaitForSecondsRealtime(.15f);
+        var slash = GameObject.Find("GiantSpinSlash");
+        Assert.IsNotNull(slash, "The turn leaves a slash behind the blade.");
+        Assert.IsTrue(slash.GetComponent<MeshRenderer>().enabled);
         // 奥行きまで拡大すると、手前(z=-5)に置いた柄がカメラ(z=-10)の後ろへ回り込んで消える
         Assert.AreEqual(baseDepth, p1.transform.localScale.z, .001f, "Growing must not stretch the depth.");
         var hilt = p1.GetComponentsInChildren<Transform>().First(t => t.CompareTag("Handle"));
@@ -382,12 +398,27 @@ public class MultiplayerSceneTests
         Assert.IsTrue(Flag(p1, "IsStaggered"));
         Assert.AreEqual(baseScale, p1.transform.localScale.x, .001f);
         Assert.IsFalse(Field(p1, "isDashing"), "A staggering sword can be hit.");
+        Assert.AreEqual(0, GiantPhase(p1), "The stage is cleared once the sword is back to size.");
         Assert.IsFalse(reach.GetComponent<LineRenderer>().enabled);
+        Assert.IsFalse(slash.GetComponent<MeshRenderer>().enabled, "The slash is gone by then.");
+        // ふらつき：本物の刀身は隠し、揺れる写しと黄色い星を見せる（本物を回すと当たり判定まで回るため）
+        yield return null;
+        var blade = p1.transform.Find("Blade").GetComponent<SpriteRenderer>();
+        Assert.IsTrue(blade.forceRenderingOff, "The real blade is hidden behind its wobbling stand-in.");
+        Assert.IsNotNull(GameObject.Find("GiantStaggerStandIn"));
+        var star = GameObject.Find("GiantStaggerStar");
+        Assert.IsNotNull(star, "Stars circle above a staggering sword.");
+        Assert.IsTrue(star.GetComponent<SpriteRenderer>().enabled);
 
         giveUp = Time.realtimeSinceStartup + 2f;
         while (Flag(p1, "IsStaggered") && Time.realtimeSinceStartup < giveUp) yield return null;
         Assert.IsFalse(Flag(p1, "IsStaggered"), "The stagger wears off.");
+        yield return null;
+        Assert.IsFalse(blade.forceRenderingOff, "The real blade shows again after the stagger.");
+        Assert.IsFalse(star.GetComponent<SpriteRenderer>().enabled);
     }
+
+    private static int GiantPhase(Component sword) => (int)sword.GetType().GetField("giantSpinPhase").GetValue(sword);
 
     // ===== オレ達アタック：分身が減らしたHPの2割を本体が回復する =====
 
@@ -810,13 +841,269 @@ public class MultiplayerSceneTests
         Assert.AreEqual(4f, (float)bonus.GetValue(p0), .001f, "大回転斬 multiplies its hit by four.");
 
         // 相手に当たって突進が終わった瞬間を再現する。同じ物理ステップの残りの衝突でダメージを受けないよう、無敵はまだ残る
-        p0.GetType().GetMethod("EndSwordDash").Invoke(p0, null);
+        p0.GetType().GetMethod("EndSwordDash").Invoke(p0, new object[] { true });
         Assert.IsTrue(Field(p0, "isDashing"), "The sword stays protected for the rest of the physics step.");
         Assert.IsFalse(Field(p0, "isDashShooting"));
 
         yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
         Assert.IsFalse(Field(p0, "isDashing"));
         Assert.AreEqual(1f, (float)bonus.GetValue(p0), .001f, "An unused bonus must not carry over to the next ordinary hit.");
+    }
+
+    private static int SpinPhase(Component sword) => (int)sword.GetType().GetField("spinDashPhase").GetValue(sword);
+
+    private static bool InputBlocked(Component sword) =>
+        (bool)sword.GetType().GetProperty("InputBlockedBySkill", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(sword);
+
+    private static IEnumerator WaitUntilSpinPhase(Component sword, int phase, float seconds = 4f)
+    {
+        float giveUp = Time.realtimeSinceStartup + seconds;
+        while (SpinPhase(sword) != phase && Time.realtimeSinceStartup < giveUp) yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashThatMissesSlowsDownThenDescendsAndAJumpEndsTheDescent()
+    {
+        Call("InitializeMultiplayer", Config("spin-miss", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-miss\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        // 相手には当たらないようにして、2秒たって外れる終わり方を見る
+        // 突進は速さを保って遠くまで届くので、自分以外の全員に当たらないようにする
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        Assert.AreEqual(3, SpinPhase(p0), "The dash stage is shown while it flies.");
+        yield return null; // 演出は LateUpdate で段階の変わり目を見て出る
+        Assert.IsNotNull(GameObject.Find("SpinDashBurst"), "Launching leaves the flash and shock ring where it started.");
+        Assert.IsNotNull(GameObject.Find("SpinDashTrail"), "The dash draws a brush trail.");
+
+        yield return WaitUntilSpinPhase(p0, 4);
+        Assert.AreEqual(4, SpinPhase(p0), "Missing ends in the slow-down.");
+        Assert.Greater(body.linearVelocity.magnitude, 1f, "It slows down instead of stopping dead.");
+        Assert.AreEqual(0f, body.gravityScale, .001f, "It does not fall while slowing down.");
+        Assert.IsTrue(InputBlocked(p0), "Input is not taken while it slows down.");
+
+        yield return WaitUntilSpinPhase(p0, 6, 1f);
+        Assert.AreEqual(6, SpinPhase(p0), "Then it descends gently.");
+        Assert.IsFalse(InputBlocked(p0), "The descent can be controlled.");
+        Assert.Less(body.gravityScale, 1f, "Gravity comes back gradually.");
+
+        float before = body.linearVelocity.y;
+        p0.GetType().GetMethod("ExecuteMultiplayerAction").Invoke(p0, new object[] { true });
+        Assert.AreEqual(0, SpinPhase(p0), "A jump ends the descent at once.");
+        Assert.AreEqual(1f, body.gravityScale, .001f, "Ordinary gravity is back after the jump.");
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        Assert.Greater(body.linearVelocity.y, before + 1f, "The jump itself happened.");
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashGrazingAWallBehindItKeepsGoingInsteadOfTurningBack()
+    {
+        Call("InitializeMultiplayer", Config("spin-graze", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-graze\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        // 突進は速さを保って遠くまで届くので、自分以外の全員に当たらないようにする
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        // 天井ぎわから真下へ撃った時と同じ形を、床に邪魔されないよう横向きで再現する：
+        // 右へ飛ばし、回っている刀身の左端がわずかに重なる所に、背中側の壁を置く
+        // 突進中は保っている速さ（spinDashVelocity）が毎ステップ入るので、そちらを右向きにする
+        p0.GetType().GetField("spinDashVelocity", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(p0, new Vector2(50f, 0f));
+        body.linearVelocity = new Vector2(50f, 0f);
+        yield return new WaitForFixedUpdate();
+        float left = float.MaxValue;
+        foreach (var c in p0.GetComponentsInChildren<Collider2D>()) if (c.enabled && !c.isTrigger) left = Mathf.Min(left, c.bounds.min.x);
+        var ceiling = new GameObject("TestWallBehind").AddComponent<BoxCollider2D>();
+        ceiling.size = new Vector2(4f, 40f);
+        ceiling.transform.position = new Vector2(left + .2f - 2f, body.worldCenterOfMass.y);
+        bool touched = false;
+        try
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                touched |= body.IsTouching(ceiling);
+                Assert.Greater(body.linearVelocity.x, 30f, "Grazing the wall behind it must not turn the dash back.");
+            }
+            Assert.IsTrue(touched, "The spinning blade did graze the wall behind it.");
+        }
+        finally { UnityEngine.Object.Destroy(ceiling.gameObject); }
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashSkimmingTheFloorSlidesAlongItInsteadOfBouncing()
+    {
+        Call("InitializeMultiplayer", Config("spin-skim", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-skim\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        // 地上どうしで撃った時と同じ形：右へ少し下向き（約11°）に飛ばし、回る刀身の下端がわずかに重なる所に床を置く
+        Vector2 heading = new Vector2(50f, -10f);
+        p0.GetType().GetField("spinDashVelocity", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(p0, heading);
+        body.linearVelocity = heading;
+        yield return new WaitForFixedUpdate();
+        float bottom = float.MaxValue;
+        foreach (var c in p0.GetComponentsInChildren<Collider2D>()) if (c.enabled && !c.isTrigger) bottom = Mathf.Min(bottom, c.bounds.min.y);
+        var floor = new GameObject("TestFloor").AddComponent<BoxCollider2D>();
+        floor.size = new Vector2(200f, 4f);
+        floor.transform.position = new Vector2(body.worldCenterOfMass.x, bottom + .2f - 2f);
+        // 回る刀身が床を叩くと、そのステップだけ体が上へ弾かれる（次のステップで保っている速さに戻る）。
+        // 刀身が床に届かない高さまで数回持ち上がったら、あとは床に沿ってなめらかに滑る
+        int touchingSteps = 0;
+        float startY = body.position.y;
+        try
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                if (body.IsTouching(floor)) touchingSteps++;
+                Assert.Greater(body.linearVelocity.x, 40f, "It keeps going forward at full speed.");
+            }
+            Assert.Greater(touchingSteps, 0, "The spinning blade did touch the floor.");
+            Assert.LessOrEqual(touchingSteps, 6, "It soon clears the floor instead of crawling along it.");
+            Assert.Less(Mathf.Abs(body.linearVelocity.y), 5f, "Once clear it glides level.");
+            Assert.Less(body.position.y - startY, 4f, "It is not knocked up into the air.");
+            Assert.AreEqual(0f, ((Vector2)p0.GetType().GetField("spinDashVelocity", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(p0)).y, .5f,
+                "After touching it, the dash runs along the floor.");
+        }
+        finally { UnityEngine.Object.Destroy(floor.gameObject); }
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashSlidingOffALiftTurnsBackTowardsItsTarget()
+    {
+        Call("InitializeMultiplayer", Config("spin-lift", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-lift\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+        var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        var held = p0.GetType().GetField("spinDashVelocity", flags);
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        // リフトの上から、右下の地上の相手へ撃った時を再現する：足元に右端が少し先で終わるリフトを置き、狙う相手を右下に置く
+        var target = new GameObject("TestTarget").transform;
+        Vector2 heading = new Vector2(50f, -12f);
+        held.SetValue(p0, heading);
+        body.linearVelocity = heading;
+        yield return new WaitForFixedUpdate();
+        float bottom = float.MaxValue;
+        foreach (var c in p0.GetComponentsInChildren<Collider2D>()) if (c.enabled && !c.isTrigger) bottom = Mathf.Min(bottom, c.bounds.min.y);
+        Vector2 pivot = body.worldCenterOfMass;
+        target.position = pivot + new Vector2(18f, -12f);
+        p0.GetType().GetField("spinAimTarget", flags).SetValue(p0, target);
+        var lift = new GameObject("TestLift").AddComponent<BoxCollider2D>();
+        lift.size = new Vector2(10f, 1f);
+        lift.transform.position = new Vector2(pivot.x + 1f, bottom + .2f - .5f); // 右端は 6 先
+        // 向かい直した後に場面の床で跳ね返ることもあるので、滑った後に一度でも相手の方へ向かったかを見る
+        bool skimmed = false, turned = false;
+        try
+        {
+            for (int i = 0; i < 16 && !turned; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                Vector2 v = (Vector2)held.GetValue(p0);
+                if (Mathf.Abs(v.y) < .5f) skimmed = true;
+                else if (skimmed && v.y < -10f && v.x > 0f) turned = true;
+            }
+            Assert.IsTrue(skimmed, "It first slides along the lift.");
+            Assert.IsTrue(turned, "Past the lift's edge it turns back down towards its target.");
+        }
+        finally { UnityEngine.Object.Destroy(lift.gameObject); UnityEngine.Object.Destroy(target.gameObject); }
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashKeepsItsSpeedAndDirectionUntilItBounces()
+    {
+        Call("InitializeMultiplayer", Config("spin-keep", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-keep\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        // 突進は速さを保って遠くまで届くので、自分以外の全員に当たらないようにする
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        yield return new WaitForFixedUpdate();
+        Vector2 launched = body.linearVelocity;
+        float spin = body.angularVelocity;
+        // 天井をかすって蹴られた時を再現する：速さと回転を乱しても、次のステップで元に戻る
+        body.linearVelocity = launched * .3f + Vector2.Perpendicular(launched) * .5f;
+        body.angularVelocity = spin * .2f;
+        yield return new WaitForFixedUpdate();
+        Assert.AreEqual(launched.x, body.linearVelocity.x, .5f, "The dash keeps the speed it was launched with.");
+        Assert.AreEqual(launched.y, body.linearVelocity.y, .5f);
+        Assert.AreEqual(spin, body.angularVelocity, 1f, "The dash keeps its spin.");
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashThatHitsRecoilsBackwardsThenDescends()
+    {
+        Call("InitializeMultiplayer", Config("spin-hit", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-hit\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        Vector2 travel = body.linearVelocity.normalized;
+
+        // 敵に当たって突進が終わった時を再現する
+        p0.GetType().GetMethod("EndSwordDash").Invoke(p0, new object[] { true });
+        Assert.AreEqual(5, SpinPhase(p0), "A hit ends in the recoil.");
+        Assert.IsTrue(InputBlocked(p0), "Input is not taken while it is knocked back.");
+        yield return null;
+        Assert.Less(Vector2.Dot(body.linearVelocity, travel), -1f, "It is knocked back against the way it was dashing.");
+        Assert.IsNotNull(GameObject.Find("SpinDashSplash"), "Hitting another sword throws a splash in the player's colour.");
+
+        yield return WaitUntilSpinPhase(p0, 6, 1f);
+        Assert.AreEqual(6, SpinPhase(p0), "Then it descends gently.");
+        yield return WaitUntilSpinPhase(p0, 0, 1.5f);
+        Assert.AreEqual(0, SpinPhase(p0), "The descent ends by itself.");
+        Assert.AreEqual(1f, body.gravityScale, .001f, "Ordinary gravity is back once it has descended.");
     }
 
     [UnityTest]

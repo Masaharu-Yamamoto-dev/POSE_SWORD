@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { usePortrait } from './swordForge.js';
 import './FullscreenButton.css';
 
 // スマホ・タブレットで、アドレスバーなどを消して画面いっぱいで遊ぶためのボタン。
@@ -6,6 +7,7 @@ import './FullscreenButton.css';
 // 出すのは全画面にできる端末だけ（Androidなど）。iPhoneのSafariはページからの全画面に
 // 対応していない（document.fullscreenEnabled が false）ので、ボタン自体を出さない。
 // PCは対象外。全画面の間はボタンを隠す（戻すのは端末の戻る操作で行う）。
+// 縦持ちの間も隠す（縦長の画面では右上が各画面の部品と重なるため）。横持ちにすると出る。
 const TOUCH = '(pointer: coarse)';
 
 const canFullscreen = () => Boolean(document.fullscreenEnabled && document.documentElement.requestFullscreen);
@@ -13,6 +15,7 @@ const canFullscreen = () => Boolean(document.fullscreenEnabled && document.docum
 export default function FullscreenButton() {
   const [isTouch, setIsTouch] = useState(() => window.matchMedia(TOUCH).matches);
   const [isFull, setIsFull] = useState(() => Boolean(document.fullscreenElement));
+  const portrait = usePortrait();
 
   useEffect(() => {
     const query = window.matchMedia(TOUCH);
@@ -26,7 +29,7 @@ export default function FullscreenButton() {
     };
   }, []);
 
-  if (!isTouch || isFull || !canFullscreen()) return null;
+  if (!isTouch || isFull || portrait || !canFullscreen()) return null;
 
   const enter = async () => {
     try {

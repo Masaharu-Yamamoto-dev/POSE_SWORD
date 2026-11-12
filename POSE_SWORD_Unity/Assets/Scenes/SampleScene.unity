@@ -2220,7 +2220,13 @@ MonoBehaviour:
   swordNameText: {fileID: 721800048}
   skillNameText: {fileID: 1288393474}
   timeScaleDuringCutin: 0.05
-  cutinDuration: 0.6
+  cutinDuration: 0.95
+  swordImageOffsetX: -170
+  textOutlineColor: {r: 0, g: 0, b: 0, a: 1}
+  skillNameOutlineWidth: 0
+  swordNameOutlineWidth: 0
+  skillNameShadowColor: {r: 0.08, g: 0.07, b: 0.1, a: 0.45}
+  skillNameShadowOffset: {x: 5, y: -5}
   cutinSound: {fileID: 8300000, guid: d6bab274eb3bf4544a85850d37d05384, type: 3}
 --- !u!4 &265735582
 Transform:
@@ -2484,7 +2490,12 @@ MonoBehaviour:
   passiveSpFill: 1
   damageSpMultiplier: 1.5
   spinDashDamageMultiplier: 4
-  giantSpinScale: 6
+  spinMissSlowTime: 0.45
+  spinHitRecoilTime: 0.25
+  spinHitRecoilDistance: 2
+  spinDescendTime: 0.5
+  spinGrazeAngle: 30
+  giantSpinScale: 5
   giantSpinDamageMultiplier: 8
   giantSpinRotationSpeed: 540
   giantSpinHiltGlowTime: 0.2
@@ -2530,6 +2541,8 @@ MonoBehaviour:
   leafShieldKnockbackRate: 0.3
   isDashing: 0
   isDashShooting: 0
+  spinDashPhase: 0
+  giantSpinPhase: 0
   respawnInvincibleDuration: 3
   respawnBlinkInterval: 0.12
   currentDashType: 0
@@ -4063,7 +4076,12 @@ MonoBehaviour:
   passiveSpFill: 1
   damageSpMultiplier: 1.5
   spinDashDamageMultiplier: 4
-  giantSpinScale: 6
+  spinMissSlowTime: 0.45
+  spinHitRecoilTime: 0.25
+  spinHitRecoilDistance: 2
+  spinDescendTime: 0.5
+  spinGrazeAngle: 30
+  giantSpinScale: 5
   giantSpinDamageMultiplier: 8
   giantSpinRotationSpeed: 540
   giantSpinHiltGlowTime: 0.2
@@ -4109,6 +4127,8 @@ MonoBehaviour:
   leafShieldKnockbackRate: 0.3
   isDashing: 0
   isDashShooting: 0
+  spinDashPhase: 0
+  giantSpinPhase: 0
   respawnInvincibleDuration: 3
   respawnBlinkInterval: 0.12
   currentDashType: 0

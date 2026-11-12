@@ -1703,7 +1703,7 @@ public class MultiplayerManager : MonoBehaviour
                 sword.currentCenterPosition = center;
                 return new MultiplayerPlayerState { playerId = p.playerId, x = pos.x, y = pos.y,
                     rotation = sword.transform.eulerAngles.z, centerX = center.x, centerY = center.y,
-                    hp = sword.hp, sp = sword.currentSp, isDashing = sword.isDashing, dashType = sword.currentDashType,
+                    hp = sword.hp, sp = sword.currentSp, isDashing = sword.isDashing, dashType = sword.currentDashType, spinPhase = sword.spinDashPhase, giantPhase = sword.giantSpinPhase,
                     // ▼ 巨大化一回転(hiltType:"1")の拡大がクライアント側にも見えるよう、剣本体のスケールも同期する
                     scale = sword.transform.localScale.x,
                     targetPlayerId = targets[p.playerId],
@@ -1752,7 +1752,7 @@ public class MultiplayerManager : MonoBehaviour
             }
             sword.ApplyMultiplayerHealth(data.hp, wasCrit);
             if (clashed) sword.PlayClashEffect();
-            sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale);
+            sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale, data.spinPhase, data.giantPhase);
             // 残り秒数を「解ける時刻」に直して持つ。こうするとHostと同じ IsSuppressed() が使える。
             if (data.suppressedRemaining > 0f)
             {
