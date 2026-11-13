@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import { PLAYER_COLORS, swordImageSource } from '../styles';
 import { MATCH_INTRO_MS } from '../network/RoomSession.js';
 import { hiltOf } from './swordForge.js';
@@ -23,6 +24,30 @@ const Sword = ({ sword, className = '', hilt = true }) => (
     {hilt && <img className="mi-sword__hilt" src={hiltOf(sword?.hiltType).imageSrc} alt="" draggable={false} />}
   </div>
 );
+
+// 剣の名前（省略しない）。名札の行の幅いっぱいに1行で出し、入りきらないときだけ入るまで文字を小さくする
+// （ロビーの名札と同じ考え方。大きさの上限は CSS の font-size）
+const PlateName = ({ name }) => {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let alive = true;
+    const fit = () => {
+      if (!alive) return;
+      el.style.fontSize = '';
+      const size = parseFloat(getComputedStyle(el).fontSize);
+      const room = el.clientWidth;
+      const width = el.scrollWidth;
+      if (width > room) el.style.fontSize = `${Math.floor(size * room / width * 10) / 10}px`;
+    };
+    fit();
+    // 文字の形が読み込み終わると幅が変わるので、合わせ直す
+    document.fonts?.ready.then(fit);
+    return () => { alive = false; };
+  }, [name]);
+  return <span ref={ref} className="mi-plate__name">{name}</span>;
+};
 
 // ==========================================
 // 対戦開始の演出（ロード画面を兼ねる）
@@ -82,12 +107,15 @@ export default function MatchIntro({ room, localPlayerId, waiting }) {
                     : <Sword sword={sword} className="mi-sword--main" />}
                 </div>
 
+                {/* 名札はロビーと同じ組み方：上の行に「何P」と「あなた」「ボス」の札、下の行に剣の名前（行の幅いっぱい） */}
                 <div className="mi-plate">
-                  <div className="mi-plate__top">
+                  <div className="mi-plate__who">
                     <span className="mi-plate__badge">{player.slotIndex + 1}P</span>
-                    <span className="mi-plate__name">{sword?.name}</span>
-                    {isBoss && <small className="mi-plate__tag mi-plate__tag--boss">ボス</small>}
                     {player.playerId === localPlayerId && <small className="mi-plate__tag">あなた</small>}
+                    {isBoss && <small className="mi-plate__tag mi-plate__tag--boss">ボス</small>}
+                  </div>
+                  <div className="mi-plate__top">
+                    <PlateName name={sword?.name} />
                   </div>
                   {lives && (
                     <span className="mi-plate__stock">

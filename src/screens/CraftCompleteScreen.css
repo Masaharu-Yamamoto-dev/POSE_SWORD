@@ -309,7 +309,7 @@
 .forge-done--land .stats { flex: 1; }
 .forge-done--land .stats__row { align-items: center; }
 .forge-done--land .stats__label { width: 3.2em; font-size: 18px; letter-spacing: 0.1em; }
-.forge-done--land .stats__total { width: 2.4em; font-size: 52px; line-height: 1.08; }
+.forge-done--land .stats__total { width: 2.7em; font-size: 52px; line-height: 1.08; }
 .forge-done--land .stats__breakdown { margin-left: 18px; font-size: 17px; letter-spacing: 0.02em; }
 
 .forge-done--land .forge-done__skill {
@@ -359,7 +359,11 @@
 .forge-done--land .privacy__size { min-height: 34px; padding: 0 12px; }
 .forge-done--land .privacy__hint { font-size: 12px; line-height: 1.45; }
 
-.forge-done--land .hilt-pick {
+/* 柄：となりのプライバシーと同じ高さまで欄を伸ばし、柄の絵を大きくして上下の中央に置く（下に空きを残さない） */
+.forge-done--land .forge-done__hilt { display: flex; flex-direction: column; }
+.forge-done--land .forge-done__hilt .hilt-pick {
+  --hilt-img: 72px;
+  flex: 1;
   gap: 18px;
   margin-top: 2px;
 }
@@ -511,8 +515,8 @@
 }
 
 .forge-done--port .radar { width: 132px; height: 112px; --radar-font: 11px; }
-.forge-done--port .stats__label { font-size: 13px; letter-spacing: 0.06em; }
-.forge-done--port .stats__total { width: 2.4em; font-size: 34px; }
+.forge-done--port .stats__label { width: 2.4em; font-size: 13px; letter-spacing: 0.06em; } /* 数字の4桁分の幅を空ける */
+.forge-done--port .stats__total { width: 2.7em; font-size: 34px; }
 .forge-done--port .stats__breakdown { margin-left: 8px; font-size: 12px; }
 
 /* 情報の下に、区切りの墨の筆跡・柄・プライバシー（スクロールは共通の forge-scroll） */
@@ -530,9 +534,12 @@
 .forge-done--port .forge-done__section .forge-label { margin-bottom: 6px; }
 .forge-done--port .forge-done__section + .forge-done__section { margin-top: 18px; }
 
-.forge-done--port .hilt-pick {
-  --hilt-arrow: 44px;
+.forge-done.forge-done--port .hilt-pick {
+  --hilt-img: 88px;
+  --hilt-arrow: 48px;
   --hilt-dot-hit: 22px;
+  gap: 28px;
+  justify-content: center; /* 画面の幅に対して小さく左に寄らないよう、柄の絵を大きくして中央に置く */
 }
 
 .forge-done--port .forge-done__skill {

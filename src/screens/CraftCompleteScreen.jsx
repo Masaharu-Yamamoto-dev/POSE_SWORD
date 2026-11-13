@@ -211,7 +211,7 @@ export default function CraftCompleteScreen({
           <div className="forge-done__bottom intro-late">
             {ground}
             <div className="forge-done__settings">
-              <section>
+              <section className="forge-done__hilt">
                 <div className="forge-label">柄</div>
                 {hiltPicker}
               </section>

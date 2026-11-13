@@ -219,7 +219,31 @@
 .forge-quiet .privacy__mode.is-on .privacy__icon { opacity: 0.85; }
 .forge-quiet .privacy__hint { font-size: 12px; color: #5c554c; }
 .forge-quiet .hilt-pick { --hilt-img: 52px; }
-.forge-quiet .hilt-pick__arrow svg { width: 10px; height: 17px; stroke: #6f675d; }
+/* 柄の ‹ › は、押せると分かるよう墨の線の丸で囲む（刀掛けの番号の丸と同じ形）。乗せると朱になる。
+   押せる範囲（--hilt-arrow × --hilt-img）は変えず、丸はその中に収める */
+.forge-quiet .hilt-pick__arrow { position: relative; }
+.forge-quiet .hilt-pick__arrow::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  box-sizing: border-box;
+  border: 2px solid var(--sumi);
+  border-radius: 50%;
+  background: var(--washi);
+  transition: border-color 0.15s, transform 0.1s;
+}
+.forge-quiet .hilt-pick__arrow svg { position: relative; width: 10px; height: 16px; stroke: var(--sumi); transition: stroke 0.15s; }
+.forge-quiet .hilt-pick__arrow:first-child svg { left: -1px; } /* ‹ は見た目の重心が右に寄るので少し左へ */
+.forge-quiet .hilt-pick__arrow:last-child svg { left: 1px; }
+.forge-quiet .hilt-pick__arrow:hover::before { border-color: var(--shu); }
+.forge-quiet .hilt-pick__arrow:hover svg { stroke: var(--shu); }
+.forge-quiet .hilt-pick__arrow:active::before { transform: scale(0.92); }
+.forge-quiet .hilt-pick__arrow:focus-visible { outline: none; }
+.forge-quiet .hilt-pick__arrow:focus-visible::before { box-shadow: 0 0 0 2px var(--washi), 0 0 0 4px var(--shu); }
 .forge-quiet .hilt-pick__img img { opacity: 0.9; }
 .forge-quiet .hilt-pick__name { font-size: 16px; color: #3d3833; }
 .forge-quiet .hilt-pick__mods { font-size: 12px; }
@@ -617,7 +641,7 @@
   min-width: 0;
 }
 
-/* 数字は一の位をそろえる（右寄せの決まった幅） */
+/* 数字は一の位をそろえる（右寄せの決まった幅。柄の補正で HP が 1000 を超えた4桁まで収まる幅） */
 .stats__row {
   display: flex;
   align-items: baseline;
@@ -634,7 +658,7 @@
 
 .stats__total {
   flex-shrink: 0;
-  width: 2.3em;
+  width: 2.7em;
   font-size: 38px;
   line-height: 1.1;
   text-align: right;

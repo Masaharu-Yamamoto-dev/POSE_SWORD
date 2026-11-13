@@ -450,7 +450,7 @@ export default function LobbyScreen({
           onDragLeave={handleDragLeave}
           onDrop={(e) => handleDrop(e, index)}
         >
-          EMPTY
+          空き
         </div>
       );
     }

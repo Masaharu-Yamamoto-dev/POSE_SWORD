@@ -220,15 +220,15 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 112px;
+  bottom: 124px; /* 名札（「何P」の行と名前の行の2段）に掛からない高さ */
   display: flex;
   justify-content: center;
   align-items: flex-end;
   transform: skewX(10deg);
   transform-origin: 50% 100%;
 }
-.match-intro.is-lives .mi-panel__art { bottom: 128px; }
-.match-intro.is-koma .mi-panel__art { bottom: 136px; }
+.match-intro.is-lives .mi-panel__art { bottom: 144px; }
+.match-intro.is-koma .mi-panel__art { bottom: 148px; }
 .mi-panel__shadow {
   position: absolute;
   z-index: 1;
@@ -308,11 +308,12 @@
   padding: 0 24px 0 34px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   animation: mi-slide-in 0.4s cubic-bezier(0.2, 0.9, 0.2, 1) calc(var(--d) + 0.45s) both;
 }
 .mi-panel:first-child .mi-plate { padding-left: 84px; }
-.mi-plate__top { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; padding-bottom: 10px; }
+.mi-plate__who { display: flex; align-items: center; gap: 8px; }
+.mi-plate__top { position: relative; min-width: 0; padding-bottom: 10px; }
 .mi-plate__top::after {
   content: '';
   position: absolute;
@@ -335,25 +336,25 @@
   background: var(--pc);
   clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
 }
+/* 名前は省略せず1行で出す（行に収まらないときは PlateName が文字を小さくする） */
 .mi-plate__name {
-  min-width: 0;
+  display: block;
   font-size: 38px;
-  line-height: 1.1;
+  line-height: 1.12;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   text-shadow: 0 0 6px var(--washi), 0 0 2px var(--washi);
 }
 .mi-n4 .mi-plate__name, .match-intro.is-solo .mi-panel:not(.is-boss) .mi-plate__name { font-size: 27px; }
+/* 「あなた」「ボス」はロビーの名札と同じ形：角を落とさない墨の札（ボスは金） */
 .mi-plate__tag {
   flex-shrink: 0;
-  padding: 3px 12px 2px 8px;
-  font-size: 13px;
+  padding: 2px 9px;
+  font-size: 17px;
+  line-height: 1.3;
   color: var(--washi);
   background: var(--sumi);
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%);
 }
-.mi-plate__tag--boss { font-size: 15px; background: var(--shu); }
+.mi-plate__tag--boss { letter-spacing: 0.1em; background: var(--kin); }
 .mi-plate__stock { display: flex; align-items: center; gap: 6px; font-size: 15px; color: var(--usuzumi); }
 .mi-plate__stock i { width: 10px; height: 10px; background: var(--sumi); transform: rotate(45deg); }
 .mi-plate__stock i.is-off { box-sizing: border-box; background: transparent; border: 2px solid var(--kasure); }

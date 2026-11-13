@@ -593,7 +593,7 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   {/* 順位と名前は見れば分かるので見出しを付けない */}
-                  <tr style={{ color: 'var(--usuzumi)', fontSize: '15px', whiteSpace: 'nowrap' }}>
+                  <tr style={{ color: 'var(--usuzumi)', fontSize: '17px', whiteSpace: 'nowrap' }}>
                     <th colSpan={2} />
                     <th style={{ padding: '8px 6px', textAlign: 'center' }}>撃破数</th>
                     <th style={{ padding: '8px 6px', textAlign: 'center' }}>与ダメージ</th>
@@ -625,14 +625,14 @@ export default function ResultScreen({ view, onReturnToLobby, onFindNewOpponents
                             {player && <img src={swordImageSource(player.swordData)} alt="" style={{ width: '36px', height: '44px', objectFit: 'contain', flexShrink: 0 }} />}
                             {/* 上段：プレイヤー番号と「あなた」（小さめ）／下段：名前（大きめ・墨色・15文字まで収まる幅） */}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, textAlign: 'left' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '16px', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
                                 <span style={{ color: player ? PLAYER_COLORS[player.slotIndex] : 'var(--usuzumi)' }}>
                                   {player ? `${player.slotIndex + 1}P` : score.playerId}
                                 </span>
                                 {/* ロビーの名札と同じ「あなた」の墨札 */}
-                                {isMe && <small style={{ padding: '1px 7px', fontSize: '12px', color: 'var(--washi)', background: 'var(--sumi)' }}>あなた</small>}
+                                {isMe && <small style={{ padding: '1px 7px', fontSize: '14px', color: 'var(--washi)', background: 'var(--sumi)' }}>あなた</small>}
                                 {/* ロビーのボスの札と同じ色（傾き・筆の揺らぎは付けない）。自分がボスなら「あなた」の右 */}
-                                {isBossRow && <small style={{ padding: '1px 7px', fontSize: '12px', letterSpacing: '0.1em', color: 'var(--washi)', background: 'var(--kin)' }}>ボス</small>}
+                                {isBossRow && <small style={{ padding: '1px 7px', fontSize: '14px', letterSpacing: '0.1em', color: 'var(--washi)', background: 'var(--kin)' }}>ボス</small>}
                               </div>
                               <div style={{ width: '15em', fontSize: '19px', lineHeight: 1.2, color: 'var(--sumi)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                 {player?.swordData?.name}

@@ -1253,6 +1253,8 @@ public class MultiplayerManager : MonoBehaviour
         var controller = obj.GetComponent<SwordController>();
         controller.multiplayer = this;
         controller.isLocalControlled = player.playerId == config.localPlayerId;
+        // 自分の剣の真上に、どれが自分か分かる逆三角を出す（剣が消えれば一緒に消える）
+        if (controller.isLocalControlled) OwnSwordMarker.Attach(battle);
         var rb = obj.GetComponent<Rigidbody2D>();
         rb.simulated = false;
         rb.bodyType = IsHost ? RigidbodyType2D.Dynamic : RigidbodyType2D.Kinematic;

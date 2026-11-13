@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { HILT_DATABASE } from '../screens/hiltDatabase.js';
 import { SPOT_MAX, SPOT_MIN, privacyOf } from '../swordPrivacy.js';
 import { STAT_LABELS, STAT_MAX, bonusOf, hiltOf, signed, useImageShape } from './swordForge.js';
+import { useMaxCharsInput } from './nameLimit.js';
 import './SwordForgeParts.css';
 
 // 押すことを知らせる指（指先は左から 10.5、上から 3 の所）。HAND_PATH は線（指ごとに分かれている）、
@@ -540,6 +541,7 @@ const CrossIcon = () => (
 );
 
 function NameFields({ draft, setDraft, maxLen, onSave, onCancel, autoFocus = false, compact = false }) {
+  const limit = useMaxCharsInput(draft, setDraft, maxLen);
   const count = Array.from(draft).length;
   const empty = draft.trim() === '';
   const onKeyDown = e => {
@@ -550,8 +552,7 @@ function NameFields({ draft, setDraft, maxLen, onSave, onCancel, autoFocus = fal
   return (
     <>
       <span className="name-edit__field">
-        <input type="text" value={draft} aria-label="剣の名前" autoFocus={autoFocus}
-          onChange={e => setDraft(Array.from(e.target.value).slice(0, maxLen).join(''))} onKeyDown={onKeyDown} />
+        <input type="text" value={draft} aria-label="剣の名前" autoFocus={autoFocus} {...limit} onKeyDown={onKeyDown} />
         <span className={`name-edit__count ${count >= maxLen ? 'is-full' : ''}`} aria-live="polite">{count} / {maxLen}</span>
       </span>
       <button type="button" className={`name-edit__save ${compact ? 'is-compact' : ''}`} disabled={empty} onClick={onSave}>変更</button>

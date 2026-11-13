@@ -315,7 +315,7 @@
 
 .armory__card-total {
   flex-shrink: 0;
-  width: 2.3em;
+  width: 2.7em; /* HP の4桁まで */
   font-size: 28px;
   line-height: 1.1;
   text-align: right;
@@ -339,16 +339,16 @@
 .armory__info { position: relative; min-width: 0; }
 .armory__info-body { position: relative; }
 
-/* 装備の札：名前の行の右上。「装備中」「控え」は同じ大きさ。控えのときは真下に下線付きの「装備する」 */
+/* 装備の札：名前の行の右上。「装備中」と「装備する」は同じ大きさ。
+   刀掛けの札より一回り大きくして、スマホでも押せる大きさにする */
 .armory__equip {
+  --eq-w: 100px;
+  --eq-h: 40px;
+  --eq-fs: 19px;
   position: absolute;
   right: 0;
   top: 2px;
   z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
 }
 
 .armory__badge {
@@ -381,12 +381,20 @@
   filter: url(#sumi-rough);
 }
 
+/* 控えの剣の「装備する」：墨で塗った札のボタン（ロビーの「武器庫へ」と同じ形）。印と見分けるため傾けない。乗せると朱 */
 .armory__badge.is-spare {
-  color: var(--f-empty);
-  background: transparent;
-  border: 2px dashed var(--kasure);
+  font-family: var(--font-brush);
+  color: var(--washi);
+  background: var(--sumi);
+  border: 0;
+  transform: none;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
   cursor: pointer;
+  transition: background-color 0.15s;
 }
+
+.armory__badge.is-spare:hover { background: var(--shu); }
+.armory__badge.is-spare:focus-visible { outline: 2px solid var(--shu); outline-offset: 2px; }
 
 /* 装備したときは、ロビーの準備完了と同じく押印のように押す */
 .armory__badge.is-stamped {
@@ -399,15 +407,8 @@
   100% { transform: rotate(3deg) scale(1); opacity: 1; }
 }
 
-.armory .armory__equip-link {
-  min-height: 32px;
-  padding: 2px 4px 11px;
-  font-size: 13px;
-  color: var(--sumi);
-}
-
 /* 名前の行：右上の装備の札の分を空ける。書き換え中は札を隠して、入力欄を広くとる */
-.armory__name-row { padding-right: 104px; }
+.armory__name-row { padding-right: 118px; }
 .armory__name-row.is-editing { padding-right: 0; }
 
 .armory__name { --name-h: 70px; }
@@ -549,6 +550,15 @@
 .armory--land .privacy__mode { padding: 4px 0 11px; }
 .armory--land .privacy__size { min-height: 30px; padding: 0 16px; }
 
+/* 柄：となりのプライバシーと同じ高さまで欄を伸ばし、柄の絵を大きくして上下の中央に置く（下に空きを残さない） */
+.armory--land .armory__hilt { display: flex; flex-direction: column; }
+.armory--land .armory__hilt .hilt-pick {
+  --hilt-img: 72px;
+  --hilt-arrow: 40px;
+  flex: 1;
+  gap: 12px;
+}
+
 .armory__care-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -556,6 +566,28 @@
   margin-top: 10px;
   padding-top: 12px;
 }
+
+/* 横長は舞台ごと縮むので、スマホでは文字がかなり小さくなる。読む文字は一回り大きくする
+   （共通の部品の大きさは縦長・錬成完了でも使うので、ここで横長の武器庫だけ上書きする） */
+.armory.armory--land .armory__count { font-size: 16px; }
+.armory.armory--land .armory__item-name,
+.armory.armory--land .armory__new { font-size: 16px; }
+.armory.armory--land .armory__card-label { font-size: 15px; }
+.armory.armory--land .armory__card-radar { --radar-font: 13px; }
+.armory.armory--land .armory__stats .radar { --radar-font: 13px; }
+.armory.armory--land .stats__label { font-size: 16px; }
+.armory.armory--land .stats__breakdown { font-size: 16px; }
+.armory.armory--land .skill__tag { font-size: 14px; }
+.armory.armory--land .skill__desc { font-size: 15px; }
+.armory.armory--land .forge-label { font-size: 15px; }
+.armory.armory--land .hilt-pick__mods { font-size: 14px; }
+.armory.armory--land .privacy__label { font-size: 14px; }
+.armory.armory--land .privacy__hint { font-size: 15px; }
+.armory.armory--land .armory__care-title { font-size: 15px; }
+.armory.armory--land .armory__care-desc { font-size: 13px; }
+/* 文字を大きくした分、手入れのボタンの上と中の余白を詰めて、下端の位置を変えない */
+.armory.armory--land .armory__care-grid { margin-top: 6px; padding-top: 8px; }
+.armory.armory--land .armory__care { padding-top: 4px; padding-bottom: 4px; }
 
 /* ==========================================
    縦長
@@ -600,6 +632,14 @@
 }
 
 .armory--port .armory__rack-inner { left: 18px; right: 18px; }
+
+/* 柄：画面の幅に対して小さく左に寄らないよう、柄の絵を大きくして中央に置く */
+.armory.armory--port .hilt-pick {
+  --hilt-img: 88px;
+  --hilt-arrow: 48px;
+  gap: 28px;
+  justify-content: center;
+}
 
 /* 縦長は1本分の幅が狭いので、名前は折り返して全部出す（最大2行）。その分、番号・地面・剣・円相を上げる */
 .armory--port .armory__enso {
@@ -674,16 +714,15 @@
 }
 
 .armory--port .armory__card-label { font-size: 11px; }
-.armory--port .armory__card-total { width: 2.2em; font-size: 20px; }
+.armory--port .armory__card-total { width: 2.6em; font-size: 20px; }
 .armory--port .armory__card-icon { --skill-box: 30px; }
 
 .armory--port .armory__info { padding-top: 8px; }
 
-.armory--port .armory__equip { top: 12px; }
+.armory--port .armory__equip { --eq-w: 84px; --eq-h: 34px; --eq-fs: 16px; top: 8px; }
 
-.armory--port .armory__equip-link { min-height: 30px; font-size: 12px; }
 
-.armory--port .armory__name-row { padding-right: 78px; }
+.armory--port .armory__name-row { padding-right: 96px; }
 .armory--port .armory__name-row.is-editing { padding-right: 0; }
 .armory--port .armory__name { --name-h: 52px; }
 .armory--port .name-edit__viewing { gap: 4px; }
@@ -699,8 +738,8 @@
 }
 
 .armory--port .armory__stats .radar { width: 114px; height: 97px; --radar-font: 11px; }
-.armory--port .stats__label { font-size: 12px; letter-spacing: 0.06em; }
-.armory--port .stats__total { width: 2.4em; font-size: 30px; }
+.armory--port .stats__label { width: 2.4em; font-size: 12px; letter-spacing: 0.06em; } /* 数字の4桁分の幅を空ける */
+.armory--port .stats__total { width: 2.7em; font-size: 30px; }
 .armory--port .stats__breakdown { margin-left: 8px; font-size: 12px; }
 
 .armory--port .armory__skill {

@@ -103,7 +103,9 @@ public static bool matchEnded = false;
     public float maxSp = 100f;         // SPの最大値
     public float passiveSpFill = 5f;   // 1秒間に自動で溜まる量
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
-    public float spinDashDamageMultiplier = 4f; // 大回転斬（hiltType:"0"）が相手の剣に当たった時の、通常の衝突ダメージへの倍率（以前は5）
+    public float spinDashDamageMultiplier = 6f; // 大回転斬（hiltType:"0"）が相手の剣に当たった時の、通常の衝突ダメージへの倍率（以前は4）
+    public float spinDashCritMultiplier = 1.5f; // 大回転斬が尖った所で当たった時の倍率（通常攻撃は3倍）
+    public float spinDashWeakPointMultiplier = 2f; // 大回転斬が相手の柄に当たった時の倍率
     // ▼【新規追加】大回転斬の終わり方。以前はその場で速さも回転も0になって落ちていた。
     // 外れた（2秒たった）時は減速しながら回転がゆるみ、敵に当たった時は反動で少し弾かれてから、どちらもゆっくり降りる。
     // 減速・弾かれている間は操作を受け付けず、ゆっくり降りる間は操作でき、ジャンプするとすぐ普通の動きに戻る
@@ -131,14 +133,14 @@ public static bool matchEnded = false;
     public float giantSpinStaggerOnMiss = 1.0f;  // 誰にも当たらなかった後のふらつき
     public int cloneCount = 3; // 分身突進（hiltType:"2"）の分身数
     public float cloneDashSpeed = 43f; // 分身の突進速度（以前は35）
-    public float cloneDamageMultiplier = 3f; // 分身1体が命中した時のダメージ倍率（attackへの倍率）
+    public float cloneDamageMultiplier = 2.5f; // 分身1体が命中した時のダメージ倍率（attackへの倍率）（以前は3）
     public float cloneLifeTime = 3f; // 何にも当たらなかった場合に分身が自動的に消えるまでの秒数
     // ▼【変更】本体が溜めてから、本体の位置から1体ずつ撃ち出す。撃つ瞬間にその時の相手を狙い、撃った後しばらくは弱く追尾する。
     // 以前は分身を持ち場へ出して漂わせ、構えて身を引いてから撃っていたが、ごちゃつくうえ、頭上にリフトがあると撃った直後に当たって消えていた
     public float cloneLaunchInterval = 0.35f;  // 1体ずつ撃つ間隔（溜め終わってから、本体の位置から1体ずつ撃ち出す）
     public float cloneChargeTime = 0.45f;      // 撃ち始める前に本体が溜める時間
     public float cloneHomingTurnRate = 120f;   // 追尾で曲がれる速さの上限（度/秒）
-    public float cloneHomingTime = 0.8f;       // 撃ってから追尾する時間。過ぎたらまっすぐ飛ぶ（以前は0.6）
+    public float cloneHomingTime = 0.5f;       // 撃ってから追尾する時間。過ぎたらまっすぐ飛ぶ（以前は0.8）
     // 撃った後に狙った相手が倒れた時：次の相手が進む向きのこの角度以内にいれば、そちらへ向きを変える（それ以外は真っすぐ）
     public float cloneRetargetCone = 60f;
     public float cloneRetargetTurnRate = 300f; // その時だけ曲がれる速さ（度/秒）
@@ -965,18 +967,15 @@ public static bool matchEnded = false;
         if (respawnInvincibleTimer > 0f)
         {
             respawnInvincibleTimer -= Time.deltaTime;
-            if (spriteRenderer != null)
+            if (respawnInvincibleTimer <= 0f)
             {
-                if (respawnInvincibleTimer <= 0f)
-                {
-                    respawnInvincibleTimer = 0f;
-                    var c = spriteRenderer.color; c.a = 1f; spriteRenderer.color = c;
-                }
-                else
-                {
-                    bool visible = Mathf.FloorToInt(respawnInvincibleTimer / respawnBlinkInterval) % 2 == 0;
-                    var c = spriteRenderer.color; c.a = visible ? 1f : 0.25f; spriteRenderer.color = c;
-                }
+                respawnInvincibleTimer = 0f;
+                SetRespawnBlinkAlpha(1f);
+            }
+            else
+            {
+                bool visible = Mathf.FloorToInt(respawnInvincibleTimer / respawnBlinkInterval) % 2 == 0;
+                SetRespawnBlinkAlpha(visible ? 1f : 0.25f);
             }
         }
 
@@ -1503,6 +1502,8 @@ public static bool matchEnded = false;
                 }
                 else
                 {
+                    // 大回転斬の一撃は基礎倍率を高くする代わりに、クリティカル・柄の倍率を専用の値にして最大値を抑える
+                    bool spinDashHit = wasDashing && dashDamageBonus != 1.0f;
                     if (wasDashing)
                     {
                         damage = Mathf.RoundToInt(damage * dashDamageBonus);
@@ -1510,14 +1511,14 @@ public static bool matchEnded = false;
                     }
                     if (myCollider is PolygonCollider2D myPoly && IsPointy(hitPoint, myPoly))
                     {
-                        damage *= 3;
+                        damage = spinDashHit ? Mathf.RoundToInt(damage * spinDashCritMultiplier) : damage * 3;
                         isCrit = true;
                     }
 
                 // 相手の柄（弱点）判定。オレ達シールドが出ている相手は、柄が弱点にならない
                     if (targetCollider.CompareTag("Handle") && !target.HasActiveLeafShield)
                     {
-                        damage *= 2;
+                        damage = spinDashHit ? Mathf.RoundToInt(damage * spinDashWeakPointMultiplier) : damage * 2;
                         isWeakPoint = true;
                     }
                 }
@@ -2190,6 +2191,17 @@ public static bool matchEnded = false;
     {
         const float c1 = 1.70158f, c3 = c1 + 1f;
         return 1f + c3 * Mathf.Pow(t - 1f, 3f) + c1 * Mathf.Pow(t - 1f, 2f);
+    }
+
+    // ▼【変更】リスポーン無敵中の点滅。以前は刀身だけ薄くしていたので、柄（Handleタグ）も同じ濃さにする。
+    // 色（RGB）は技の色分けや柄の光と共用なので、アルファだけ差し替える
+    void SetRespawnBlinkAlpha(float alpha)
+    {
+        foreach (var r in GetComponentsInChildren<SpriteRenderer>())
+        {
+            if (r != spriteRenderer && !r.CompareTag("Handle")) continue;
+            var c = r.color; c.a = alpha; r.color = c;
+        }
     }
 
     // ▼【新規追加】巨大回転斬の「柄が光る」。柄（Handleタグ）の見た目だけを金色にする。
