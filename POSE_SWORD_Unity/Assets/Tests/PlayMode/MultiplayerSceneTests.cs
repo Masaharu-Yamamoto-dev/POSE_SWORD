@@ -450,8 +450,28 @@ public class MultiplayerSceneTests
             "The healed amount is shown.");
     }
 
+    // 撃ち出された分身を、出てきた順に集める（出てきた時刻と、撃ち出した位置の本体からの距離も）
+    private static IEnumerator CollectFiredClones(Component master, System.Collections.Generic.List<(Component clone, float at, float fromMaster)> fired, float seconds)
+    {
+        var cloneType = RuntimeType("SwordCloneProjectile");
+        var launchedFlag = cloneType.GetProperty("Launched");
+        var seen = new System.Collections.Generic.HashSet<int>();
+        float giveUp = Time.realtimeSinceStartup + seconds;
+        while (fired.Count < 3 && Time.realtimeSinceStartup < giveUp)
+        {
+            foreach (Component clone in UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None))
+            {
+                if (clone == null || !seen.Add(clone.GetInstanceID())) continue;
+                Assert.IsTrue((bool)launchedFlag.GetValue(clone), "A clone is fired the moment it appears.");
+                var from = (Vector2)cloneType.GetProperty("LaunchedFrom").GetValue(clone);
+                fired.Add((clone, Time.realtimeSinceStartup, Vector2.Distance(from, master.transform.position)));
+            }
+            yield return null;
+        }
+    }
+
     [UnityTest]
-    public IEnumerator CloneRushHoldsItsClonesThenFiresThemOneAtATime()
+    public IEnumerator CloneRushChargesThenFiresClonesFromTheMasterOneAtATime()
     {
         Call("InitializeMultiplayer", Config("clone-rush", true));
         yield return null; yield return null;
@@ -459,39 +479,67 @@ public class MultiplayerSceneTests
         yield return new WaitForSecondsRealtime(3.2f);
         var p0 = Sword("p0");
         var cloneType = RuntimeType("SwordCloneProjectile");
-        var launchedFlag = cloneType.GetProperty("Launched");
-        Func<Component[]> clones = () => UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None).Cast<Component>().ToArray();
-        Func<Component, bool> launched = c => (bool)launchedFlag.GetValue(c);
+        var phaseField = p0.GetType().GetField("cloneRushPhase");
 
         FireUltimate(p0, "2"); // オレ達アタック
+        // まず溜める：その間は分身は出ていない
         float giveUp = Time.realtimeSinceStartup + 3f;
-        while (clones().Length < 3 && Time.realtimeSinceStartup < giveUp) yield return null;
-        var held = clones();
-        Assert.AreEqual(3, held.Length, "Three clones come out once the cutin is over.");
-        Assert.IsTrue(held.All(c => !launched(c)), "The clones take aim before anything is fired.");
-        Assert.IsTrue(held.All(c => c.GetComponent<Collider2D>().isTrigger), "Held clones cannot hit or be pushed.");
-        // 壁や床の向こう側に出ていない（自分の中心との間に壁がない）
-        foreach (var clone in held)
-            Assert.IsFalse(Physics2D.LinecastAll(p0.transform.position, clone.transform.position).Any(h =>
-                !h.collider.isTrigger && h.collider.GetComponentInParent(RuntimeType("SwordBattle")) == null &&
-                h.collider.GetComponent(cloneType) == null), "A clone must not appear behind a wall.");
+        while ((int)phaseField.GetValue(p0) != 1 && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.AreEqual(1, (int)phaseField.GetValue(p0), "The master charges first.");
+        Assert.AreEqual(3, (int)p0.GetType().GetField("cloneRushShotsLeft").GetValue(p0), "Three shots are ready.");
+        Assert.AreEqual(0, UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None).Length, "No clone is out while charging.");
 
-        // 1体ずつ、間を空けて撃つ
-        var fired = new System.Collections.Generic.Dictionary<int, float>();
-        giveUp = Time.realtimeSinceStartup + 3f;
-        while (fired.Count < 3 && Time.realtimeSinceStartup < giveUp)
+        // 本体の位置から、1体ずつ間を空けてそのまま撃ち出す
+        var fired = new System.Collections.Generic.List<(Component clone, float at, float fromMaster)>();
+        yield return CollectFiredClones(p0, fired, 3f);
+        Assert.AreEqual(3, fired.Count, "Every clone is fired.");
+        Assert.IsTrue(fired.All(f => f.fromMaster < .5f), "Each clone is fired from where the master is.");
+        Assert.Greater(fired[1].at - fired[0].at, .2f, "There is a pause between shots.");
+        Assert.Greater(fired[2].at - fired[1].at, .2f, "There is a pause between shots.");
+        Assert.IsTrue(fired.Where(f => f.clone != null).All(f => !f.clone.GetComponent<Collider2D>().isTrigger), "A fired clone can hit.");
+        yield return null;
+        Assert.AreEqual(0, (int)phaseField.GetValue(p0), "The stage is cleared once all are fired.");
+    }
+
+    [UnityTest]
+    public IEnumerator CloneRushAimsEachShotAtSomeoneStillStanding()
+    {
+        Call("InitializeMultiplayer", Config("clone-retarget", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"clone-retarget\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        var targetField = RuntimeType("SwordCloneProjectile").GetField("target", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        FireUltimate(p0, "2");
+        var fired = new System.Collections.Generic.List<(Component clone, float at, float fromMaster)>();
+        // 1体目が撃たれたら、それが狙った相手を倒す
+        float giveUp = Time.realtimeSinceStartup + 4f;
+        while (fired.Count == 0 && Time.realtimeSinceStartup < giveUp)
         {
-            foreach (var clone in held)
-                if (clone != null && launched(clone) && !fired.ContainsKey(clone.GetInstanceID())) fired[clone.GetInstanceID()] = Time.realtimeSinceStartup;
-            if (fired.Count == 1)
-                Assert.AreEqual(2, held.Count(c => c != null && !launched(c)), "Only one clone is fired at a time.");
+            var first = UnityEngine.Object.FindObjectsByType(RuntimeType("SwordCloneProjectile"), FindObjectsSortMode.None).Cast<Component>().FirstOrDefault();
+            if (first != null) fired.Add((first, Time.realtimeSinceStartup, 0f));
             yield return null;
         }
-        Assert.AreEqual(3, fired.Count, "Every clone is fired in the end.");
-        Assert.IsTrue(held.Where(c => c != null).All(c => !c.GetComponent<Collider2D>().isTrigger), "A fired clone can hit.");
-        var times = fired.Values.OrderBy(t => t).ToArray();
-        Assert.Greater(times[1] - times[0], .1f, "There is a pause between shots.");
-        Assert.Greater(times[2] - times[1], .1f, "There is a pause between shots.");
+        Assert.AreEqual(1, fired.Count, "The first clone is fired.");
+        var aimed = ((Transform)targetField.GetValue(fired[0].clone)).GetComponentInParent(RuntimeType("SwordBattle"));
+        QueueHit(p0, aimed, 5000);
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        Assert.IsFalse(Flag(aimed, "IsAlive"), "The aimed enemy is down.");
+
+        // 次の分身は、まだ立っている相手を狙って撃たれる
+        Component second = null;
+        giveUp = Time.realtimeSinceStartup + 2f;
+        while (second == null && Time.realtimeSinceStartup < giveUp)
+        {
+            second = UnityEngine.Object.FindObjectsByType(RuntimeType("SwordCloneProjectile"), FindObjectsSortMode.None).Cast<Component>()
+                .FirstOrDefault(c => c != fired[0].clone);
+            yield return null;
+        }
+        Assert.IsNotNull(second, "The next clone is fired.");
+        var next = ((Transform)targetField.GetValue(second)).GetComponentInParent(RuntimeType("SwordBattle"));
+        Assert.AreNotEqual(aimed, next, "It is aimed at someone else.");
+        Assert.IsTrue(Flag(next, "IsAlive"), "Its target is still standing.");
     }
 
     [UnityTest]
@@ -506,92 +554,14 @@ public class MultiplayerSceneTests
         // 横向きに寝かせて、地面に落ち着くまで待つ
         body.rotation = 90f; body.angularVelocity = 0f;
         yield return new WaitForSecondsRealtime(1.5f);
-        Debug.Log($"[テスト] 寝かせた剣: 位置={p0.transform.position}, 向き={p0.transform.eulerAngles.z:F0}°");
-
-        var cloneType = RuntimeType("SwordCloneProjectile");
-        var launchedFlag = cloneType.GetProperty("Launched");
-        FireUltimate(p0, "2");
-        float giveUp = Time.realtimeSinceStartup + 3f;
-        Component[] held = new Component[0];
-        while (held.Length < 3 && Time.realtimeSinceStartup < giveUp)
-        {
-            held = UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None).Cast<Component>().ToArray();
-            yield return null;
-        }
-        // 分身は本体の位置で生まれてから持ち場へ飛び出すので、着くまで待ってから見る
-        yield return new WaitForSecondsRealtime(.15f);
-        foreach (var clone in held) Debug.Log($"[テスト] 分身の持ち場={clone.transform.position}");
-        Assert.AreEqual(3, held.Length, "Three clones come out even when the sword lies on the ground.");
-        // 寝ている剣より低い（地面すれすれの）場所には出さない
-        foreach (var clone in held)
-            Assert.Greater(clone.transform.position.y, p0.transform.position.y, "Clones appear above the sword, not down by the ground.");
-
-        // 撃った直後（0.1秒以内）に壁や床に当たって消えた分身がないか
-        var firedAt = new System.Collections.Generic.Dictionary<Component, float>();
-        int lostRightAfterLaunch = 0;
-        giveUp = Time.realtimeSinceStartup + 3f;
-        while (Time.realtimeSinceStartup < giveUp)
-        {
-            foreach (var clone in held)
-            {
-                if (clone == null)
-                    continue;
-                if ((bool)launchedFlag.GetValue(clone) && !firedAt.ContainsKey(clone)) firedAt[clone] = Time.realtimeSinceStartup;
-            }
-            foreach (var pair in firedAt.ToArray())
-                if (pair.Key == null && Time.realtimeSinceStartup - pair.Value < .1f) { lostRightAfterLaunch++; firedAt.Remove(pair.Key); }
-            if (firedAt.Count + lostRightAfterLaunch >= 3 && held.All(c => c == null || (bool)launchedFlag.GetValue(c))) break;
-            yield return null;
-        }
-        Assert.AreEqual(3, firedAt.Count + lostRightAfterLaunch, "All three clones are fired.");
-        Assert.AreEqual(0, lostRightAfterLaunch, "No clone may vanish the moment it is fired.");
-    }
-
-    [UnityTest]
-    public IEnumerator ClonesAreBornFromTheirMasterAndStepBackBeforeTheyStrike()
-    {
-        Call("InitializeMultiplayer", Config("clone-familiar", true));
-        yield return null; yield return null;
-        Call("BeginMultiplayer", "{\"matchId\":\"clone-familiar\"}");
-        yield return new WaitForSecondsRealtime(3.2f);
-        var p0 = Sword("p0");
-        var cloneType = RuntimeType("SwordCloneProjectile");
-        var launchedFlag = cloneType.GetProperty("Launched");
 
         FireUltimate(p0, "2");
-        float giveUp = Time.realtimeSinceStartup + 3f;
-        Component first = null;
-        while (first == null && Time.realtimeSinceStartup < giveUp)
-        {
-            first = UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None).Cast<Component>().FirstOrDefault();
-            yield return null;
-        }
-        Assert.IsNotNull(first);
-        // 見つけた時には既に持ち場へ飛び出し始めているので、分身が覚えている「生まれた場所」で確かめる
-        var bornAt = (Vector2)cloneType.GetField("emergeFrom", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(first);
-        Assert.Less(Vector2.Distance(bornAt, p0.transform.position), 1f, "A clone is born where its master stands.");
-
-        yield return new WaitForSecondsRealtime(.3f);
-        Assert.Greater(Vector2.Distance(first.transform.position, p0.transform.position), 1.5f, "It then moves out to its post.");
-
-        // 撃つ直前に、相手と反対側へ身を引く（身を引いている間だけ、相手から離れていく）
-        var target = Sword("p1").transform;
-        var windingUp = cloneType.GetField("windingUp", BindingFlags.NonPublic | BindingFlags.Instance);
-        float startDistance = -1f, farthest = 0f;
-        giveUp = Time.realtimeSinceStartup + 2f;
-        while (first != null && !(bool)launchedFlag.GetValue(first) && Time.realtimeSinceStartup < giveUp)
-        {
-            if ((bool)windingUp.GetValue(first))
-            {
-                float distance = Vector2.Distance(first.transform.position, target.position);
-                if (startDistance < 0f) startDistance = distance;
-                farthest = Mathf.Max(farthest, distance);
-            }
-            yield return new WaitForFixedUpdate();
-        }
-        Assert.IsTrue(first == null || (bool)launchedFlag.GetValue(first), "The clone is fired.");
-        Assert.GreaterOrEqual(startDistance, 0f, "The clone draws back before it is fired.");
-        Assert.Greater(farthest - startDistance, .2f, "Drawing back moves the clone away from its target.");
+        var fired = new System.Collections.Generic.List<(Component clone, float at, float fromMaster)>();
+        yield return CollectFiredClones(p0, fired, 4f);
+        Assert.AreEqual(3, fired.Count, "All three clones are fired even when the sword lies on the ground.");
+        // 撃った直後（0.1秒以内）に床などに当たって消えた分身がないか
+        yield return new WaitForSecondsRealtime(.1f);
+        Assert.IsNotNull(fired[2].clone, "The last clone does not vanish the moment it is fired.");
     }
 
     [UnityTest]
@@ -614,7 +584,7 @@ public class MultiplayerSceneTests
             yield return null;
         }
         Assert.IsNotNull(clone);
-        Assert.IsTrue(Field(p0, "isDashing"), "The master is still protected while its clones come out.");
+        Assert.IsTrue(Field(p0, "isDashing"), "The master is still protected when the first clone is fired.");
 
         // 無敵の間でも、本体はジャンプできる
         float before = body.linearVelocity.y;
@@ -748,50 +718,49 @@ public class MultiplayerSceneTests
         Action<float> placeAt = d => enemy.position = (Vector2)p0.transform.position + Vector2.right * (d + gap);
 
         yield return RaiseShield(p0);
-        Debug.Log("[テスト] 実射程の外の敵：" + state());
-        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "An enemy beyond reach does not stretch the ring.");
+        Debug.Log("[テスト] 感知射程の外の敵：" + state());
+        Assert.Less(farthest, sense, "Sensing reaches further than the ring can stretch.");
+        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "An enemy beyond sensing range does not stretch the ring.");
         Assert.AreEqual(usualSpeed, (float)speed.GetValue(p0), .01f);
+        Assert.IsNull(GameObject.Find("ShieldRingGuide_" + p0.name), "The temporary ring guide is gone.");
+        var aura = GameObject.Find("LeafShieldAura");
+        Assert.IsNotNull(aura, "The master is outlined while shielded.");
+        Assert.IsTrue(aura.GetComponent<SpriteRenderer>().enabled);
 
-        // 感知射程の外（実射程の内側）にいるだけでは、広げ始めない
+        // 感知射程に入っても最大より遠い敵には、最大まで広げて止まる（届かない）
         float between = (sense + farthest) * .5f;
         placeAt(between);
-        yield return new WaitForSecondsRealtime(1f);
-        Debug.Log("[テスト] 感知射程の外：" + state());
-        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "An enemy outside sensing range does not start the ring.");
+        yield return new WaitForSecondsRealtime(.5f);
+        Debug.Log("[テスト] 感知射程の中・最大より遠い：" + state());
+        Assert.AreEqual(farthest, (float)radius.GetValue(p0), .3f, "The ring stretches to its limit toward a sensed enemy that is still too far.");
+        Assert.AreEqual(usualSpeed, (float)speed.GetValue(p0), .01f, "The shields keep their usual speed while reaching.");
+        Assert.AreEqual(usualSpeed, chaseSpeed, .01f);
 
-        // 感知射程に入った敵には、その距離（の少し外）まで素早く広げ、速く回って何度も通る
-        placeAt((5f + sense) * .5f);
-        yield return new WaitForSecondsRealtime(.4f);
-        Debug.Log("[テスト] 感知射程の中：" + state());
-        Assert.AreEqual(expected(), (float)radius.GetValue(p0), .3f, "The ring quickly reaches out to a sensed enemy.");
-        Assert.AreEqual(chaseSpeed, (float)speed.GetValue(p0), .01f, "The shields spin faster while chasing an enemy.");
-        var guide = GameObject.Find("ShieldRingGuide_" + p0.name);
-        Assert.IsNotNull(guide, "The ring is drawn so its size can be checked.");
-        Assert.IsTrue(guide.GetComponent<LineRenderer>().enabled);
+        // 最大より近い敵には、その距離（の少し外）まで広げる
+        placeAt((5f + farthest) * .5f);
+        yield return new WaitForSecondsRealtime(1.5f);
+        Debug.Log("[テスト] 最大より近い敵：" + state());
+        Assert.AreEqual(expected(), (float)radius.GetValue(p0), .3f, "The ring fits a nearer enemy.");
 
-        // 広げた後は、感知射程の外へ出ても実射程まで追いかける
+        // 感知射程の境目を出入りしても、輪はすぐには戻らない
         placeAt(between);
         yield return new WaitForSecondsRealtime(.6f);
-        Debug.Log("[テスト] 広げた後に感知射程の外へ：" + state());
-        Assert.AreEqual(expected(), (float)radius.GetValue(p0), .3f, "Once reaching, the ring follows the enemy out to its full reach.");
-
-        // 感知射程の境目を出入りしても、輪は戻ったり広がったりしない
         for (int i = 0; i < 4; i++)
         {
             placeAt(i % 2 == 0 ? sense + .5f : sense - .5f);
             yield return new WaitForSecondsRealtime(.25f);
             Debug.Log("[テスト] 感知射程の境目を出入り：" + state());
-            Assert.Greater((float)radius.GetValue(p0), sense - 1.5f, "Brushing the edge of sensing range does not make the ring snap back.");
+            Assert.Greater((float)radius.GetValue(p0), farthest - 1f, "Brushing the edge of sensing range does not make the ring snap back.");
         }
 
-        // 実射程の外へ離れたら、少し待ってからゆっくり普段の半径へ戻る
-        placeAt(farthest + 3f);
+        // 感知射程の外へ離れたら、少し待ってからゆっくり普段の半径へ戻る
+        placeAt(sense + 3f);
         yield return new WaitForSecondsRealtime(.2f);
-        Assert.Greater((float)radius.GetValue(p0), sense - 1.5f, "The ring waits a moment before drawing back.");
-        yield return new WaitForSecondsRealtime(.6f + (farthest - 5f) / 3f);
+        Assert.Greater((float)radius.GetValue(p0), farthest - 1f, "The ring waits a moment before drawing back.");
+        float returnSpeed = (float)p0.GetType().GetField("leafShieldRadiusReturnSpeed").GetValue(p0);
+        yield return new WaitForSecondsRealtime(.6f + (farthest - 5f) / returnSpeed);
         Debug.Log("[テスト] 離れた後：" + state());
         Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "The ring returns to its usual size.");
-        Assert.AreEqual(usualSpeed, (float)speed.GetValue(p0), .01f, "The shields slow back down once they stop chasing.");
 
         // 近い敵には縮めない（普段の半径のまま）
         placeAt(2.5f);

@@ -31,6 +31,9 @@ public class SwordBattle : MonoBehaviour
         new Color(0.25f, 0.85f, 0.35f), // P4 緑
     };
     public Color PlayerMainColor => PlayerColors[Mathf.Clamp(playerNumber - 1, 0, PlayerColors.Length - 1)];
+    // ▼【新規追加】オレ達アタック・オレ達シールドの分身を染める色。分身は剣の絵に色を掛け合わせて染めるので、
+    // プレイヤーの色そのままだと暗くなりすぎる。白に寄せて明るくする（cloneTintLighten：0でプレイヤーの色そのまま、1で白）
+    public Color CloneTint => Color.Lerp(PlayerMainColor, Color.white, cloneTintLighten);
     // 必殺技が撃てるようになるSPのライン（独楽モードは竜巻の70、剣モードは満タン）
     // 通常必殺技の発動ライン。既定の100は maxSp の既定値と同じなので、従来の挙動は変わらない。
     // 1vs3のボスだけ maxSp が200になるが、通常必殺技は100のままにしたいので参照先を分けてある。
@@ -127,18 +130,20 @@ public static bool matchEnded = false;
     public float giantSpinStaggerOnHit = 0.3f;   // 誰かに当てた後のふらつき（操作できない・無敵ではない）
     public float giantSpinStaggerOnMiss = 1.0f;  // 誰にも当たらなかった後のふらつき
     public int cloneCount = 3; // 分身突進（hiltType:"2"）の分身数
-    public float cloneSpawnMinRadius = 2f; // 分身の出現位置：自分からの最小距離
-    public float cloneSpawnMaxRadius = 4f; // 分身の出現位置：自分からの最大距離
-    public float cloneDashSpeed = 35f; // 分身の突進速度
+    public float cloneDashSpeed = 43f; // 分身の突進速度（以前は35）
     public float cloneDamageMultiplier = 3f; // 分身1体が命中した時のダメージ倍率（attackへの倍率）
     public float cloneLifeTime = 3f; // 何にも当たらなかった場合に分身が自動的に消えるまでの秒数
-    public float cloneSpawnStagger = 0.08f; // 分身が1体ずつ出現する間隔（秒）
-    // ▼【新規追加】出す → 構える → 1体ずつ撃つ。撃つ瞬間に相手を狙い直し、撃った後しばらくは弱く追尾する
-    public float cloneSpawnFanSpread = 100f;   // 分身を並べる扇の広さ（度）。相手と反対側（自分の背後）のやや上を中心にする
-    public float cloneAimTime = 0.25f;         // 出し終えてから、相手に切っ先を向けて構える時間
-    public float cloneLaunchInterval = 0.18f;  // 1体ずつ撃つ間隔
+    // ▼【変更】本体が溜めてから、本体の位置から1体ずつ撃ち出す。撃つ瞬間にその時の相手を狙い、撃った後しばらくは弱く追尾する。
+    // 以前は分身を持ち場へ出して漂わせ、構えて身を引いてから撃っていたが、ごちゃつくうえ、頭上にリフトがあると撃った直後に当たって消えていた
+    public float cloneLaunchInterval = 0.35f;  // 1体ずつ撃つ間隔（溜め終わってから、本体の位置から1体ずつ撃ち出す）
+    public float cloneChargeTime = 0.45f;      // 撃ち始める前に本体が溜める時間
     public float cloneHomingTurnRate = 120f;   // 追尾で曲がれる速さの上限（度/秒）
-    public float cloneHomingTime = 0.6f;       // 撃ってから追尾する時間。過ぎたらまっすぐ飛ぶ
+    public float cloneHomingTime = 0.8f;       // 撃ってから追尾する時間。過ぎたらまっすぐ飛ぶ（以前は0.6）
+    // 撃った後に狙った相手が倒れた時：次の相手が進む向きのこの角度以内にいれば、そちらへ向きを変える（それ以外は真っすぐ）
+    public float cloneRetargetCone = 60f;
+    public float cloneRetargetTurnRate = 300f; // その時だけ曲がれる速さ（度/秒）
+    public float cloneRetargetTime = 0.6f;     // その時だけ追尾する時間
+    [Range(0f, 1f)] public float cloneTintLighten = 0.5f; // 分身を染める色を、プレイヤーの色からどれだけ白に寄せるか
     public float cloneLifestealRate = 0.2f; // 分身が相手のHPを実際に減らした量のうち、本体が回復する割合（ライフスティール）
     public int leafShieldCount = 3; // リーフシールド（hiltType:"3"）の展開枚数
     public float leafShieldDuration = 15f; // リーフシールドの持続時間（秒）
@@ -150,12 +155,14 @@ public static bool matchEnded = false;
     public int leafShieldDurability = 2;            // 分身1枚の耐久（触れられる・本体が被弾するたびに1減り、0で割れる）
     // ▼ 輪の広がり方：普段は leafShieldOrbitRadius。一番近い敵が「感知射程」に入ったら広げ始め、広げた後は「実射程」まで追いかける。
     // 始める距離（感知射程）とやめる距離（実射程）に差があるので、境目を敵が通っても広がったり戻ったりを繰り返さない
-    public float leafShieldSenseRadius = 8f;        // 感知射程：一番近い敵がここまで入ったら広げ始める
-    public float leafShieldMaxOrbitRadius = 12f;    // 実射程：広げた後は、敵がここまで離れても追いかける（輪の上限）
+    // ▼【変更】感知射程を最大の届く距離より長くした。遠くの敵には輪を最大まで広げて構え、届くのは最大より近い敵だけ。
+    // 感知射程の外へ出たら、少し待ってゆっくり戻す（境目で出入りしても輪がゆっくり動くだけなので、揺れが目立たない）
+    public float leafShieldSenseRadius = 10f;       // 感知射程：一番近い敵がここまで入ったら広げ始め、ここから出たら戻す
+    public float leafShieldMaxOrbitRadius = 8f;     // 最大の届く距離（輪の半径の上限）
     public float leafShieldReachDepth = .5f;        // 輪を「敵の一番近い点」よりこれだけ外に合わせ、分身が敵の体に食い込む位置を通るようにする
-    public float leafShieldChaseOrbitSpeed = 180f;  // 敵を追っている間の回る速さ（度/秒）。普段は leafShieldOrbitSpeed。敵の方向を通る回数を増やす
+    public float leafShieldChaseOrbitSpeed = 150f;  // 敵を追っている間の回る速さ（度/秒）。今は普段（leafShieldOrbitSpeed）と同じにしている（以前は180）
     public float leafShieldReachTime = .15f;        // 広げる時に、どこまで広げてもほぼ届くまでの時間（着く直前はなめらかに減速）
-    public float leafShieldRadiusReturnSpeed = 3f;  // 輪を普段の半径へ戻す速さ（毎秒）。広げる時よりゆっくり戻して落ち着いて見せる
+    public float leafShieldRadiusReturnSpeed = 1.5f; // 輪を普段の半径へ戻す速さ（毎秒）。広げる時よりゆっくり戻して落ち着いて見せる（以前は3）
     public float leafShieldReachStartDelay = 0f;    // 敵が感知射程にこの秒数いたら広げ始める（0ならすぐ。一瞬かすめただけで広げたくない時に上げる）
     public float leafShieldReachHoldTime = .4f;     // 実射程から出ても、この秒数は広げたまま待ってから戻す
     public float leafShieldDamageTakenRate = .5f;   // シールドが出ている間、本体が受けるダメージの割合
@@ -293,7 +300,7 @@ public static bool matchEnded = false;
         MultiplayerOwner = owner; PlayerId = playerId;
         InitializeComponents(); StopAllCoroutines();
         enabled = true; isDead = false; isDashing = false; isDashShooting = false;
-        currentDashType = 0; currentSp = 0; spinDashPhase = 0; giantSpinPhase = 0;
+        currentDashType = 0; currentSp = 0; spinDashPhase = 0; giantSpinPhase = 0; cloneRushPhase = 0; cloneRushShotsLeft = 0;
         ApplyPlayerColor();
         controller.enabled = true;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = true;
@@ -522,7 +529,7 @@ public static bool matchEnded = false;
     {
         if (MultiplayerOwner == null) return;
         isDead = false; isDashing = false; isDashShooting = false; skillAllowsMovement = false;
-        currentDashType = 0; currentSp = 0; spinDashPhase = 0; giantSpinPhase = 0;
+        currentDashType = 0; currentSp = 0; spinDashPhase = 0; giantSpinPhase = 0; cloneRushPhase = 0; cloneRushShotsLeft = 0;
         StopUltimateAura();
         StopAllCoroutines();
         controller.enabled = true;
@@ -551,6 +558,7 @@ public static bool matchEnded = false;
         int damage = Mathf.Max(0, hp - health);
         if (damage > 0)
         {
+            PlayShieldGuard();
             PlayClientDamageEffect(damage, wasCrit);
             if (MultiplayerOwner.IsHost) currentSp = Mathf.Min(maxSp, currentSp + 100f * damage / maxHp * damageSpMultiplier);
         }
@@ -560,7 +568,7 @@ public static bool matchEnded = false;
         hp = Mathf.Clamp(health, 0, maxHp); UpdateUI();
         if (healed > 0) ShowHealPopup(healed);
         if (hp > 0) return;
-        isDead = true; isDashing = false; currentDashType = 0; skillAllowsMovement = false; spinDashPhase = 0; giantSpinPhase = 0;
+        isDead = true; isDashing = false; currentDashType = 0; skillAllowsMovement = false; spinDashPhase = 0; giantSpinPhase = 0; cloneRushPhase = 0; cloneRushShotsLeft = 0;
         RestoreTeammateCollisions();
         SetHiltGlow(false);
         giantSpinHitActive = false;
@@ -594,11 +602,14 @@ public static bool matchEnded = false;
 
     // ▼【修正】dashType 4(巨大化一回転)・5(分身突進)・6(リーフシールド発動)の色分けと、
     // 巨大化のスケールをクライアント側にも反映する
-    public void ApplyMultiplayerVisuals(float sp, bool dashing, int dashType, float scale, int spinPhase = 0, int giantPhase = 0)
+    public void ApplyMultiplayerVisuals(float sp, bool dashing, int dashType, float scale, int spinPhase = 0, int giantPhase = 0,
+        int clonePhase = 0, int cloneShots = 0)
     {
         if (!IsAlive) return;
         spinDashPhase = spinPhase;
         giantSpinPhase = giantPhase;
+        cloneRushPhase = clonePhase;
+        cloneRushShotsLeft = cloneShots;
         // ▼【新規追加】Client側はUltimateRoutine()自体をローカル実行しない（Host権威でのみ実行される）ため、
         // カットインもここで再生する。dashTypeが必殺技の値に変わった瞬間（0/1→2〜6）だけ発火させる
         int previousDashType = currentDashType;
@@ -624,38 +635,41 @@ public static bool matchEnded = false;
     void LateUpdate()
     {
         UpdateGiantSpinLook();
-        UpdateShieldRingGuide();
+        UpdateCloneRushChargeLook();
+        UpdateShieldAura();
         UpdateSpinDashLook();
     }
 
-    // ▼【新規追加】オレ達シールドの輪の大きさを確かめるための、仮の表示（薄い緑の円）。
-    // 分身はホスト側にしかないので、ホスト（とローカル対戦）の画面にだけ出る。演出の本番で差し替えるか消す
-    LineRenderer shieldRingLine;
+    // ▼【新規追加】オレ達シールドの、守っている間のふちどりと、殴られた時の盾の光（SkillEffects.LeafShield）。
+    // ゲストには分身がないので、守っているかは同期された分身の見た目があるかで決める
+    ILeafShieldAura shieldAura;
 
-    void UpdateShieldRingGuide()
+    bool ShieldShowing => IsAlive && (HasActiveLeafShield ||
+        (MultiplayerOwner != null && !MultiplayerOwner.IsHost && MultiplayerOwner.HasShieldVisuals(PlayerId)));
+
+    void UpdateShieldAura()
     {
-        bool show = IsAlive && HasActiveLeafShield;
-        if (!show)
-        {
-            if (shieldRingLine != null) shieldRingLine.enabled = false;
-            return;
-        }
-        if (shieldRingLine == null)
-        {
-            shieldRingLine = CreateCircleLine("ShieldRingGuide_" + name, ColorForDashType(6), .35f);
-        }
-        float radius = LeafShieldOrbitRadiusNow;
-        Vector3 centre = transform.position;
-        for (int i = 0; i < ReachSegments; i++)
-        {
-            float a = i * Mathf.PI * 2f / ReachSegments;
-            shieldRingLine.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
-        }
-        shieldRingLine.startWidth = shieldRingLine.endWidth = .05f;
-        shieldRingLine.enabled = true;
+        bool show = ShieldShowing && !SwordController.isKomaMode;
+        if (shieldAura == null && show) shieldAura = SkillEffects.LeafShield.CreateAura(this);
+        if (shieldAura != null) shieldAura.Tick(show, Time.deltaTime);
     }
 
-    const int ReachSegments = 64;
+    // 守っている間に本体が殴られた時：一番近い敵の方に盾の光を出す
+    void PlayShieldGuard()
+    {
+        if (!ShieldShowing || SwordController.isKomaMode) return;
+        Vector2 from = Vector2.right;
+        float best = float.MaxValue;
+        foreach (var enemy in NearbyEnemies())
+        {
+            if (enemy == null || enemy == this) continue;
+            Vector2 to = (Vector2)enemy.transform.position - (Vector2)transform.position;
+            if (to.sqrMagnitude < best) { best = to.sqrMagnitude; from = to; }
+        }
+        if (shieldAura == null) shieldAura = SkillEffects.LeafShield.CreateAura(this);
+        shieldAura.PlayGuard(from);
+    }
+
     PolygonCollider2D[] bladeShapes;
 
     // ▼【変更】巨大回転斬の演出。以前は仮の見た目（赤い円・ふらつきの点滅・ホストだけの柄の金色）だった。
@@ -727,36 +741,12 @@ public static bool matchEnded = false;
         return reach;
     }
 
-    // 円を描く線。剣の子にすると大きさに引きずられるので、独立したオブジェクトにして OnDestroy で片付ける
-    LineRenderer CreateCircleLine(string objectName, Color color, float alpha)
-    {
-        var line = new GameObject(objectName).AddComponent<LineRenderer>();
-        line.useWorldSpace = true;
-        line.loop = true;
-        line.positionCount = ReachSegments;
-        var shader = Shader.Find("Sprites/Default");
-        if (shader != null) line.material = new Material(shader);
-        Color c = color;
-        c.a = alpha;
-        line.startColor = line.endColor = c;
-        if (spriteRenderer != null)
-        {
-            line.sortingLayerID = spriteRenderer.sortingLayerID;
-            line.sortingOrder = spriteRenderer.sortingOrder - 1;
-        }
-        return line;
-    }
-
     void OnDestroy()
     {
         if (spinDashLook != null) { spinDashLook.Dispose(); spinDashLook = null; }
         if (giantSpinLook != null) { giantSpinLook.Dispose(); giantSpinLook = null; }
-        foreach (var line in new[] { shieldRingLine })
-        {
-            if (line == null) continue;
-            if (line.material != null) Destroy(line.material);
-            Destroy(line.gameObject);
-        }
+        if (cloneRushChargeLook != null) { cloneRushChargeLook.Dispose(); cloneRushChargeLook = null; }
+        if (shieldAura != null) { shieldAura.Dispose(); shieldAura = null; }
     }
 
     public static Color ColorForDashType(int dashType)
@@ -863,7 +853,6 @@ public static bool matchEnded = false;
             }
             spinTravelVelocity = rb.linearVelocity;
             spinTravelAngular = rb.angularVelocity;
-            TrackSpinDashClosestApproach();
         }
         trueVelocity = ((Vector2)transform.position - lastPosition) / Time.fixedDeltaTime;
         lastPosition = transform.position;
@@ -1265,7 +1254,6 @@ public static bool matchEnded = false;
                     spinDashVelocity = rb.linearVelocity;
                     spinDashAngular = rb.angularVelocity;
 
-                    if (spinDashPhase == (int)SpinDashStage.Dash) spinWallBounces++;
                     // 壁に当たった音とエフェクト
                     if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
                     if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
@@ -1526,6 +1514,7 @@ public static bool matchEnded = false;
         // ▼【変更】オレ達シールドが出ている間は、受けるダメージを減らす（以前は完全無敵）
         bool shielded = HasActiveLeafShield;
         damage = ShieldedDamage(damage);
+        if (shielded) PlayShieldGuard();
 
         float damagePercentage = ((float)damage / maxHp) * 100f; 
         currentSp = Mathf.Clamp(currentSp + (damagePercentage * damageSpMultiplier), 0f, maxSp);
@@ -2165,131 +2154,134 @@ public static bool matchEnded = false;
         // Client側の見た目再生（Kinematicコピー）では分身は出すが、ダメージは与えない。
         bool isAuthoritative = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
         int cloneDamage = Mathf.Max(Mathf.RoundToInt(attack * cloneDamageMultiplier), 1);
-
-        Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
         List<Collider2D> spawnedColliders = new List<Collider2D>();
-        List<SwordCloneProjectile> clones = new List<SwordCloneProjectile>();
-        const float cloneColliderRadius = 0.6f;
 
-        // ▼【変更】出す場所：相手と反対側（自分の背後）のやや上を中心にした扇に並べる。
-        // 以前は自分の周り360°に散らしていたため、壁の向こう側に出て、撃った瞬間に壁の裏に当たって消えることがあった
-        Vector2 awayFromEnemy = (Vector2)transform.position - CloneAimPosition();
-        if (awayFromEnemy.sqrMagnitude < .0001f) awayFromEnemy = Vector2.left;
-        Vector2 fanCentre = (awayFromEnemy.normalized + Vector2.up * .8f).normalized;
-        float fanCentreAngle = Mathf.Atan2(fanCentre.y, fanCentre.x) * Mathf.Rad2Deg;
-        float slotWidth = cloneCount > 0 ? cloneSpawnFanSpread / cloneCount : cloneSpawnFanSpread;
+        // 狙える相手がいない時に撃つ向き：技を出した時の相手の方
+        Vector2 toEnemy = CloneAimPosition() - (Vector2)transform.position;
+        cloneForward = toEnemy.sqrMagnitude > .0001f ? toEnemy.normalized : Vector2.right;
+
+        // ▼【変更】分身の予備動作（持ち場へ飛び出す・並ぶ・構える・引く）をやめた。本体が溜めてから、
+        // 本体の位置から1体ずつそのまま撃ち出す。以前は3体が同時に動いてごちゃつき、頭上にリフトや天井があると
+        // 持ち場が壁際になって、撃った直後に当たって消えていた。本体のいる所は必ず空いているので、そこから撃てば消えない
+        cloneRushPhase = (int)CloneRushChargeStage.Charge;
+        cloneRushShotsLeft = cloneCount;
+        yield return StartCoroutine(WaitSkillTime(cloneChargeTime));
+        // 本体の無敵は、溜め終わってから0.3秒で切る。撃つのはその後も続き、本体は自由に動ける
+        StartCoroutine(EndCloneRushProtectionAfter(0.3f));
+        cloneRushPhase = (int)CloneRushChargeStage.Fire;
 
         for (int i = 0; i < cloneCount; i++)
         {
-            // ▼【重要】画面端など出現位置の確保が難しい状況で1体の生成に失敗しても、
-            // 残りの分身の生成や末尾の状態リセットが必ず実行されるようにtry/catchで保護する
-            try
-            {
-                float slotAngle = fanCentreAngle + (i - (cloneCount - 1) * .5f) * slotWidth;
-                Vector3 spawnPos = FindCloneSpawnPosition(cloneColliderRadius, slotAngle, slotWidth);
-
-                // 本体の位置で生まれ、持ち場（spawnPos）へ飛び出す（SwordCloneProjectile.BeginHold）
-                GameObject cloneObj = new GameObject("SwordClone");
-                cloneObj.transform.position = transform.position;
-                cloneObj.transform.rotation = transform.rotation;
-
-                // ▼【新規追加】分身たちに「今使っている自分の剣 + まだ使っていない手持ちの剣」の形を持たせる
-                // (i=0が現在の自分、以降は手持ちの他の剣)。既に使い終えて手放した剣は含めない。
-                // 残機モードのON/OFFに関わらず、手持ちの剣が1本・2本だけでも安全に動作する
-                // (GetLifeSpriteが範囲を丸めるので、その場合は同じ形が繰り返されるだけ)。
-                // 画像が取れない場合は従来通り現在の刀身と同じ見た目にフォールバックする
-                int lifeSpriteIndex = -1;
-                Sprite cloneSprite = spriteRenderer != null ? spriteRenderer.sprite : null;
-                if (MultiplayerOwner != null)
-                {
-                    int wantedIndex = MultiplayerOwner.GetCurrentLifeIndex(PlayerId) + i;
-                    var lifeSprite = MultiplayerOwner.GetLifeSprite(PlayerId, wantedIndex);
-                    if (lifeSprite != null) { cloneSprite = lifeSprite; lifeSpriteIndex = wantedIndex; }
-                }
-
-                if (spriteRenderer != null)
-                {
-                    SpriteRenderer sr = cloneObj.AddComponent<SpriteRenderer>();
-                    sr.sprite = cloneSprite;
-                    sr.color = cloneColor;
-                    sr.sortingLayerID = spriteRenderer.sortingLayerID;
-                    sr.sortingOrder = spriteRenderer.sortingOrder;
-                    // ▼【修正】大きさは CloneVisualScale で本体の刀身と同じ太さにそろえる（どの剣を装備していても同じ大きさ）
-                    cloneObj.transform.localScale = Vector3.one * CloneVisualScale(this, cloneSprite);
-                }
-
-                // 当たり判定の大きさは見た目の大きさに関わらず固定（cloneColliderRadius）。拡大縮小の分を打ち消しておく
-                CircleCollider2D cloneCollider = cloneObj.AddComponent<CircleCollider2D>();
-                cloneCollider.radius = cloneColliderRadius / Mathf.Max(.0001f, cloneObj.transform.localScale.x);
-
-                Rigidbody2D cloneRb = cloneObj.AddComponent<Rigidbody2D>();
-                cloneRb.gravityScale = 0f;
-
-                // 出てすぐは飛ばさず、その場で構える（撃ち出すのは下の発射の段）
-                cloneRb.linearVelocity = Vector2.zero;
-
-                // ▼【新規追加】オンライン対戦では、Host権威の分身だけをMultiplayerManagerに登録し、
-                // その位置をSYNCでクライアントへ配信して見た目を再現できるようにする
-                string cloneId = (isAuthoritative && MultiplayerOwner != null) ? MultiplayerOwner.RegisterClone(cloneObj, PlayerId, cloneColor, lifeSpriteIndex) : null;
-
-                SwordCloneProjectile clone = cloneObj.AddComponent<SwordCloneProjectile>();
-                clone.Setup(this, isAuthoritative, cloneDamage, cloneLifeTime, MultiplayerOwner, cloneId);
-                clone.BeginHold((Vector2)spawnPos - (Vector2)transform.position, i);
-                clones.Add(clone);
-
-                // 自分自身や他の分身とは当たらないようにする
-                foreach (Collider2D myCol in myColliders)
-                {
-                    Physics2D.IgnoreCollision(cloneCollider, myCol, true);
-                }
-                foreach (Collider2D otherCloneCollider in spawnedColliders)
-                {
-                    Physics2D.IgnoreCollision(cloneCollider, otherCloneCollider, true);
-                }
-
-                // ▼【保険】それでも壁と重なった状態で出現してしまった場合、出現直後に消えないよう
-                // 重なっている壁（相手の剣ではないコライダー）とは衝突しないようにする
-                foreach (Collider2D overlapped in Physics2D.OverlapCircleAll(spawnPos, cloneColliderRadius))
-                {
-                    if (overlapped.GetComponentInParent<SwordBattle>() == null)
-                    {
-                        Physics2D.IgnoreCollision(cloneCollider, overlapped, true);
-                    }
-                }
-                spawnedColliders.Add(cloneCollider);
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"❌ 分身の生成に失敗しました（{i + 1}体目）: {e}");
-            }
-
-            // 出現タイミングを1体ずつずらす（最後の1体の後は待たない）
-            if (i < cloneCount - 1 && cloneSpawnStagger > 0f)
-            {
-                yield return StartCoroutine(WaitSkillTime(cloneSpawnStagger));
-            }
+            if (i > 0 && cloneLaunchInterval > 0f) yield return StartCoroutine(WaitSkillTime(cloneLaunchInterval));
+            if (!IsAlive) break;
+            // ▼【重要】1体の生成に失敗しても、残りの分身や末尾の状態リセットが必ず実行されるようにtry/catchで保護する
+            try { FireCloneFromMaster(i, isAuthoritative, cloneDamage, spawnedColliders); }
+            catch (System.Exception e) { Debug.LogError($"❌ 分身の生成に失敗しました（{i + 1}体目）: {e}"); }
+            cloneRushShotsLeft = cloneCount - i - 1;
         }
+        cloneRushPhase = 0;
+        cloneRushShotsLeft = 0;
+    }
 
-        // 本体の無敵は今までどおり、出し終えてから0.3秒で切る。構えと発射はその後も続き、本体は自由に動ける
-        StartCoroutine(EndCloneRushProtectionAfter(0.3f));
+    // ▼【新規追加】オレ達アタックの段階（CloneRushChargeStage）と、残りの発射数。演出と同期に使う
+    [HideInInspector] public int cloneRushPhase;
+    [HideInInspector] public int cloneRushShotsLeft;
 
-        // 構え：1体ずつ時間差で相手へ振り向く（構える時間の終わりまでに全員向き終わる）
-        Transform aimTarget = controller != null ? controller.enemyTarget : null;
-        for (int i = 0; i < clones.Count; i++)
-            if (clones[i] != null) clones[i].BeginAim(aimTarget, cloneAimTime, cloneAimTime * .25f * i);
-        yield return StartCoroutine(WaitSkillTime(cloneAimTime));
+    // ▼【新規追加】オレ達アタックの溜めと残りの発射数の演出。段階（cloneRushPhase、ゲストへ同期）を見て切り替える
+    ICloneRushChargeLook cloneRushChargeLook;
+    int cloneRushLookPhase, cloneRushLookShots;
 
-        // 発射：1体ずつ、撃つ瞬間の相手を狙い直して撃ち出す
-        for (int i = 0; i < clones.Count; i++)
+    void UpdateCloneRushChargeLook()
+    {
+        int phase = IsAlive && !SwordController.isKomaMode ? cloneRushPhase : 0;
+        int shots = phase != 0 ? cloneRushShotsLeft : 0;
+        if (phase != cloneRushLookPhase || shots != cloneRushLookShots)
         {
-            if (clones[i] != null)
-            {
-                Transform target = controller != null ? controller.enemyTarget : null;
-                clones[i].Launch(target, cloneDashSpeed, cloneHomingTurnRate, cloneHomingTime, cloneLifeTime);
-            }
-            if (i < clones.Count - 1 && cloneLaunchInterval > 0f)
-                yield return StartCoroutine(WaitSkillTime(cloneLaunchInterval));
+            if (cloneRushChargeLook == null && phase != 0) cloneRushChargeLook = SkillEffects.CloneRush.CreateCharge(this);
+            if (cloneRushChargeLook != null) cloneRushChargeLook.SetStage((CloneRushChargeStage)phase, shots, cloneChargeTime);
+            cloneRushLookPhase = phase;
+            cloneRushLookShots = shots;
         }
+        if (cloneRushChargeLook != null && phase != 0) cloneRushChargeLook.Tick(Time.deltaTime);
+    }
+
+    // 分身1体を本体の位置で作り、撃つ瞬間の相手（いなければ前）へそのまま撃ち出す
+    void FireCloneFromMaster(int order, bool isAuthoritative, int cloneDamage, List<Collider2D> spawnedColliders)
+    {
+        const float cloneColliderRadius = 0.6f;
+        Transform target = PickCloneTarget();
+        Vector2 origin = transform.position;
+        Vector2 direction = target != null ? (Vector2)target.position - origin : cloneForward;
+        if (direction.sqrMagnitude < .0001f) direction = cloneForward;
+        direction.Normalize();
+
+        GameObject cloneObj = new GameObject("SwordClone");
+        cloneObj.transform.position = origin;
+        cloneObj.transform.rotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg - 90f);
+
+        // ▼【新規追加】分身たちに「今使っている自分の剣 + まだ使っていない手持ちの剣」の形を持たせる
+        // (order=0が現在の自分、以降は手持ちの他の剣)。画像が取れない場合は現在の刀身と同じ見た目にする
+        int lifeSpriteIndex = -1;
+        Sprite cloneSprite = spriteRenderer != null ? spriteRenderer.sprite : null;
+        if (MultiplayerOwner != null)
+        {
+            int wantedIndex = MultiplayerOwner.GetCurrentLifeIndex(PlayerId) + order;
+            var lifeSprite = MultiplayerOwner.GetLifeSprite(PlayerId, wantedIndex);
+            if (lifeSprite != null) { cloneSprite = lifeSprite; lifeSpriteIndex = wantedIndex; }
+        }
+        // ▼【変更】分身はプレイヤーの色に染める（以前は技の青。誰の分身か分かるように）
+        Color cloneColor = CloneTint;
+        if (spriteRenderer != null)
+        {
+            SpriteRenderer sr = cloneObj.AddComponent<SpriteRenderer>();
+            sr.sprite = cloneSprite;
+            sr.color = cloneColor;
+            sr.sortingLayerID = spriteRenderer.sortingLayerID;
+            sr.sortingOrder = spriteRenderer.sortingOrder;
+            // ▼【修正】大きさは CloneVisualScale で本体の刀身と同じ太さにそろえる（どの剣を装備していても同じ大きさ）
+            cloneObj.transform.localScale = Vector3.one * CloneVisualScale(this, cloneSprite);
+        }
+        // 当たり判定の大きさは見た目の大きさに関わらず固定（cloneColliderRadius）。拡大縮小の分を打ち消しておく
+        CircleCollider2D cloneCollider = cloneObj.AddComponent<CircleCollider2D>();
+        cloneCollider.radius = cloneColliderRadius / Mathf.Max(.0001f, cloneObj.transform.localScale.x);
+        Rigidbody2D cloneRb = cloneObj.AddComponent<Rigidbody2D>();
+        cloneRb.gravityScale = 0f;
+
+        // ▼ オンライン対戦では、Host権威の分身だけをMultiplayerManagerに登録し、SYNCでクライアントへ見た目を配信する
+        string cloneId = (isAuthoritative && MultiplayerOwner != null) ? MultiplayerOwner.RegisterClone(cloneObj, PlayerId, cloneColor, lifeSpriteIndex) : null;
+
+        // 自分自身や他の分身とは当たらないようにする（本体の位置から撃つので、本体と重なって生まれる）
+        foreach (Collider2D myCol in GetComponentsInChildren<Collider2D>()) Physics2D.IgnoreCollision(cloneCollider, myCol, true);
+        foreach (Collider2D other in spawnedColliders) if (other != null) Physics2D.IgnoreCollision(cloneCollider, other, true);
+        spawnedColliders.Add(cloneCollider);
+
+        SwordCloneProjectile clone = cloneObj.AddComponent<SwordCloneProjectile>();
+        clone.Setup(this, isAuthoritative, cloneDamage, cloneLifeTime, MultiplayerOwner, cloneId);
+        // 演出（撃った所の閃光と輪・軌跡・飛沫など）。ゲストの画面では MultiplayerManager が同じものを付ける
+        clone.Look = SkillEffects.CloneRush.Attach(cloneObj, this);
+        clone.FireNow(target, direction, cloneDashSpeed, cloneHomingTurnRate, cloneHomingTime, cloneLifeTime);
+    }
+
+    // 狙える相手がいない時に分身を撃つ向き（技を出した時の相手の方）
+    Vector2 cloneForward = Vector2.right;
+
+    // ▼【新規追加】分身が狙う相手：本体が今狙っている相手。その相手が倒れていれば、次の生きている相手。いなければ null
+    public Transform PickCloneTarget()
+    {
+        Transform aimed = controller != null ? controller.enemyTarget : null;
+        if (aimed != null && IsCloneTargetAlive(aimed)) return aimed;
+        foreach (var enemy in NearbyEnemies())
+            if (enemy != null && enemy != this && enemy.IsAlive) return enemy.transform;
+        return null;
+    }
+
+    bool IsCloneTargetAlive(Transform target)
+    {
+        if (target == null) return false;
+        var sword = target.GetComponentInParent<SwordBattle>();
+        if (sword == null) return true;
+        if (sword == this || !sword.IsAlive) return false;
+        return MultiplayerOwner == null || !MultiplayerOwner.AreTeammates(PlayerId, sword.PlayerId);
     }
 
     // 分身が狙う相手の位置（いなければ自分の正面）
@@ -2352,7 +2344,8 @@ public static bool matchEnded = false;
 
                 SpriteRenderer sr = shieldObj.AddComponent<SpriteRenderer>();
                 sr.sprite = shieldSprite;
-                sr.color = shieldColor;
+                // ▼【変更】シールドの分身はプレイヤーの色に染める（以前は技の緑。誰の分身か分かるように）
+                sr.color = CloneTint;
                 sr.sortingLayerID = spriteRenderer.sortingLayerID;
                 sr.sortingOrder = spriteRenderer.sortingOrder;
                 // ▼【修正】大きさは CloneVisualScale で本体の刀身と同じ太さにそろえる（どの剣を装備していても同じ大きさ）
@@ -2364,12 +2357,14 @@ public static bool matchEnded = false;
                 col.radius = leafShieldRadius / Mathf.Max(.0001f, shieldObj.transform.localScale.x);
 
                 LeafShieldOrb orb = shieldObj.AddComponent<LeafShieldOrb>();
-                orb.Setup(this, i * sectorSize, leafShieldDurability, leafShieldDuration);
+                orb.Setup(this, i * sectorSize, leafShieldDurability, leafShieldDuration, i);
+                // 演出（展開して着いた時の輪・広げている間の軌跡・ひび・割れ方）。ゲストの画面では MultiplayerManager が同じものを付ける
+                SkillEffects.LeafShield.AttachOrb(shieldObj, this);
 
                 // ▼ オンライン対戦では、この分身をMultiplayerManagerに登録し、位置をSYNCでクライアントへ配信する
                 if (MultiplayerOwner != null)
                 {
-                    string id = MultiplayerOwner.RegisterClone(shieldObj, PlayerId, shieldColor, lifeSpriteIndex);
+                    string id = MultiplayerOwner.RegisterClone(shieldObj, PlayerId, CloneTint, lifeSpriteIndex);
                     orb.SetNetworkId(MultiplayerOwner, id);
                 }
             }
@@ -2381,50 +2376,6 @@ public static bool matchEnded = false;
         isDashing = false;
         currentDashType = 0;
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
-    }
-
-    // ▼【変更】分身の出現位置を決める。preferredAngle（度）を中心に searchWidth の範囲で、方向と距離を変えながら探す。
-    // 候補は「壁・床と重ならない」だけでなく「自分の中心との間に壁・床がない」ことも確かめる。
-    // 以前は重なりだけを見ていたため、薄い壁の向こう側（場外や床の下）にも出てしまい、撃った瞬間に壁の裏に当たって消えていた。
-    // 前半は割り当てられた方向を優先し、後半は上半分の全体から探す。見つからなければ自分のすぐ上に出す。
-    // ▼【修正】出す方向は上半分（水平から CloneSpawnMinAngle〜CloneSpawnMaxAngle）に限る。剣を地面に寝かせて撃つと、
-    // 扇の端の分身が寝ている剣より低い地面すれすれに出て、剣や地面の絵に隠れたうえ地面沿いに飛んでいた
-    const float CloneSpawnMinAngle = 15f, CloneSpawnMaxAngle = 165f;
-
-    private Vector3 FindCloneSpawnPosition(float colliderRadius, float preferredAngle, float searchWidth)
-    {
-        const int attemptCount = 10;
-        const int preferredAttempts = 4;
-        Vector2 centre = transform.position;
-
-        for (int attempt = 0; attempt < attemptCount; attempt++)
-        {
-            // 1回目は扇の中のきれいな並び（割り当てられた方向ちょうど・どの分身も同じ距離）を試す。眷属が隊列を組んで見えるように
-            float angle = attempt == 0 ? Mathf.Clamp(preferredAngle, CloneSpawnMinAngle, CloneSpawnMaxAngle)
-                : attempt < preferredAttempts
-                ? Mathf.Clamp(preferredAngle + Random.Range(-searchWidth * 0.5f, searchWidth * 0.5f), CloneSpawnMinAngle, CloneSpawnMaxAngle)
-                : Random.Range(CloneSpawnMinAngle, CloneSpawnMaxAngle);
-
-            // 半径も塞がっている場合に備え、徐々に自分に近い側も試す
-            float minRadius = Mathf.Lerp(cloneSpawnMinRadius, 0.5f, (float)attempt / (attemptCount - 1));
-            float radius = attempt == 0 ? (cloneSpawnMinRadius + cloneSpawnMaxRadius) * .5f
-                : Random.Range(Mathf.Min(minRadius, cloneSpawnMaxRadius), cloneSpawnMaxRadius);
-
-            Vector2 dir = new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad), Mathf.Sin(angle * Mathf.Deg2Rad));
-            Vector2 candidate = centre + dir * radius;
-            if (IsClearCloneSpawn(centre, candidate, colliderRadius)) return candidate;
-        }
-        Debug.Log($"⚠ 分身を出す場所が見つからず、本体の真上に出しました: 本体の位置={transform.position}, 向き={transform.eulerAngles.z:F0}°");
-        return centre + Vector2.up * Mathf.Min(1f, cloneSpawnMinRadius);
-    }
-
-    bool IsClearCloneSpawn(Vector2 centre, Vector2 candidate, float colliderRadius)
-    {
-        foreach (Collider2D overlapped in Physics2D.OverlapCircleAll(candidate, colliderRadius))
-            if (IsWallForClones(overlapped)) return false;
-        foreach (RaycastHit2D hit in Physics2D.LinecastAll(centre, candidate))
-            if (IsWallForClones(hit.collider)) return false;
-        return true;
     }
 
     // ▼【新規追加】オレ達シールドの守りと返し
@@ -2485,7 +2436,8 @@ public static bool matchEnded = false;
         }
         float usual = leafShieldOrbitRadius;
         float farthest = Mathf.Max(usual, leafShieldMaxOrbitRadius);
-        float sense = Mathf.Clamp(leafShieldSenseRadius, usual, farthest);
+        // 感知射程は最大の届く距離とは別に決める（最大より長くてよい）
+        float sense = Mathf.Max(usual, leafShieldSenseRadius);
         float nearest = NearestEnemyPartDistance();
         if (!shieldReaching)
         {
@@ -2496,8 +2448,8 @@ public static bool matchEnded = false;
         }
         else
         {
-            // 近くまで来た（普段の半径で当たる）か、実射程の外へ出た
-            bool done = nearest < 0f || nearest <= usual || nearest > farthest;
+            // 近くまで来た（普段の半径で当たる）か、感知射程の外へ出た
+            bool done = nearest < 0f || nearest <= usual || nearest > sense;
             shieldReachOutTime = done ? shieldReachOutTime + Time.deltaTime : 0f;
             if (shieldReachOutTime >= leafShieldReachHoldTime) { shieldReaching = false; shieldReachInTime = 0f; }
         }
@@ -2690,18 +2642,12 @@ public static bool matchEnded = false;
         spinDashAngular = 0f;
         spinSkimSurface = null;
         spinAimTarget = controller != null ? controller.enemyTarget : null;
-        spinClosestEnemy = null;
-        spinClosestGap = -1f;
-        spinGapByEnemy.Clear();
-        spinWallBounces = 0;
-        spinAimNote = "狙う相手なし";
 
         // ▼【修正】3. 敵に向かって一直線に発射！（Hostのみ）
         if (controller != null && controller.enemyTarget != null && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
             rb.linearVelocity = dirToEnemy * 50f; 
-            spinAimNote = $"{controller.enemyTarget.name} {(Vector2)controller.enemyTarget.position:F2} へ、自分{(Vector2)transform.position:F2} から向き{dirToEnemy:F2}";
             
             float spinDir = Mathf.Sign(dirToEnemy.x) * -1f; 
             rb.angularVelocity = spinDir * 2500f; 
@@ -2723,7 +2669,7 @@ public static bool matchEnded = false;
     {
         // 相手に当たって終わった後、同じ物理ステップでもう一度呼ばれても二重に止めない
         if (!isDashing || currentDashType != 3) return;
-        if (!hitTarget) { spinHitTarget = null; LogSpinDashMiss(); }
+        if (!hitTarget) spinHitTarget = null;
 
         // ▼【修正】無敵(isDashing)はここでは外さず、DelayEndDashFlagで物理ステップの後に外す。
         // 以前はここでisDashing=falseにしていたため、相手に当たったその瞬間に無敵が切れ、
@@ -2745,55 +2691,6 @@ public static bool matchEnded = false;
         if (spinSettleRoutine != null) StopCoroutine(spinSettleRoutine);
         spinSettleRoutine = StartCoroutine(SpinDashSettleRoutine(hitTarget, velocity, angular));
         StartCoroutine(DelayEndDashFlag());
-    }
-
-    // ▼【調査用】大回転斬が外れた時に、一番近づいた相手とその時のすき間（当たり判定どうしの距離）をログに出す。
-    // 狙いは合っているのに空振りする原因を探すためのもの。分かったら消す
-    SwordBattle spinClosestEnemy;
-    float spinClosestGap = -1f;
-    string spinClosestParts;
-    // 相手ごとの一番近づいたすき間と、撃ち出した時に狙った相手・向き
-    readonly Dictionary<SwordBattle, float> spinGapByEnemy = new Dictionary<SwordBattle, float>();
-    string spinAimNote;
-    int spinWallBounces;
-
-    void TrackSpinDashClosestApproach()
-    {
-        var mine = GetComponentsInChildren<Collider2D>();
-        foreach (var enemy in NearbyEnemies())
-        {
-            if (enemy == null || enemy == this || !enemy.IsAlive) continue;
-            foreach (var theirs in enemy.GetComponentsInChildren<Collider2D>())
-            {
-                if (theirs == null || !theirs.enabled || theirs.isTrigger) continue;
-                foreach (var own in mine)
-                {
-                    if (own == null || !own.enabled || own.isTrigger) continue;
-                    var d = Physics2D.Distance(own, theirs);
-                    if (!d.isValid) continue;
-                    if (!spinGapByEnemy.TryGetValue(enemy, out var best) || d.distance < best) spinGapByEnemy[enemy] = d.distance;
-                    if (spinClosestGap >= 0f && d.distance >= spinClosestGap) continue;
-                    spinClosestGap = d.distance;
-                    spinClosestEnemy = enemy;
-                    spinClosestParts = $"{own.name}↔{theirs.name}, 自分{(Vector2)transform.position:F2} 相手{(Vector2)enemy.transform.position:F2}, " +
-                        $"速さ{rb.linearVelocity.magnitude:F1}, 当たり判定を無視中={Physics2D.GetIgnoreCollision(own, theirs)}";
-                }
-            }
-        }
-    }
-
-    void LogSpinDashMiss()
-    {
-        if (spinClosestEnemy != null)
-            Debug.Log($"🌀 [調査用] 大回転斬が外れた: {name} → 一番近づいた相手 {spinClosestEnemy.name}、すき間 {spinClosestGap:F2}" +
-                $"（{spinClosestParts}）、相手の無敵={spinClosestEnemy.isDashing}" +
-                $"\n  狙い: {spinAimNote}\n  壁・足場で跳ねた回数: {spinWallBounces}\n  相手ごとの一番近いすき間: " +
-                string.Join(", ", System.Linq.Enumerable.Select(spinGapByEnemy, kv => $"{(kv.Key != null ? kv.Key.name : "?")}={kv.Value:F2}")));
-        else
-            Debug.Log($"🌀 [調査用] 大回転斬が外れた: {name} → 近くに相手がいなかった（狙い: {spinAimNote}）");
-        spinClosestEnemy = null;
-        spinClosestGap = -1f;
-        spinGapByEnemy.Clear();
     }
 
     Vector2 spinTravelVelocity, spinSettleVelocity;

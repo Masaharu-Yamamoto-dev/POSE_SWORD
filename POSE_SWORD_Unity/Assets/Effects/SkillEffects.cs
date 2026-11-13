@@ -10,6 +10,10 @@ public static class SkillEffects
     public static ISpinDashEffect SpinDash => spinDash ?? (spinDash = new InkSpinDashEffect());
     static IGiantSpinEffect giantSpin;
     public static IGiantSpinEffect GiantSpin => giantSpin ?? (giantSpin = new InkGiantSpinEffect());
+    static ICloneRushEffect cloneRush;
+    public static ICloneRushEffect CloneRush => cloneRush ?? (cloneRush = new InkCloneRushEffect());
+    static ILeafShieldEffect leafShield;
+    public static ILeafShieldEffect LeafShield => leafShield ?? (leafShield = new InkLeafShieldEffect());
 
     static Sprite starSprite;
     // 五角の星（大きさ1ワールド単位、白）。色は SpriteRenderer.color で付ける
@@ -1253,5 +1257,864 @@ public class SkillSparkle : MonoBehaviour
         vertical.transform.localScale = new Vector3(size * .16f, size, 1f);
         core.transform.localScale = Vector3.one * (size * .3f);
         horizontal.color = vertical.color = core.color = c;
+    }
+}
+
+// ======================================================================
+// オレ達アタック
+// ======================================================================
+
+// 分身1体の段階。SwordCloneProjectile.Phase の値と同じで、オンライン対戦ではホストからゲストへ同期する
+// （オレ達シールドの分身は None のまま。ゲストはこれでオレ達アタックの分身かどうかを見分ける）
+public enum CloneRushPhase
+{
+    None = 0,
+    Fly = 1, // 撃ち出されて飛んでいる
+}
+
+// 分身の消え方
+public enum CloneRushEnd
+{
+    Fade = 0,   // 時間切れ：その場で薄れる
+    Hit = 1,    // 相手に当たった：飛沫
+    Burst = 2,  // 壁・巨大回転斬・シールドに当たった：小さく弾けて粒が散る
+}
+
+// オレ達アタックの本体の段階。SwordBattle.cloneRushPhase の値と同じで、オンライン対戦ではホストからゲストへ同期する
+public enum CloneRushChargeStage
+{
+    None = 0,
+    Charge = 1, // 撃ち始める前に溜める
+    Fire = 2,   // 1体ずつ撃ち出している
+}
+
+public interface ICloneRushEffect
+{
+    // 分身（ホストの本物・ゲストの見た目）に演出を付ける
+    ICloneRushLook Attach(GameObject clone, SwordBattle owner);
+    // 本体の溜めと、残りの発射数の見た目
+    ICloneRushChargeLook CreateCharge(SwordBattle owner);
+}
+
+public interface ICloneRushChargeLook
+{
+    void SetStage(CloneRushChargeStage stage, int shotsLeft, float chargeTime);
+    void Tick(float deltaTime);
+    void Dispose();
+}
+
+public interface ICloneRushLook
+{
+    // 段階が変わった時
+    void SetPhase(CloneRushPhase phase);
+    // 消える時。分身はこの直後に消されるので、残る演出は分身の外に作る
+    void PlayEnd(CloneRushEnd kind, Vector3 position, float angleDeg);
+}
+
+public class InkCloneRushEffect : ICloneRushEffect
+{
+    public ICloneRushLook Attach(GameObject clone, SwordBattle owner)
+    {
+        var look = clone.AddComponent<InkCloneRushLook>();
+        look.Init(owner);
+        return look;
+    }
+
+    public ICloneRushChargeLook CreateCharge(SwordBattle owner) => new InkCloneRushCharge(owner);
+}
+
+// 標準の溜め：プレイヤーの色の光の輪と粒が本体へ縮んで集まり、本体を演出の色でふちどる。
+// 本体のまわりを、残りの発射数だけ光の粒が回る（撃つたびに1つ消える）
+public class InkCloneRushCharge : ICloneRushChargeLook
+{
+    const float Px = 1f / 21f;
+    const float RingFrom = 95f, RingTo = 20f, RingWidth = 3.5f, ParticleFrom = 110f, ParticleTo = 12f, ParticleSize = 4.8f;
+    const int Particles = 12, CirclePoints = 48;
+    const float PipOrbitX = 44f, PipOrbitY = 18f, PipLift = 6f, PipCore = 10f, PipHalo = 18f, PipHaloAlpha = .45f, PipSpin = 5f;
+    const float GlowScale = 1.12f, GlowAlpha = .5f;
+
+    readonly SwordBattle owner;
+    readonly List<GameObject> created = new List<GameObject>();
+    readonly List<Material> materials = new List<Material>();
+    CloneRushChargeStage stage;
+    int shotsLeft;
+    float stageTime, chargeTime = .45f, sinceStart;
+    LineRenderer ring;
+    SpriteRenderer[] particles;
+    Vector2[] particleDirections;
+    readonly List<(SpriteRenderer source, SpriteRenderer glow)> glows = new List<(SpriteRenderer, SpriteRenderer)>();
+    readonly List<(SpriteRenderer core, SpriteRenderer halo)> pips = new List<(SpriteRenderer, SpriteRenderer)>();
+
+    public InkCloneRushCharge(SwordBattle owner) { this.owner = owner; }
+
+    int Order => owner.BodyRenderer != null ? owner.BodyRenderer.sortingOrder : 0;
+    int Layer => owner.BodyRenderer != null ? owner.BodyRenderer.sortingLayerID : 0;
+    Color FxColor => owner.PlayerMainColor;
+
+    public void SetStage(CloneRushChargeStage next, int shots, float charge)
+    {
+        if (next != stage) { stageTime = 0f; if (next == CloneRushChargeStage.Charge) sinceStart = 0f; }
+        stage = next;
+        shotsLeft = shots;
+        chargeTime = Mathf.Max(.01f, charge);
+        if (next == CloneRushChargeStage.None) Hide();
+        else if (glows.Count == 0) BuildGlows();
+    }
+
+    public void Tick(float dt)
+    {
+        stageTime += dt;
+        sinceStart += dt;
+        if (stage == CloneRushChargeStage.None) return;
+        Vector3 centre = owner.transform.position;
+        // 溜め：光の輪と粒が縮んで集まる
+        bool charging = stage == CloneRushChargeStage.Charge;
+        float k = Mathf.Clamp01(stageTime / chargeTime), ease = k * k * k;
+        if (ring == null) ring = NewRing();
+        ring.enabled = charging;
+        if (charging)
+        {
+            float radius = Mathf.Lerp(RingFrom, RingTo, ease) * Px;
+            for (int i = 0; i < CirclePoints; i++)
+            {
+                float a = i * Mathf.PI * 2f / CirclePoints;
+                ring.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
+            }
+            ring.widthMultiplier = RingWidth * Px;
+            Color c = FxColor; c.a = .3f + .7f * k;
+            ring.startColor = ring.endColor = c;
+        }
+        if (particles == null) BuildParticles();
+        float distance = Mathf.Lerp(ParticleFrom, ParticleTo, ease) * Px;
+        Color pc = FxColor; pc.a = k;
+        for (int i = 0; i < Particles; i++)
+        {
+            particles[i].enabled = charging;
+            if (!charging) continue;
+            particles[i].transform.position = centre + (Vector3)(particleDirections[i] * distance);
+            particles[i].transform.localScale = Vector3.one * (ParticleSize * Px);
+            particles[i].color = pc;
+        }
+        // ふちどり：本体の絵の写しを少し大きくして、演出の色で後ろに敷く
+        foreach (var (source, glow) in glows)
+        {
+            bool show = source != null && source.enabled && !source.forceRenderingOff;
+            glow.enabled = show;
+            if (!show) continue;
+            glow.transform.SetPositionAndRotation(source.transform.position, source.transform.rotation);
+            glow.transform.localScale = source.transform.lossyScale * GlowScale;
+            glow.sprite = source.sprite;
+            Color gc = FxColor; gc.a = GlowAlpha * (charging ? k : 1f);
+            glow.color = gc;
+        }
+        // 残りの発射数：本体のまわりを光の粒が回る
+        while (pips.Count < 3)
+            pips.Add((NewSprite("CloneRushPip", InkAssets.Dot, Order + 4), NewSprite("CloneRushPipHalo", InkAssets.Dot, Order + 3)));
+        for (int n = 0; n < pips.Count; n++)
+        {
+            var (core, halo) = pips[n];
+            bool show = n < shotsLeft;
+            core.enabled = halo.enabled = show;
+            if (!show) continue;
+            float appear = Mathf.Clamp01((sinceStart - .1f - n * .08f) / .2f);
+            appear = 1f - Mathf.Pow(1f - appear, 3f);
+            float a = sinceStart * PipSpin + n * Mathf.PI * 2f / 3f;
+            Vector3 at = centre + new Vector3(Mathf.Cos(a) * PipOrbitX, Mathf.Sin(a) * PipOrbitY + PipLift, 0f) * Px;
+            core.transform.position = halo.transform.position = at;
+            core.transform.localScale = Vector3.one * (PipCore * Px * appear);
+            halo.transform.localScale = Vector3.one * (PipHalo * Px * appear);
+            core.color = new Color(1f, 1f, 1f, .95f);
+            Color hc = FxColor; hc.a = PipHaloAlpha;
+            halo.color = hc;
+        }
+    }
+
+    void BuildGlows()
+    {
+        foreach (var source in owner.GetComponentsInChildren<SpriteRenderer>())
+        {
+            if (source == null || source.sprite == null || source.name.StartsWith(InkDefeatEffect.BleedName)) continue;
+            var glow = NewSprite("CloneRushGlow", source.sprite, Order - 1);
+            glow.sharedMaterial = source.sharedMaterial;
+            glows.Add((source, glow));
+        }
+    }
+
+    void BuildParticles()
+    {
+        particles = new SpriteRenderer[Particles];
+        particleDirections = new Vector2[Particles];
+        for (int i = 0; i < Particles; i++)
+        {
+            particles[i] = NewSprite("CloneRushChargeParticle", InkAssets.Dot, Order + 1);
+            float a = Random.Range(0f, Mathf.PI * 2f);
+            particleDirections[i] = new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * Random.Range(.7f, 1.2f);
+        }
+    }
+
+    LineRenderer NewRing()
+    {
+        var obj = new GameObject("CloneRushChargeRing");
+        created.Add(obj);
+        var line = obj.AddComponent<LineRenderer>();
+        line.useWorldSpace = true;
+        line.loop = true;
+        line.positionCount = CirclePoints;
+        var material = SkillEffects.NewLineMaterial();
+        if (material != null) materials.Add(material);
+        line.material = material;
+        line.sortingLayerID = Layer;
+        line.sortingOrder = Order + 1;
+        return line;
+    }
+
+    SpriteRenderer NewSprite(string objectName, Sprite sprite, int order)
+    {
+        var obj = new GameObject(objectName);
+        created.Add(obj);
+        var r = obj.AddComponent<SpriteRenderer>();
+        r.sprite = sprite;
+        r.sortingLayerID = Layer;
+        r.sortingOrder = order;
+        r.enabled = false;
+        return r;
+    }
+
+    void Hide()
+    {
+        if (ring != null) ring.enabled = false;
+        if (particles != null) foreach (var p in particles) if (p != null) p.enabled = false;
+        foreach (var (_, glow) in glows) if (glow != null) Destroy(glow.gameObject);
+        glows.Clear();
+        foreach (var (core, halo) in pips) { if (core != null) core.enabled = false; if (halo != null) halo.enabled = false; }
+    }
+
+    static void Destroy(Object obj) { if (obj != null) Object.Destroy(obj); }
+
+    public void Dispose()
+    {
+        glows.Clear();
+        pips.Clear();
+        foreach (var obj in created) Destroy(obj);
+        created.Clear();
+        foreach (var m in materials) Destroy(m);
+        materials.Clear();
+    }
+}
+
+// 標準：撃った所（本体の位置）に閃光と輪、飛ぶ間は色の濃淡の軌跡。当たると刃先が刺さったように見せて飛沫、
+// 壁などでは小さく弾ける。演出の色はプレイヤーの色（軌跡は分身と同じ明るい色合い）
+public class InkCloneRushLook : MonoBehaviour, ICloneRushLook
+{
+    // 見本（HTMLのモック）のピクセルをワールド単位に直す倍率（大回転斬と同じ：秒速50 = 1050px）
+    const float Px = 1f / 21f;
+    const float CoreShade = .72f;
+    // 撃った所
+    const float LaunchFlashSize = 24f, LaunchFlashTime = .09f, LaunchRingFrom = 6f, LaunchRingTo = 34f, LaunchRingTime = .38f;
+    // 軌跡（長さは 120px ぶん：秒速43で約0.13秒）
+    const float TrailTime = .13f, TrailOuter = 16f, TrailCore = 5f, TrailOuterAlpha = .32f, TrailCoreAlpha = .65f;
+    // 当たった・弾けた
+    const float HitSplashScale = .75f;
+    const float StabTime = .18f; // 当たった時に刺さって見せる写しが薄れるまで
+
+    SwordBattle owner;
+    SpriteRenderer body;
+    CloneRushPhase phase = CloneRushPhase.None;
+    Transform trailRoot;
+    TrailRenderer[] trails;
+
+    Color FxColor => owner != null ? owner.PlayerMainColor : Color.white;
+    int Order => body != null ? body.sortingOrder : 0;
+    int Layer => body != null ? body.sortingLayerID : 0;
+
+    public void Init(SwordBattle owner)
+    {
+        this.owner = owner;
+        body = GetComponent<SpriteRenderer>();
+    }
+
+    public void SetPhase(CloneRushPhase next)
+    {
+        if (next == phase) return;
+        CloneRushPhase previous = phase;
+        phase = next;
+        // 撃った所の閃光と輪は本体の位置に出す（ゲストの見た目の分身は、最初に届いた時にはもう少し飛んでいるため）
+        if (next == CloneRushPhase.Fly && previous == CloneRushPhase.None) BeginFly(owner != null ? owner.transform.position : transform.position);
+    }
+
+    void LateUpdate()
+    {
+        if (trailRoot != null) trailRoot.position = transform.position;
+    }
+
+    void BeginFly(Vector3 at)
+    {
+        SkillFlash.Play(at, LaunchFlashSize * Px, LaunchFlashTime, Layer, Order + 2);
+        ExpandingRing.Play(at, LaunchRingFrom * Px, LaunchRingTo * Px, 3f * Px, 3f * Px, LaunchRingTime, FxColor, Layer, Order + 1);
+        if (trailRoot != null) return;
+        // 軌跡は分身の子にしない（分身の大きさに引きずられず、消えた後も少し残すため）
+        trailRoot = new GameObject("CloneRushTrail").transform;
+        trailRoot.position = transform.position;
+        trails = new TrailRenderer[2];
+        float[] widths = { TrailOuter, TrailCore };
+        float[] alphas = { TrailOuterAlpha, TrailCoreAlpha };
+        for (int i = 0; i < 2; i++)
+        {
+            var child = new GameObject("Trail" + i);
+            child.transform.SetParent(trailRoot, false);
+            var trail = child.AddComponent<TrailRenderer>();
+            trail.time = TrailTime;
+            trail.minVertexDistance = .05f;
+            trail.widthMultiplier = widths[i] * Px;
+            trail.widthCurve = AnimationCurve.Linear(0f, 1f, 1f, i == 0 ? .06f : 0f);
+            trail.material = SkillEffects.NewLineMaterial();
+            trail.sortingLayerID = Layer;
+            trail.sortingOrder = Order - 3 + i;
+            // 分身と同じ明るい色合いで、少し透けさせる（濃いと、明るくした分身より軌跡の方が目立つため）
+            Color tint = owner != null ? owner.CloneTint : Color.white;
+            Color c = i == 0 ? tint : tint * CoreShade;
+            c.a = alphas[i];
+            trail.startColor = trail.endColor = c;
+            trails[i] = trail;
+        }
+    }
+
+    // ---------- 消える時 ----------
+    public void PlayEnd(CloneRushEnd kind, Vector3 position, float angleDeg)
+    {
+        Vector2 dir = new Vector2(Mathf.Cos(angleDeg * Mathf.Deg2Rad), Mathf.Sin(angleDeg * Mathf.Deg2Rad));
+        switch (kind)
+        {
+            case CloneRushEnd.Hit:
+                // 刃先が当たった所（position）へ刺さるように、写しを少し前へ突き出してから薄れさせる
+                if (body != null)
+                {
+                    float half = body.bounds.extents.magnitude * .8f;
+                    Vector3 stab = position - (Vector3)(dir * half * .85f);
+                    stab.z = transform.position.z;
+                    FadingCopy.Play(body, StabTime, 0f, stab);
+                }
+                SpinDashSplash.Play(position, dir, FxColor * .85f, Layer, Order + 2, HitSplashScale);
+                break;
+            case CloneRushEnd.Burst:
+                SkillFlash.Play(position, 20f * Px, .09f, Layer, Order + 2);
+                ExpandingRing.Play(position, 4f * Px, 22f * Px, 2f * Px, 2f * Px, .45f, FxColor, Layer, Order + 1);
+                SpinDashSplash.Play(position, -dir, FxColor * .85f, Layer, Order + 2, .4f);
+                break;
+            default:
+                if (body != null) FadingCopy.Play(body, .25f, 0f);
+                break;
+        }
+        // 軌跡は残して、伸びるのを止めて薄れさせる。当たった時は、先を当たった所まで伸ばす
+        // （分身の真ん中で止まると、刃先の分だけ相手との間に隙間が見えるため）
+        if (trailRoot != null)
+        {
+            Vector3 head = kind == CloneRushEnd.Hit || kind == CloneRushEnd.Burst ? position : transform.position;
+            head.z = trailRoot.position.z;
+            foreach (var trail in trails)
+                if (trail != null) { trail.AddPosition(head); trail.emitting = false; trail.autodestruct = true; }
+            trailRoot.position = head;
+            trailRoot = null;
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (trailRoot != null) Destroy(trailRoot.gameObject);
+    }
+}
+
+// 広がって消える輪（演出の色）
+public class ExpandingRing : MonoBehaviour
+{
+    const int Points = 48;
+    LineRenderer line;
+    float from, to, widthFrom, widthTo, duration, time;
+    Color color;
+
+    public static void Play(Vector3 centre, float fromRadius, float toRadius, float widthFrom, float widthTo, float duration, Color color, int sortingLayer, int sortingOrder)
+    {
+        var obj = new GameObject("SkillRing");
+        obj.transform.position = centre;
+        var ring = obj.AddComponent<ExpandingRing>();
+        ring.from = fromRadius; ring.to = toRadius; ring.widthFrom = widthFrom; ring.widthTo = widthTo;
+        ring.duration = Mathf.Max(.01f, duration); ring.color = color;
+        ring.line = obj.AddComponent<LineRenderer>();
+        ring.line.useWorldSpace = true;
+        ring.line.loop = true;
+        ring.line.positionCount = Points;
+        ring.line.material = SkillEffects.NewLineMaterial();
+        ring.line.sortingLayerID = sortingLayer;
+        ring.line.sortingOrder = sortingOrder;
+        ring.Apply();
+    }
+
+    void Update()
+    {
+        time += Time.deltaTime;
+        if (time >= duration) { Destroy(gameObject); return; }
+        Apply();
+    }
+
+    void Apply()
+    {
+        float k = Mathf.Clamp01(time / duration);
+        float radius = Mathf.Lerp(from, to, 1f - Mathf.Pow(1f - k, 3f));
+        Vector3 centre = transform.position;
+        for (int i = 0; i < Points; i++)
+        {
+            float a = i * Mathf.PI * 2f / Points;
+            line.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
+        }
+        line.widthMultiplier = Mathf.Lerp(widthFrom, widthTo, k);
+        Color c = color; c.a = 1f - k;
+        line.startColor = line.endColor = c;
+    }
+
+    void OnDestroy()
+    {
+        if (line != null && line.material != null) Destroy(line.material);
+    }
+}
+
+// 白い閃光（丸）。すぐ消える
+public class SkillFlash : MonoBehaviour
+{
+    SpriteRenderer look;
+    float duration, time;
+
+    public static void Play(Vector3 position, float size, float duration, int sortingLayer, int sortingOrder)
+    {
+        var obj = new GameObject("SkillFlash");
+        obj.transform.position = position;
+        obj.transform.localScale = Vector3.one * size;
+        var flash = obj.AddComponent<SkillFlash>();
+        flash.duration = Mathf.Max(.01f, duration);
+        flash.look = obj.AddComponent<SpriteRenderer>();
+        flash.look.sprite = InkAssets.Dot;
+        flash.look.sortingLayerID = sortingLayer;
+        flash.look.sortingOrder = sortingOrder;
+    }
+
+    void Update()
+    {
+        time += Time.deltaTime;
+        if (time >= duration) { Destroy(gameObject); return; }
+        look.color = new Color(1f, 1f, 1f, 1f - time / duration);
+    }
+}
+
+// 消える分身の写し：その場（rise だけ上へ）で薄れて消える
+public class FadingCopy : MonoBehaviour
+{
+    SpriteRenderer look;
+    Vector3 from, to;
+    Color color;
+    float duration, rise, time;
+
+    public static void Play(SpriteRenderer source, float duration, float rise) { Play(source, duration, rise, source.transform.position); }
+
+    // moveTo：薄れながら最初の数分の1の時間でそこまで動く（当たった時に刃先を刺す）
+    public static void Play(SpriteRenderer source, float duration, float rise, Vector3 moveTo)
+    {
+        var obj = new GameObject("CloneRushFade");
+        obj.transform.SetPositionAndRotation(source.transform.position, source.transform.rotation);
+        obj.transform.localScale = source.transform.lossyScale;
+        var copy = obj.AddComponent<FadingCopy>();
+        copy.look = obj.AddComponent<SpriteRenderer>();
+        copy.look.sprite = source.sprite;
+        copy.look.sharedMaterial = source.sharedMaterial;
+        copy.look.sortingLayerID = source.sortingLayerID;
+        copy.look.sortingOrder = source.sortingOrder;
+        copy.color = source.color;
+        copy.from = obj.transform.position;
+        copy.to = moveTo;
+        copy.duration = Mathf.Max(.01f, duration);
+        copy.rise = rise;
+        copy.look.color = copy.color;
+    }
+
+    void Update()
+    {
+        time += Time.deltaTime;
+        if (time >= duration) { Destroy(gameObject); return; }
+        float k = time / duration;
+        float thrust = 1f - Mathf.Pow(1f - Mathf.Clamp01(k * 3f), 3f);
+        transform.position = Vector3.Lerp(from, to, thrust) + Vector3.up * (rise * (1f - Mathf.Pow(1f - k, 3f)));
+        Color c = color; c.a = color.a * (1f - k);
+        look.color = c;
+    }
+}
+
+// ======================================================================
+// オレ達シールド
+// ======================================================================
+
+// シールドの分身の消え方。オンライン対戦ではホストからゲストへ同期する（MultiplayerCloneEnd.kind。オレ達アタックの値と重ならない）
+public enum LeafShieldEnd
+{
+    Break = 10,  // 2回削られて割れた
+    Expire = 11, // 効果が切れて本体へ吸い込まれた
+}
+
+public interface ILeafShieldEffect
+{
+    // シールドの分身（ホストの本物・ゲストの見た目）に演出を付ける
+    ILeafShieldLook AttachOrb(GameObject orb, SwordBattle owner);
+    // 本体の、守っている間のふちどりと、殴られた時の盾の光
+    ILeafShieldAura CreateAura(SwordBattle owner);
+}
+
+public interface ILeafShieldLook
+{
+    // 消える時。分身はこの直後に消されるので、残る演出は分身の外に作る
+    void PlayEnd(LeafShieldEnd kind);
+}
+
+public interface ILeafShieldAura
+{
+    void Tick(bool shielded, float deltaTime);
+    // 殴られた向き（本体から相手の方）に盾の光を出す
+    void PlayGuard(Vector2 towardAttacker);
+    void Dispose();
+}
+
+public class InkLeafShieldEffect : ILeafShieldEffect
+{
+    public ILeafShieldLook AttachOrb(GameObject orb, SwordBattle owner)
+    {
+        var look = orb.AddComponent<InkLeafShieldLook>();
+        look.Init(owner);
+        return look;
+    }
+
+    public ILeafShieldAura CreateAura(SwordBattle owner) => new InkLeafShieldAura(owner);
+}
+
+// 標準：輪の上に着くと小さな輪が弾け、輪を広げている間は通った跡に短い軌跡。削れると少し薄くなり、
+// 割れると閃光とともに砕けて破片が散る。効果が切れて吸い込まれると、本体で輪が広がる。
+// 触れて返した時（削れた・割れた時に近くに敵がいる）は、敵の方へ飛沫。演出の色はプレイヤーの色
+public class InkLeafShieldLook : MonoBehaviour, ILeafShieldLook
+{
+    const float Px = 1f / 21f;
+    const float ArriveAfter = .4f, ArriveRingFrom = 6f, ArriveRingTo = 26f, ArriveRingTime = .3f;
+    // 広げている間の軌跡。分身は輪の上を回るので、通った位置をつなぐのではなく、本体を中心に分身の後ろへ伸びる円弧として
+    // 毎フレーム描く（通った位置をつなぐと、速く回る分身では1フレームの移動が大きく、折れ線のようにカクついていた）。
+    // 長さは「普段の回る速さ × TrailTime」の角度ぶん。色は分身と同じ明るい色合いで、少し透けさせる
+    const float TrailTime = .25f, TrailOuter = 9f, TrailCore = 3f, TrailOuterAlpha = .3f, TrailCoreAlpha = .6f, TrailCoreShade = .8f;
+    const int TrailPoints = 20;
+    const float TrailFadeSpeed = 6f;
+    const float WornAlphaBelow = .9f;
+    const float SplashNear = 2.5f, SplashScale = .6f;
+    const int Shards = 8;
+
+    static readonly Dictionary<SwordBattle, float> lastRecallRing = new Dictionary<SwordBattle, float>();
+
+    SwordBattle owner;
+    SpriteRenderer body;
+    float sinceBorn;
+    bool arrived, worn;
+    LineRenderer[] trails;
+    float trailLevel;
+
+    Color FxColor => owner != null ? owner.PlayerMainColor : Color.white;
+    int Order => body != null ? body.sortingOrder : 0;
+    int Layer => body != null ? body.sortingLayerID : 0;
+
+    public void Init(SwordBattle owner)
+    {
+        this.owner = owner;
+        body = GetComponent<SpriteRenderer>();
+    }
+
+    void LateUpdate()
+    {
+        if (owner == null || body == null) return;
+        sinceBorn += Time.deltaTime;
+        float distance = Vector2.Distance(transform.position, owner.transform.position);
+        // 展開して輪の上に着いた
+        if (!arrived && sinceBorn >= ArriveAfter)
+        {
+            arrived = true;
+            if (distance > owner.leafShieldOrbitRadius * .7f)
+                ExpandingRing.Play(transform.position, ArriveRingFrom * Px, ArriveRingTo * Px, 2.5f * Px, 2.5f * Px, ArriveRingTime, FxColor, Layer, Order + 1);
+        }
+        // 輪を広げている間の軌跡
+        bool reaching = arrived && distance > owner.leafShieldOrbitRadius + .3f;
+        trailLevel = Mathf.MoveTowards(trailLevel, reaching ? 1f : 0f, TrailFadeSpeed * Time.deltaTime);
+        UpdateTrail(distance);
+        // 削れた（少し薄くなった）：近くに敵がいれば飛沫
+        if (!worn && body.color.a < WornAlphaBelow)
+        {
+            worn = true;
+            SplashTowardNearbyEnemy();
+        }
+    }
+
+    void UpdateTrail(float radius)
+    {
+        if (trails == null)
+        {
+            trails = new LineRenderer[2];
+            float[] widths = { TrailOuter, TrailCore };
+            for (int i = 0; i < 2; i++)
+            {
+                var line = new GameObject("LeafShieldTrail").AddComponent<LineRenderer>();
+                line.useWorldSpace = true;
+                line.positionCount = TrailPoints;
+                line.material = SkillEffects.NewLineMaterial();
+                line.widthMultiplier = widths[i] * Px;
+                line.widthCurve = AnimationCurve.Linear(0f, 1f, 1f, 0f);
+                line.numCapVertices = 2;
+                line.sortingLayerID = Layer;
+                line.sortingOrder = Order - 2 + i;
+                trails[i] = line;
+            }
+        }
+        bool show = trailLevel > 0f && radius > .01f;
+        foreach (var line in trails) line.enabled = show;
+        if (!show) return;
+        Vector3 centre = owner.transform.position;
+        Vector2 offset = transform.position - centre;
+        float head = Mathf.Atan2(offset.y, offset.x);
+        // 分身は角度が増える向き（反時計回り）に回るので、後ろは角度の小さい側
+        float span = owner.leafShieldOrbitSpeed * TrailTime * Mathf.Deg2Rad;
+        for (int k = 0; k < TrailPoints; k++)
+        {
+            float a = head - span * k / (TrailPoints - 1);
+            Vector3 at = centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius;
+            at.z = transform.position.z;
+            trails[0].SetPosition(k, at);
+            trails[1].SetPosition(k, at);
+        }
+        Color tint = owner.CloneTint;
+        float[] alphas = { TrailOuterAlpha, TrailCoreAlpha };
+        for (int i = 0; i < 2; i++)
+        {
+            Color c = i == 0 ? tint : tint * TrailCoreShade;
+            c.a = alphas[i] * trailLevel;
+            Color tail = c; tail.a = 0f;
+            trails[i].startColor = c;
+            trails[i].endColor = tail;
+        }
+    }
+
+    // 触れて返した時：近くの敵の方へ飛沫
+    void SplashTowardNearbyEnemy()
+    {
+        if (owner == null) return;
+        SwordBattle nearest = null;
+        float best = SplashNear;
+        foreach (var enemy in owner.EffectOpponents())
+        {
+            if (enemy == null) continue;
+            float d = Vector2.Distance(enemy.transform.position, transform.position);
+            if (d < best) { best = d; nearest = enemy; }
+        }
+        if (nearest == null) return;
+        Vector2 dir = (Vector2)(nearest.transform.position - transform.position);
+        SpinDashSplash.Play(transform.position, dir.sqrMagnitude > .0001f ? dir.normalized : Vector2.right, FxColor * .85f, Layer, Order + 2, SplashScale);
+    }
+
+    public void PlayEnd(LeafShieldEnd kind)
+    {
+        if (kind == LeafShieldEnd.Break)
+        {
+            Vector3 at = transform.position;
+            SkillFlash.Play(at, 32f * Px, .09f, Layer, Order + 2);
+            ExpandingRing.Play(at, 6f * Px, 34f * Px, 2.5f * Px, 2.5f * Px, .45f, FxColor, Layer, Order + 1);
+            // 破片は分身と同じ色（プレイヤーの色）。半分は少し明るくして、粒の重なりが見分けられるようにする
+            Color shard = body != null ? body.color : FxColor;
+            shard.a = 1f;
+            for (int i = 0; i < Shards; i++) ShieldShard.Play(at, i % 2 == 0 ? shard : Color.Lerp(shard, Color.white, .35f), Layer, Order + 2);
+            SplashTowardNearbyEnemy();
+        }
+        else if (kind == LeafShieldEnd.Expire && owner != null &&
+            (!lastRecallRing.TryGetValue(owner, out float last) || Time.time - last > .5f))
+        {
+            // 吸い込まれた所（本体）で輪が広がる（5枚続けて吸い込まれるので、1回だけ）
+            lastRecallRing[owner] = Time.time;
+            ExpandingRing.Play(owner.transform.position, 20f * Px, 80f * Px, 4f * Px, .5f * Px, .35f, FxColor, Layer, Order + 1);
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (trails != null) foreach (var line in trails) if (line != null) { if (line.material != null) Destroy(line.material); Destroy(line.gameObject); }
+    }
+}
+
+// 割れた分身の破片：細い粒が外へ飛んで、落ちながら回って薄れる
+public class ShieldShard : MonoBehaviour
+{
+    const float Px = 1f / 21f, Duration = .45f, Gravity = 30f * 21f * Px;
+    SpriteRenderer look;
+    Vector2 velocity;
+    float spin, size, time;
+    Color color;
+
+    public static void Play(Vector3 at, Color color, int sortingLayer, int sortingOrder)
+    {
+        var obj = new GameObject("LeafShieldShard");
+        obj.transform.position = at;
+        var shard = obj.AddComponent<ShieldShard>();
+        float angle = Random.Range(0f, Mathf.PI * 2f);
+        shard.velocity = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * Random.Range(45f, 100f) * Px / Duration;
+        shard.spin = Random.Range(-540f, 540f);
+        shard.size = Random.Range(10f, 20f) * Px;
+        shard.color = color;
+        shard.look = obj.AddComponent<SpriteRenderer>();
+        shard.look.sprite = InkAssets.Dot;
+        shard.look.sortingLayerID = sortingLayer;
+        shard.look.sortingOrder = sortingOrder;
+        shard.Apply();
+    }
+
+    void Update()
+    {
+        time += Time.deltaTime;
+        if (time >= Duration) { Destroy(gameObject); return; }
+        velocity += Vector2.down * Gravity * Time.deltaTime;
+        transform.position += (Vector3)(velocity * Time.deltaTime);
+        transform.Rotate(0f, 0f, spin * Time.deltaTime);
+        Apply();
+    }
+
+    void Apply()
+    {
+        float k = Mathf.Clamp01(time / Duration);
+        float s = size * (1f - .5f * k);
+        transform.localScale = new Vector3(s, s * .35f, 1f);
+        Color c = color; c.a = 1f - k;
+        look.color = c;
+    }
+}
+
+// 本体の、守っている間のふちどり（演出の色で、本体の絵の写しを少し大きくして後ろに敷く）と、殴られた時の盾の光
+public class InkLeafShieldAura : ILeafShieldAura
+{
+    const float GlowScale = 1.12f, GlowAlpha = .4f, FadeSpeed = 5f;
+    readonly SwordBattle owner;
+    readonly List<(SpriteRenderer source, SpriteRenderer glow)> glows = new List<(SpriteRenderer, SpriteRenderer)>();
+    float level;
+
+    public InkLeafShieldAura(SwordBattle owner) { this.owner = owner; }
+
+    public void Tick(bool shielded, float dt)
+    {
+        level = Mathf.MoveTowards(level, shielded ? 1f : 0f, FadeSpeed * dt);
+        if (level <= 0f)
+        {
+            foreach (var (_, glow) in glows) if (glow != null) Object.Destroy(glow.gameObject);
+            glows.Clear();
+            return;
+        }
+        if (glows.Count == 0)
+            foreach (var source in owner.GetComponentsInChildren<SpriteRenderer>())
+            {
+                if (source == null || source.sprite == null || source.name.StartsWith(InkDefeatEffect.BleedName)) continue;
+                var glow = new GameObject("LeafShieldAura").AddComponent<SpriteRenderer>();
+                glow.sharedMaterial = source.sharedMaterial;
+                glow.sortingLayerID = source.sortingLayerID;
+                glow.sortingOrder = source.sortingOrder - 1;
+                glows.Add((source, glow));
+            }
+        foreach (var (source, glow) in glows)
+        {
+            if (glow == null) continue;
+            bool show = source != null && source.enabled && !source.forceRenderingOff;
+            glow.enabled = show;
+            if (!show) continue;
+            glow.sprite = source.sprite;
+            glow.transform.SetPositionAndRotation(source.transform.position, source.transform.rotation);
+            glow.transform.localScale = source.transform.lossyScale * GlowScale;
+            Color c = owner.PlayerMainColor; c.a = GlowAlpha * level;
+            glow.color = c;
+        }
+    }
+
+    public void PlayGuard(Vector2 towardAttacker)
+    {
+        var body = owner.BodyRenderer;
+        float radius = body != null ? body.bounds.extents.magnitude * .75f : 1.5f;
+        ShieldGuardArc.Play(owner.transform, towardAttacker, radius, owner.PlayerMainColor,
+            body != null ? body.sortingLayerID : 0, (body != null ? body.sortingOrder : 0) + 3);
+    }
+
+    public void Dispose()
+    {
+        foreach (var (_, glow) in glows) if (glow != null) Object.Destroy(glow.gameObject);
+        glows.Clear();
+    }
+}
+
+// 殴られた向きに、本体の前で一瞬出る弧の形の盾の光（演出の色の太い弧と、白い細い弧）
+public class ShieldGuardArc : MonoBehaviour
+{
+    const int Points = 24;
+    const float Duration = .3f, OuterSpan = 60f, InnerSpan = 50f, Grow = .23f, OuterWidth = .16f, InnerWidth = .06f;
+    Transform centre;
+    LineRenderer outer, inner;
+    float baseAngle, radius, time;
+    Color color;
+
+    public static void Play(Transform centre, Vector2 toward, float radius, Color color, int sortingLayer, int sortingOrder)
+    {
+        var obj = new GameObject("LeafShieldGuard");
+        var arc = obj.AddComponent<ShieldGuardArc>();
+        arc.centre = centre;
+        arc.radius = radius;
+        arc.color = color;
+        arc.baseAngle = toward.sqrMagnitude > .0001f ? Mathf.Atan2(toward.y, toward.x) : 0f;
+        arc.outer = Line(obj.transform, sortingLayer, sortingOrder);
+        arc.inner = Line(obj.transform, sortingLayer, sortingOrder + 1);
+        arc.Apply();
+    }
+
+    static LineRenderer Line(Transform parent, int sortingLayer, int sortingOrder)
+    {
+        var obj = new GameObject("Arc");
+        obj.transform.SetParent(parent, false);
+        var line = obj.AddComponent<LineRenderer>();
+        line.useWorldSpace = true;
+        line.positionCount = Points;
+        line.numCapVertices = 4;
+        line.material = SkillEffects.NewLineMaterial();
+        line.sortingLayerID = sortingLayer;
+        line.sortingOrder = sortingOrder;
+        return line;
+    }
+
+    void Update()
+    {
+        time += Time.deltaTime;
+        if (time >= Duration || centre == null) { Destroy(gameObject); return; }
+        Apply();
+    }
+
+    void Apply()
+    {
+        float k = Mathf.Clamp01(time / Duration);
+        float r = radius * (1f + Grow * (1f - Mathf.Pow(1f - k, 3f)));
+        SetArc(outer, r, OuterSpan, radius * OuterWidth * (1f - .5f * k), color, 1f - k);
+        SetArc(inner, r, InnerSpan, radius * InnerWidth * (1f - .5f * k), Color.white, 1f - k);
+    }
+
+    void SetArc(LineRenderer line, float r, float span, float width, Color c, float alpha)
+    {
+        Vector3 at = centre.position;
+        for (int i = 0; i < Points; i++)
+        {
+            float a = baseAngle + Mathf.Lerp(-span, span, i / (Points - 1f)) * Mathf.Deg2Rad;
+            line.SetPosition(i, at + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * r);
+        }
+        line.widthMultiplier = width;
+        c.a = alpha;
+        line.startColor = line.endColor = c;
+    }
+
+    void OnDestroy()
+    {
+        foreach (var line in new[] { outer, inner }) if (line != null && line.material != null) Destroy(line.material);
     }
 }

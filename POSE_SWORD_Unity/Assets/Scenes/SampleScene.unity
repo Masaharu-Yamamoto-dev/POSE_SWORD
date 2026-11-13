@@ -2509,17 +2509,17 @@ MonoBehaviour:
   giantSpinStaggerOnHit: 0.3
   giantSpinStaggerOnMiss: 1
   cloneCount: 3
-  cloneSpawnMinRadius: 2
-  cloneSpawnMaxRadius: 4
-  cloneDashSpeed: 35
+  cloneDashSpeed: 43
   cloneDamageMultiplier: 3
   cloneLifeTime: 3
-  cloneSpawnStagger: 0.08
-  cloneSpawnFanSpread: 100
-  cloneAimTime: 0.25
-  cloneLaunchInterval: 0.18
+  cloneLaunchInterval: 0.35
+  cloneChargeTime: 0.45
   cloneHomingTurnRate: 120
-  cloneHomingTime: 0.6
+  cloneHomingTime: 0.8
+  cloneRetargetCone: 60
+  cloneRetargetTurnRate: 300
+  cloneRetargetTime: 0.6
+  cloneTintLighten: 0.5
   cloneLifestealRate: 0.2
   leafShieldCount: 5
   leafShieldDuration: 10
@@ -2528,12 +2528,12 @@ MonoBehaviour:
   leafShieldOrbitSpeed: 150
   leafShieldReflectMultiplier: 1
   leafShieldDurability: 2
-  leafShieldSenseRadius: 8
-  leafShieldMaxOrbitRadius: 12
+  leafShieldSenseRadius: 10
+  leafShieldMaxOrbitRadius: 8
   leafShieldReachDepth: 0.5
-  leafShieldChaseOrbitSpeed: 180
+  leafShieldChaseOrbitSpeed: 150
   leafShieldReachTime: 0.15
-  leafShieldRadiusReturnSpeed: 3
+  leafShieldRadiusReturnSpeed: 1.5
   leafShieldReachStartDelay: 0
   leafShieldReachHoldTime: 0.4
   leafShieldDamageTakenRate: 0.5
@@ -2548,6 +2548,8 @@ MonoBehaviour:
   currentDashType: 0
   trueVelocity: {x: 0, y: 0}
   currentCenterPosition: {x: 0, y: 0, z: 0}
+  cloneRushPhase: 0
+  cloneRushShotsLeft: 0
 --- !u!4 &287059452
 Transform:
   m_ObjectHideFlags: 0
@@ -4095,17 +4097,17 @@ MonoBehaviour:
   giantSpinStaggerOnHit: 0.3
   giantSpinStaggerOnMiss: 1
   cloneCount: 3
-  cloneSpawnMinRadius: 2
-  cloneSpawnMaxRadius: 4
-  cloneDashSpeed: 35
+  cloneDashSpeed: 43
   cloneDamageMultiplier: 3
   cloneLifeTime: 3
-  cloneSpawnStagger: 0.08
-  cloneSpawnFanSpread: 100
-  cloneAimTime: 0.25
-  cloneLaunchInterval: 0.18
+  cloneLaunchInterval: 0.35
+  cloneChargeTime: 0.45
   cloneHomingTurnRate: 120
-  cloneHomingTime: 0.6
+  cloneHomingTime: 0.8
+  cloneRetargetCone: 60
+  cloneRetargetTurnRate: 300
+  cloneRetargetTime: 0.6
+  cloneTintLighten: 0.5
   cloneLifestealRate: 0.2
   leafShieldCount: 5
   leafShieldDuration: 10
@@ -4114,12 +4116,12 @@ MonoBehaviour:
   leafShieldOrbitSpeed: 150
   leafShieldReflectMultiplier: 1
   leafShieldDurability: 2
-  leafShieldSenseRadius: 8
-  leafShieldMaxOrbitRadius: 12
+  leafShieldSenseRadius: 10
+  leafShieldMaxOrbitRadius: 8
   leafShieldReachDepth: 0.5
-  leafShieldChaseOrbitSpeed: 180
+  leafShieldChaseOrbitSpeed: 150
   leafShieldReachTime: 0.15
-  leafShieldRadiusReturnSpeed: 3
+  leafShieldRadiusReturnSpeed: 1.5
   leafShieldReachStartDelay: 0
   leafShieldReachHoldTime: 0.4
   leafShieldDamageTakenRate: 0.5
@@ -4134,6 +4136,8 @@ MonoBehaviour:
   currentDashType: 0
   trueVelocity: {x: 0, y: 0}
   currentCenterPosition: {x: 0, y: 0, z: 0}
+  cloneRushPhase: 0
+  cloneRushShotsLeft: 0
 --- !u!82 &503523104
 AudioSource:
   m_ObjectHideFlags: 0
@@ -5076,7 +5080,7 @@ MonoBehaviour:
   debugRosterJsonFile: {fileID: 0}
   playerCount: 2
   gameMode: 0
-  localHiltTypeOverride: 
+  localHiltTypeOverride: 0
   ownedSwordCount: 1
   livesMode: 1
   isHost: 1
