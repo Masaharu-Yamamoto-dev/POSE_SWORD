@@ -183,6 +183,7 @@ export function useRoom({ peerOptions, onClosed }) {
     setLivesMode: useCallback(enabled => act(s => s.setLivesMode(enabled)), [act]),
     setSoloMode: useCallback(enabled => act(s => s.setSoloMode(enabled)), [act]),
     setBossPlayer: useCallback(playerId => act(s => s.setBossPlayer(playerId)), [act]),
+    setNpcBoss: useCallback(enabled => act(s => s.setNpcBoss(enabled)), [act]),
     spinSword: useCallback(() => act(s => s.spinSword()), [act]),
     updateSword: useCallback(sword => act(s => s.updateSword(sword)), [act]),
     start: useCallback(() => act(s => s.prepare()), [act]),

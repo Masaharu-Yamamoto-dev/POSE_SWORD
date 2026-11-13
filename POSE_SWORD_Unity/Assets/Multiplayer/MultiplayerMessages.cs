@@ -10,6 +10,9 @@ using UnityEngine;
     // ▼【新規追加】1vs3の陣営。0=ボス(1人側) / 1=トリオ(3人側)。
     // soloModeでない試合では全員0で、その場合は陣営を使わず従来どおりの個人戦として扱う
     public int team;
+    // ▼【新規追加】1vs3のNPCボス。PeerJSの接続を持たないプレイヤーで、入力はホストのUnity(BossNpcBrain)が作る。
+    // ゲストは何もしなくても既存のSYNCで他の剣と同じように表示されるので、SYNC(MultiplayerPlayerState)には載せない
+    public bool isNpc;
 }
 // ▼【新規追加】1vs3のボス強化。全クライアントが同じ値を使う必要があるため、
 // ホストが決めた値をこの形で配る（Web側 HostRoom.js の SOLO_BUFF が出どころ）

@@ -1,5 +1,8 @@
 // 6: PREPARE から剣画像を抜いた（ゲストは ROSTER で受け取った画像を使う）
-export const PROTOCOL_VERSION = 6;
+// 7: 1vs3 の NPC ボス。名簿に接続を持たないプレイヤー（npc: true）が入る
+import { BOSS_NPC_SWORD, NPC_PLAYER_ID } from './bossNpcSword.js';
+
+export const PROTOCOL_VERSION = 7;
 export const MAX_IMAGE_LENGTH = 4 * 1024 * 1024;
 // 剣本体のステータス上限(image-process/stats.pyでの生成上限: hp 100〜1000 / attack・weight 1〜100)に、
 // 柄(SwordListScreenのHILT_DATABASE)が乗せうる最大の補正値を足した、正規のプレイで届きうる本当の上限。
@@ -152,6 +155,8 @@ export class HostRoom {
     // 1vs3 で誰がボスをやるか。1vs3 をONにした時点ではホスト（p0）で、ホストが指名し直せる。
     // 1vs3 でないあいだは null。
     this.bossPlayerId = soloMode ? 'p0' : null;
+    // 1vs3 のボスを NPC にするか。部屋を作る時点では使わず、ロビーで setNpcBoss() から切り替える。
+    this.npcBoss = false;
     this.phase = 'LOBBY';
     this.revision = 0;
     this.readyVersion = 0;
@@ -168,15 +173,25 @@ export class HostRoom {
       connected: true, inLobby: true };
   }
 
+  // NPC ボス。PeerJS の接続を持たないので、準備完了・ロード完了・ロビー復帰を自分で送ってこない。
+  // そのため最初から全部済んだ状態で作り、resetReady() と prepare() でもその状態を保つ。
+  // connected を true にしておくと、切断した人を名簿から外す filter(p => p.connected) にも消されない。
+  makeNpc(slotIndex) {
+    return { playerId: NPC_PLAYER_ID, npc: true, slotIndex, swordData: validateSword(BOSS_NPC_SWORD),
+      ready: true, loaded: true, connected: true, inLobby: true };
+  }
+
   snapshot() {
     return structuredClone({ protocolVersion: PROTOCOL_VERSION, roomEpoch: this.roomEpoch,
       revision: this.revision, readyVersion: this.readyVersion, seatLimit: this.seatLimit, autoStart: this.autoStart, gameMode: this.gameMode,
-      livesMode: this.livesMode, soloMode: this.soloMode, bossPlayerId: this.bossPlayerId,
+      livesMode: this.livesMode, soloMode: this.soloMode, bossPlayerId: this.bossPlayerId, npcBoss: this.npcBoss,
       phase: this.phase, matchId: this.matchId, players: this.players });
   }
 
+  // 席は「ホスト1 + 接続（入室済みと入室待ち）+ NPC」で数える。NPC は接続を持たないので、
+  // connections だけで数えると NPC がいても人間がもう1人入れてしまう。
   reserve(connectionId) {
-    if (this.phase !== 'LOBBY' || this.connections.has(connectionId) || this.connections.size >= this.seatLimit - 1) return false;
+    if (this.phase !== 'LOBBY' || this.connections.has(connectionId) || this.seatsTaken() >= this.seatLimit) return false;
     this.connections.set(connectionId, null);
     return true;
   }
@@ -195,7 +210,9 @@ export class HostRoom {
 
   playerForConnection(connectionId) { return this.connections.get(connectionId); }
   get(playerId) { return this.players.find(p => p.playerId === playerId); }
-  resetReady() { this.players.forEach(p => { p.ready = false; p.loaded = false; }); this.revision++; this.readyVersion++; }
+  seatsTaken() { return 1 + this.connections.size + this.players.filter(p => p.npc).length; }
+  // NPC は準備完了を出し直せないので外さない。外すと canStart() が二度と true にならない。
+  resetReady() { this.players.forEach(p => { p.ready = !!p.npc; p.loaded = !!p.npc; }); this.revision++; this.readyVersion++; }
   // Unity requires slots 0..n-1, so vacated seats close up while the room waits in the lobby.
   compactSlots() { this.players.sort((a, b) => a.slotIndex - b.slotIndex).forEach((p, i) => { p.slotIndex = i; }); }
 
@@ -205,7 +222,7 @@ export class HostRoom {
     if (this.phase !== 'LOBBY' || !['0', '1'].includes(mode)) throw new Error('モードを変更できません。');
     this.gameMode = mode;
     // 独楽には 1vs3 がないので、1vs3 のまま独楽にしたら特殊ルールは「なし」に戻す
-    if (mode === '1') { this.soloMode = false; this.bossPlayerId = null; }
+    if (mode === '1') { this.soloMode = false; this.bossPlayerId = null; this.removeNpc(); }
     this.revision++;
   }
 
@@ -214,7 +231,7 @@ export class HostRoom {
     if (this.phase !== 'LOBBY' || typeof enabled !== 'boolean') throw new Error('モードを変更できません。');
     this.livesMode = enabled;
     // 1vs3 との併用は当面見送る。ボスの実効HPが「剣の本数 × 強化倍率」で膨らみ、調整が追えなくなるため。
-    if (enabled) { this.soloMode = false; this.bossPlayerId = null; }
+    if (enabled) { this.soloMode = false; this.bossPlayerId = null; this.removeNpc(); }
     this.revision++;
   }
 
@@ -224,14 +241,43 @@ export class HostRoom {
     if (enabled && this.gameMode === '1') throw new Error('独楽モードでは 1vs3 を選べません。');
     this.soloMode = enabled;
     if (enabled) this.livesMode = false;
+    else this.removeNpc();
     // ONにしたら、まずホストをボスにしておく（指名し忘れて開始できないのを避ける）。OFFにしたら指名も外す。
     this.bossPlayerId = enabled ? (this.get(this.bossPlayerId) ? this.bossPlayerId : 'p0') : null;
     this.revision++;
   }
 
+  // 1vs3 のボスを NPC にする／人間に戻す。NPC は空いている席を1つ使う。
+  // ルール変更の扱いなので、setSoloMode と同じく準備完了は解除しない。
+  setNpcBoss(enabled) {
+    if (this.phase !== 'LOBBY' || typeof enabled !== 'boolean' || !this.soloMode) throw new Error('モードを変更できません。');
+    if (enabled === this.npcBoss) return;
+    if (enabled) {
+      // 入室待ちの接続も席を使っているので、名簿の人数ではなく seatsTaken() で数える
+      if (this.seatsTaken() >= this.seatLimit) throw new Error('満席のためNPCを入れられません。');
+      const slot = Array.from({ length: this.seatLimit }, (_, i) => i).find(i => !this.players.some(p => p.slotIndex === i));
+      this.players.push(this.makeNpc(slot));
+      this.npcBoss = true;
+      this.bossPlayerId = NPC_PLAYER_ID;
+    } else this.removeNpc();
+    this.revision++;
+  }
+
+  // NPC は 1vs3 でしか意味がないので、1vs3 を外す操作（1vs3 OFF・残機制・独楽）ではいっしょに外す。
+  // ボスが NPC だったら、ホストに戻す（1vs3 のままなら）。
+  removeNpc() {
+    if (!this.npcBoss && !this.players.some(p => p.npc)) return;
+    this.players = this.players.filter(p => !p.npc);
+    this.npcBoss = false;
+    if (this.bossPlayerId === NPC_PLAYER_ID) this.bossPlayerId = this.soloMode ? 'p0' : null;
+    this.compactSlots();
+  }
+
   // ボスの指名。誰がボスかは戦い方に直結するが、ここでは準備完了を解除しない
   // （ホストが指名を試行錯誤するたびに全員がやり直しになるのを避けるため）。
   setBossPlayer(playerId) {
+    // NPC ボスのあいだはボスを固定する。人間を指名すると NPC がトリオ側に入ってしまう。
+    if (this.npcBoss) throw new Error('NPCボスのあいだはボスを指名できません。');
     const player = this.get(playerId);
     if (this.phase !== 'LOBBY' || !player?.connected || !player.inLobby) {
       throw new Error('ボスを指名できません。');
@@ -278,7 +324,9 @@ export class HostRoom {
     this.matchId = `${this.roomEpoch}-${++this.matchNumber}`;
     this.phase = 'LOADING';
     this.inputs.clear();
-    this.players.forEach(p => { p.loaded = false; p.inLobby = false; });
+    // NPC は INITIALIZED も RETURN も送らないので、ロード完了・ロビーにいる状態のままにする。
+    // 外すと markLoaded の「全員ロード完了」と returnToLobby の「全員ロビー」が永遠に揃わない。
+    this.players.forEach(p => { if (!p.npc) { p.loaded = false; p.inLobby = false; } });
     this.revision++;
     return this.snapshot();
   }

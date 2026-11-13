@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HostRoom, MAX_HP, MAX_ATTACK, MAX_WEIGHT, swordForGameMode, validateSword } from '../src/network/HostRoom.js';
+import { BOSS_NPC_SWORD, NPC_PLAYER_ID } from '../src/network/bossNpcSword.js';
 
 const sword = { name: 'テスト剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
 function fullRoom(count = 4) {
@@ -369,6 +370,149 @@ test('the suppress input is accepted and keeps its own action name', () => {
   assert.ok(room.acceptInput('peer-1', { ...suppress, seq: 2 }, 1200));
   // 知らないアクションは従来どおり捨てる
   assert.equal(room.acceptInput('peer-1', { ...suppress, seq: 3, action: 'STUN' }, 1400), null);
+});
+
+// ---- 1vs3 の NPC ボス ----
+// ホスト + ゲスト2人 + NPC の部屋。全員準備完了まで済ませて返す。
+function npcRoom() {
+  const room = new HostRoom({ roomEpoch: 'npc', hostSword: sword, soloMode: true });
+  room.setNpcBoss(true);
+  for (const peer of ['peer-1', 'peer-2']) {
+    room.reserve(peer);
+    room.join(peer, sword);
+  }
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  return room;
+}
+
+test('an NPC boss takes a seat, becomes the boss and is published to guests', () => {
+  const room = npcRoom();
+  const snap = room.snapshot();
+  assert.equal(snap.npcBoss, true);
+  assert.equal(snap.bossPlayerId, NPC_PLAYER_ID);
+  assert.equal(snap.players.length, 4);
+  const npc = snap.players.find(p => p.npc);
+  assert.equal(npc.playerId, NPC_PLAYER_ID);
+  assert.equal(npc.swordData.name, BOSS_NPC_SWORD.name);
+  assert.deepEqual(snap.players.map(p => p.slotIndex).sort(), [0, 1, 2, 3], '席番号は0..3で重ならない');
+  assert.equal(room.canStart(), true, '人間3人の準備完了とNPCで開始できる');
+});
+
+test('an NPC boss leaves room for only two guests', () => {
+  const room = new HostRoom({ roomEpoch: 'npc', hostSword: sword, soloMode: true });
+  room.setNpcBoss(true);
+  assert.equal(room.reserve('peer-1'), true);
+  assert.equal(room.reserve('peer-2'), true);
+  assert.equal(room.reserve('peer-3'), false, 'NPCが1席使うので3人目のゲストは入れない');
+  room.setNpcBoss(false);
+  assert.equal(room.reserve('peer-3'), true, 'NPCを外せば席が空く');
+});
+
+test('the NPC cannot be added to a full room, counting guests still connecting', () => {
+  const room = fullRoom();
+  room.setSoloMode(true);
+  assert.throws(() => room.setNpcBoss(true), /満席/);
+  const waiting = new HostRoom({ roomEpoch: 'w', hostSword: sword, soloMode: true });
+  for (const peer of ['peer-1', 'peer-2', 'peer-3']) waiting.reserve(peer);
+  assert.throws(() => waiting.setNpcBoss(true), /満席/, '入室待ちの接続も席を使っている');
+  assert.equal(waiting.snapshot().npcBoss, false);
+});
+
+test('the NPC stays ready through joins, leaves and a finished match', () => {
+  const room = npcRoom();
+  const npcReady = () => room.get(NPC_PLAYER_ID).ready;
+  room.removeConnection('peer-2');
+  assert.equal(npcReady(), true, '人が抜けて全員の準備完了が外れても、NPCは準備完了のまま');
+  room.reserve('peer-3');
+  room.join('peer-3', sword);
+  assert.equal(npcReady(), true, '人が入っても同じ');
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  room.prepare();
+  const matchId = room.snapshot().matchId;
+  for (const p of room.snapshot().players.filter(p => !p.npc)) room.markLoaded(p.playerId, matchId);
+  room.beginPlaying(matchId);
+  room.finish(matchId);
+  assert.equal(npcReady(), true, '決着後も同じ');
+});
+
+test('three humans loading is enough to reach the countdown', () => {
+  const room = npcRoom();
+  room.prepare();
+  const matchId = room.snapshot().matchId;
+  assert.equal(room.get(NPC_PLAYER_ID).loaded, true, 'NPCはINITIALIZEDを送らないので最初からロード済み');
+  for (const id of ['p0', 'p1']) room.markLoaded(id, matchId);
+  assert.equal(room.snapshot().phase, 'LOADING');
+  room.markLoaded('p2', matchId);
+  assert.equal(room.snapshot().phase, 'COUNTDOWN');
+});
+
+test('the room returns to the lobby once every human is back, and can rematch', () => {
+  const room = npcRoom();
+  room.prepare();
+  const matchId = room.snapshot().matchId;
+  for (const id of ['p0', 'p1', 'p2']) room.markLoaded(id, matchId);
+  room.beginPlaying(matchId);
+  room.finish(matchId);
+  for (const id of ['p0', 'p1', 'p2']) room.returnToLobby(id);
+  assert.equal(room.snapshot().phase, 'LOBBY', 'NPCはRETURNを送らないが、人間が揃えばロビーに戻る');
+  assert.equal(room.snapshot().bossPlayerId, NPC_PLAYER_ID, '再戦でもNPCがボスのまま');
+  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  assert.equal(room.canStart(), true);
+});
+
+test('an aborted start keeps the NPC in the room', () => {
+  const room = npcRoom();
+  room.prepare();
+  room.removeConnection('peer-1');
+  assert.equal(room.snapshot().phase, 'LOBBY');
+  assert.ok(room.get(NPC_PLAYER_ID), '切断した人だけが外れ、NPCは残る');
+  assert.equal(room.snapshot().bossPlayerId, NPC_PLAYER_ID);
+});
+
+test('leaving 1vs3 for none, lives or top mode removes the NPC', () => {
+  for (const leave of [r => r.setSoloMode(false), r => r.setLivesMode(true), r => r.setGameMode('1')]) {
+    const room = npcRoom();
+    leave(room);
+    const snap = room.snapshot();
+    assert.equal(snap.npcBoss, false);
+    assert.equal(snap.bossPlayerId, null);
+    assert.ok(snap.players.every(p => !p.npc));
+    assert.deepEqual(snap.players.map(p => p.slotIndex).sort(), [0, 1, 2], '空いた席は詰める');
+  }
+});
+
+test('turning the NPC off hands the boss back to the host and keeps ready', () => {
+  const room = npcRoom();
+  room.setNpcBoss(false);
+  assert.equal(room.snapshot().bossPlayerId, 'p0');
+  assert.ok(room.snapshot().players.every(p => p.ready), 'ルール変更なので準備完了は解除しない');
+  assert.equal(room.canStart(), false, '1vs3 は4人必要なので、NPCを外すと開始できない');
+});
+
+test('nobody may be named boss while the NPC is the boss', () => {
+  const room = npcRoom();
+  assert.throws(() => room.setBossPlayer('p0'));
+  assert.throws(() => room.setBossPlayer('p1'));
+  assert.equal(room.snapshot().bossPlayerId, NPC_PLAYER_ID);
+});
+
+test('the NPC exists only in a 1vs3 lobby', () => {
+  const room = new HostRoom({ roomEpoch: 'x', hostSword: sword });
+  assert.throws(() => room.setNpcBoss(true), '1vs3 でなければNPCは入れられない');
+  const npc = npcRoom();
+  npc.prepare();
+  assert.throws(() => npc.setNpcBoss(false), 'ロビーの外では切り替えられない');
+});
+
+test('a guest input can never act for the NPC', () => {
+  const room = npcRoom();
+  room.prepare();
+  const matchId = room.snapshot().matchId;
+  for (const id of ['p0', 'p1', 'p2']) room.markLoaded(id, matchId);
+  room.beginPlaying(matchId);
+  const accepted = room.acceptInput('peer-1', { matchId, seq: 1, action: 'PRIMARY', direction: 'LEFT', playerId: NPC_PLAYER_ID }, 1000);
+  assert.equal(accepted.playerId, room.playerForConnection('peer-1'), 'playerIdは接続から決まり、パケットの値は使われない');
+  assert.equal(room.playerForConnection(NPC_PLAYER_ID), undefined, 'NPCに対応する接続は存在しない');
 });
 
 test('独楽モードでは柄の補正を外した剣本体の値で戦う', () => {

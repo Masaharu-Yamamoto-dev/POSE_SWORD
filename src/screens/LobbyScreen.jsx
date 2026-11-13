@@ -167,7 +167,7 @@ const SwordFigure = ({ sword, blade, spinCount, onSpin, hiltOff }) => {
 // ==========================================
 // ルール設定（ホスト以外は説明を読むだけ）
 // ==========================================
-const RuleSheet = ({ gameMode, special, canEdit, onGameMode, onSpecial, onClose }) => (
+const RuleSheet = ({ gameMode, special, canEdit, onGameMode, onSpecial, npcBoss, onNpcBoss, seatsFull, onClose }) => (
   <div className="lobby-veil" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="lobby-sheet" role="dialog" aria-label="ルール設定">
       <h3>いまのルール</h3>
@@ -203,6 +203,22 @@ const RuleSheet = ({ gameMode, special, canEdit, onGameMode, onSpecial, onClose 
             ))}
           </div>
         </div>
+        {special === 'solo' && (
+          <div className="lobby-sheet__group">
+            <b>ボス</b>
+            <div className="lobby-sheet__choices">
+              {[[false, "プレイヤー"], [true, "NPC"]].map(([value, label]) => (
+                // NPC は空いている席を1つ使うので、満席のあいだは NPC に切り替えられない（人間に戻すのはいつでもできる）
+                <button key={label} type="button" disabled={!canEdit || (value && seatsFull && !npcBoss)}
+                  title={value && seatsFull && !npcBoss ? "満席のためNPCを入れられません" : undefined}
+                  className={`fuda-btn ${npcBoss === value ? 'fuda-btn--on' : 'fuda-btn--off'}`}
+                  onClick={() => { if (npcBoss !== value) onNpcBoss(value); }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <p className="lobby-sheet__note">{canEdit ? "" : "ルールを変えられるのはホストだけです"}</p>
       </div>
 
@@ -230,7 +246,7 @@ export default function LobbyScreen({
   swordList, mySwordData, equipSword, reorderSwords,
   // 自分の剣の画像の選び方。プライバシーを設定した剣は、相手に見えているのと同じ加工済みの画像を出す
   imageOf = bladeOf,
-  onReady, onGameMode, onLivesMode, onSoloMode, onBossPlayer, onSpin, onStart, onLeave, goToCrafting, error
+  onReady, onGameMode, onLivesMode, onSoloMode, onBossPlayer, onNpcBoss, onSpin, onStart, onLeave, goToCrafting, error
 }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
@@ -286,7 +302,9 @@ export default function LobbyScreen({
   // ※ auto を参照するので、必ず auto の宣言より後に置くこと（前に置くと 1vs3 をONにした
   //   瞬間に初期化前アクセスで描画が落ちる）。
   const bossPlayerId = room.bossPlayerId ?? null;
-  const canPickBoss = soloMode && isHost && !auto;
+  // ボスが NPC のあいだはボスを固定する（HostRoom.setBossPlayer も拒む）ので、指名ボタンを出さない
+  const npcBoss = Boolean(room.npcBoss);
+  const canPickBoss = soloMode && isHost && !auto && !npcBoss;
   const playerCount = room.players.length;
   const readyCount = room.players.filter(p => p.ready).length;
   const emptySlots = Array.from({ length: seatLimit }, (_, slot) => slot)
@@ -317,7 +335,8 @@ export default function LobbyScreen({
   const soloShortage = soloMode ? SOLO_MODE_PLAYERS - playerCount : 0;
 
   const status = auto ? autoStatus
-    : soloShortage > 0 ? `1vs3 には${SOLO_MODE_PLAYERS}人必要です（あと${soloShortage}人）`
+    // NPC ボスも1人に数えるので、そうと分かるように書き添える（人間はあと何人か、で迷わせない）
+    : soloShortage > 0 ? `1vs3 には${SOLO_MODE_PLAYERS}人必要です（${npcBoss ? 'NPCボス込み・' : ''}あと${soloShortage}人）`
     : soloMode && !bossPlayerId ? 'ボスを指名してください'
     : playerCount < MIN_PLAYERS ? `参加者を待っています（最低${MIN_PLAYERS}人・最大${seatLimit}人）`
     : readyCount < playerCount ? `準備完了 ${readyCount} / ${playerCount}人`
@@ -486,10 +505,11 @@ export default function LobbyScreen({
     // 1vs3 のボスは試合で HP・攻撃に倍率が掛かるので、その値を出す（HostRoom.js の SOLO_BUFF）
     const stats = isBoss ? bossStats(swordStats) : swordStats;
     const isPresent = player.connected && player.inLobby;
-    const isReady = !auto && player.ready && isPresent;
+    // NPC は準備完了を自分で出せない代わりに、いつでも準備完了として名簿に入っている（HostRoom.makeNpc）
+    const isReady = player.npc || (!auto && player.ready && isPresent);
     const waitLabel = !player.connected ? "切断" : !player.inLobby ? "結果\n確認中" : "準備\n中";
     // 名札は幅が限られるので、自分の列は「あなた」だけにする（自分がホストかどうかは対戦開始ボタンの有無で分かる）。
-    const role = isMe ? "あなた" : player.playerId === 'p0' ? "ホスト" : "";
+    const role = isMe ? "あなた" : player.npc ? "NPC" : player.playerId === 'p0' ? "ホスト" : "";
     const photo = isMe && mySwordData ? imageOf(sword) : bladeOf(sword);
 
     return (
@@ -670,6 +690,9 @@ export default function LobbyScreen({
           canEdit={isHost && !auto}
           onGameMode={onGameMode}
           onSpecial={handleSpecial}
+          npcBoss={npcBoss}
+          onNpcBoss={onNpcBoss}
+          seatsFull={playerCount >= seatLimit}
           onClose={() => setIsRuleOpen(false)}
         />
       )}
