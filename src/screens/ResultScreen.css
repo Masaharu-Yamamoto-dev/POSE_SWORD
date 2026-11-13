@@ -1,0 +1,209 @@
+/* ===== 結果画面の動き（ResultScreen.jsx） =====
+   飛ぶ・落ちる・ぶつかるなど、位置を計算する動きは ResultScreen.jsx の中で Web Animations を使う。
+   ここには、決まった形の動き（着地・揺れ・札の落ち方・光など）と、表の線を置く。 */
+
+/* 左の定位置にドンッと着地 */
+@keyframes swordSlam {
+  0% { transform: scale(3) rotate(360deg); opacity: 0; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+/* 背景の剣は少し大きい所からゆっくり収まる */
+@keyframes resultBgIn {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(1.12); }
+  to { opacity: 0.15; transform: translate(-50%, -50%) scale(1); }
+}
+.result-sword-slam { animation: swordSlam 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) both; }
+
+/* いちばん多かった数字：ロビーの対戦開始ボタンのように脈打たせる。墨色のまま一回り大きく */
+@keyframes resultTopPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+.result-top {
+  display: inline-block;
+  font-size: 1.25em;
+  color: var(--sumi);
+  animation: resultTopPulse 1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .result-top { animation: none; }
+}
+
+/* ボスの着地：揺れずに「ズン」と一発で止まる（少しつぶれて戻るだけ） */
+@keyframes resultBossLand {
+  0% { transform: scale(1.1, 0.86); }
+  40% { transform: scale(0.97, 1.04); }
+  100% { transform: scale(1, 1); }
+}
+.result-boss-land { animation: resultBossLand 0.4s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+
+/* 3人の剣：落とした札のように、傾きを変えながらひらひら落ち → 床に平らに当たって跳ね → 寝て止まる（床の上の向きは --rz） */
+@keyframes resultCard {
+  0% { transform: translateY(-640px) perspective(800px) rotateX(15deg) rotateY(-25deg) rotateZ(calc(var(--rz) - 70deg)); opacity: 0; }
+  8% { opacity: 1; }
+  45% { transform: translateY(-220px) perspective(800px) rotateX(48deg) rotateY(22deg) rotateZ(calc(var(--rz) - 25deg)); }
+  62% { transform: translateY(0) perspective(800px) rotateX(64deg) rotateY(-6deg) rotateZ(var(--rz)); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+  72% { transform: translateY(-46px) perspective(800px) rotateX(46deg) rotateY(10deg) rotateZ(calc(var(--rz) + 8deg)); animation-timing-function: cubic-bezier(0.6, 0, 1, 0.6); }
+  82% { transform: translateY(0) perspective(800px) rotateX(66deg) rotateY(-3deg) rotateZ(calc(var(--rz) + 4deg)); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1); }
+  89% { transform: translateY(-12px) perspective(800px) rotateX(58deg) rotateY(2deg) rotateZ(calc(var(--rz) + 5deg)); animation-timing-function: cubic-bezier(0.6, 0, 1, 0.6); }
+  100% { transform: translateY(0) perspective(800px) rotateX(62deg) rotateY(0deg) rotateZ(calc(var(--rz) + 5deg)); opacity: 1; }
+}
+.result-card {
+  transform-origin: 50% 50%;
+  animation: resultCard 0.95s cubic-bezier(0.45, 0, 0.9, 0.55) both;
+}
+/* ボスが突き刺さった衝撃で、寝ている剣が跳ねる */
+@keyframes resultCardHop {
+  0% { translate: 0 0; }
+  30% { translate: 0 -34px; }
+  60% { translate: 0 0; }
+  78% { translate: 0 -8px; }
+  100% { translate: 0 0; }
+}
+.result-card-hop { animation: resultCardHop 0.5s ease-out both; }
+/* ボスが突き刺さった瞬間、地面が大きく揺れる */
+@keyframes resultQuake {
+  0% { translate: 0 0; }
+  10% { translate: -14px 10px; }
+  22% { translate: 12px -8px; }
+  34% { translate: -10px 6px; }
+  48% { translate: 7px -4px; }
+  64% { translate: -4px 2px; }
+  80% { translate: 2px -1px; }
+  100% { translate: 0 0; }
+}
+.result-quake { animation: resultQuake 0.5s linear both; }
+
+/* 引き分け：ぶつかった瞬間に止まって白黒になる */
+.result-freeze { filter: grayscale(1) contrast(1.25); }
+/* ぶつかった所の光と、四方に走る火花 */
+@keyframes resultClash {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 1; }
+  25% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.85; }
+}
+.result-clash {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 420px;
+  height: 420px;
+  z-index: 30;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, rgb(255, 253, 246) 0, rgb(255, 253, 246) 12%, rgba(255, 253, 246, 0.6) 22%, rgba(255, 253, 246, 0) 48%),
+    linear-gradient(90deg, transparent 0, rgba(255, 253, 246, 0.95) 50%, transparent 100%) center / 100% 5px no-repeat,
+    linear-gradient(0deg, transparent 0, rgba(255, 253, 246, 0.95) 50%, transparent 100%) center / 5px 100% no-repeat,
+    linear-gradient(45deg, transparent 0, rgba(255, 253, 246, 0.8) 50%, transparent 100%) center / 70% 3px no-repeat;
+  animation: resultClash 0.65s ease-out both;
+}
+@keyframes resultBgInDraw {
+  from { opacity: 0; transform: scale(1.08); }
+  to { opacity: 0.15; transform: scale(1); }
+}
+.result-bg-in-draw { animation: resultBgInDraw 0.9s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
+
+/* 表の横線（ロビーの線と同じ作り）：単色の線の縁を、筆で引いたように細かく欠けさせる */
+.result-rule {
+  height: 2px;
+  background: var(--usuzumi);
+  filter: url(#sumi-edge);
+}
+.result-rule--head {
+  height: 5px;
+  background: var(--sumi);
+}
+
+/* 残機制の控えの剣：選んだ剣の後ろ（真ん中）から外側へ */
+@keyframes resultReserveIn {
+  from { transform: translateX(-50%) scale(0.5); opacity: 0; }
+  to { transform: translateX(calc(-50% + var(--dx))) scale(0.62); opacity: 0.5; }
+}
+.result-reserve {
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  bottom: 0;
+  transform-origin: 50% 100%;
+  pointer-events: none;
+  animation: resultReserveIn 0.55s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+/* ---------- drop：天から落ちて突き刺さる ---------- */
+/* 上空に現れる。光が満ちる（〜35%）まで見えず、光に隠れたまま小さく育ち、光が引くと点の剣が見える */
+@keyframes resultDropAim {
+  0%, 38% { transform: translate(240px, -280px) scale(0.01); opacity: 0; }
+  40% { transform: translate(240px, -280px) scale(0.01); opacity: 1; }
+  70%, 100% { transform: translate(240px, -280px) scale(0.08); opacity: 1; }
+}
+/* 上空の光：芯は和紙色の白で塗りつぶし、十字の筋がきらりと伸びる */
+@keyframes resultDropGlow {
+  0% { transform: translate(-50%, -50%) scale(0) rotate(0deg); opacity: 0; }
+  30% { transform: translate(-50%, -50%) scale(1) rotate(20deg); opacity: 1; }
+  72% { transform: translate(-50%, -50%) scale(1.05) rotate(35deg); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1.5) rotate(45deg); opacity: 0; }
+}
+/* 回りながら大きくなって定位置へ。だんだん速くなり、最後は一番速い */
+@keyframes resultDropFall {
+  0% { transform: translate(240px, -280px) scale(0.08) rotate(0deg); }
+  100% { transform: translate(0, 0) scale(1) rotate(1080deg); }
+}
+/* 刺さったあと、根元を支点に左右に揺れて止まる（入りで少しつぶれる） */
+@keyframes resultDropWobble {
+  0% { transform: scale(1.06, 0.9) rotate(0deg); }
+  12% { transform: scale(1, 1) rotate(9deg); }
+  32% { transform: rotate(-7deg); }
+  52% { transform: rotate(4.5deg); }
+  70% { transform: rotate(-2.5deg); }
+  86% { transform: rotate(1deg); }
+  100% { transform: rotate(0deg); }
+}
+/* 地面に広がる墨。真ん中から左右へ一気に */
+@keyframes resultDropGround {
+  from { transform: translateX(-50%) scaleX(0.1); opacity: 0; }
+  to { transform: translateX(-50%) scaleX(1); opacity: 0.85; }
+}
+@keyframes resultDropLight {
+  0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; }
+}
+.result-drop-aim { animation: resultDropAim 0.7s linear both; }
+.result-drop-glow {
+  position: absolute;
+  z-index: 5;
+  width: 260px;
+  height: 260px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, rgb(255, 253, 246) 0, rgb(255, 253, 246) 22%, rgba(255, 246, 214, 0.75) 34%, rgba(255, 240, 200, 0) 62%),
+    linear-gradient(90deg, transparent 0, rgba(255, 253, 246, 0.95) 50%, transparent 100%) center / 100% 6px no-repeat,
+    linear-gradient(0deg, transparent 0, rgba(255, 253, 246, 0.95) 50%, transparent 100%) center / 6px 100% no-repeat;
+  filter: drop-shadow(0 0 18px rgba(255, 215, 0, 0.7));
+  animation: resultDropGlow 0.7s ease-out both;
+}
+.result-drop-fall { animation: resultDropFall 0.65s cubic-bezier(0.55, 0, 0.9, 0.4) both; }
+.result-drop-wobble { animation: resultDropWobble 0.9s ease-out both; }
+.result-drop-ground {
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  bottom: -26px;
+  width: 340px;
+  height: 64px;
+  background: var(--sumi);
+  -webkit-mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+          mask: var(--sumi-stroke) center / 100% 100% no-repeat;
+  animation: resultDropGround 0.25s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.result-drop-light {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 0;
+  width: 700px;
+  height: 700px;
+  transform: translate(-50%, 50%);
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(255, 253, 246, 0.95) 0, rgba(255, 253, 246, 0.7) 18%, rgba(255, 253, 246, 0) 55%);
+  animation: resultDropLight 0.45s ease-out both;
+}
+.result-bg-in { animation: resultBgIn 0.9s cubic-bezier(0.2, 0.8, 0.3, 1) both; }
