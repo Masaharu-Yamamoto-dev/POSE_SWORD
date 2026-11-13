@@ -319,6 +319,9 @@ export class RoomSession {
   setLivesMode(enabled) { if (!this.closed && this.isHost) { this.host.setLivesMode(enabled); this.publish(); } }
   setSoloMode(enabled) { if (!this.closed && this.isHost) { this.host.setSoloMode(enabled); this.publish(); } }
   setBossPlayer(playerId) { if (!this.closed && this.isHost) { this.host.setBossPlayer(playerId); this.publish(); } }
+  // NPC を入れたときは剣画像をゲストへ配り直す必要があるので ROSTER（publish(true)）で送る。
+  // assetVersion が進むので、開始ボタンは assetsDelivered() が全員の受け取りを確かめるまで押せない。
+  setNpcBoss(enabled) { if (!this.closed && this.isHost) { this.host.setNpcBoss(enabled); this.publish(true); } }
   updateSword(sword) {
     if (this.closed) return;
     this.sword = validateSword(sword);
@@ -355,8 +358,10 @@ export class RoomSession {
   // シャッフルする。こうしないと陣営が入り混じった配置で試合が始まってしまう。
   assignRoles(players) {
     // 独楽モードでは柄の補正を外した値で戦う（swordForGameMode）
+    // isNpc は Unity との取り決め。ホストの Unity だけが、これの立った剣に NPC の入力役（BossNpcBrain）を付ける。
     const describe = (player, team, spawnIndex) => ({ playerId: player.playerId,
-      slotIndex: player.slotIndex, spawnIndex, team, swordData: swordForGameMode(player.swordData, this.room.gameMode) });
+      slotIndex: player.slotIndex, spawnIndex, team, isNpc: !!player.npc,
+      swordData: swordForGameMode(player.swordData, this.room.gameMode) });
     if (!this.room.soloMode) {
       const spawnSlots = this.shuffle(players.map((_, i) => i));
       return players.map((player, i) => describe(player, 0, spawnSlots[i]));

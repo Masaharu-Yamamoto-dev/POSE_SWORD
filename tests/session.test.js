@@ -467,6 +467,85 @@ test('a rematch keeps the named boss unless the host changes it', () => {
   assert.equal(configs.at(-1).data.players.find(p => p.team === 0).playerId, 'p1', '指名は再戦でも保たれる');
 });
 
+// ===== 1vs3 の NPC ボス（人間3人 vs NPC） =====
+
+// ホスト＋ゲスト2人の 1vs3 の部屋に NPC ボスを入れる。NPC が空いた4席目を使う。
+function setupNpcBoss() {
+  const s = setup({ soloMode: true }, 2);
+  s.host.setNpcBoss(true); s.net.flush();
+  return s;
+}
+
+test('the NPC boss is handed to Unity as team 0 at spawn 0, flagged isNpc', () => {
+  const s = setupNpcBoss();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
+  s.host.prepare(); s.net.flush();
+  const config = soloConfig(s);
+  const npc = config.players.find(p => p.playerId === 'npc');
+  assert.deepEqual([npc.team, npc.spawnIndex, npc.isNpc], [0, 0, true]);
+  const humans = config.players.filter(p => p.playerId !== 'npc');
+  assert.equal(humans.length, 3);
+  assert.ok(humans.every(p => p.team === 1 && p.isNpc === false), '人間は全員トリオ側で、NPC ではない');
+  assert.deepEqual(humans.map(p => p.spawnIndex).sort(), [1, 2, 3]);
+  // ゲストの Unity にも同じ isNpc が届く（NPC の入力はホストの Unity だけが作るので、ゲストは見分けるだけ）
+  for (let i = 1; i <= 2; i++) {
+    const guestConfig = s.commands[i].find(c => c.method === 'InitializeMultiplayer').data;
+    assert.deepEqual(guestConfig.players.map(p => [p.playerId, p.team, p.spawnIndex, p.isNpc]),
+      config.players.map(p => [p.playerId, p.team, p.spawnIndex, p.isNpc]));
+  }
+});
+
+test('an ordinary match marks every player as not an NPC', () => {
+  const s = setup();
+  start(s);
+  assert.ok(soloConfig(s).players.every(p => p.isNpc === false));
+});
+
+test('turning on the NPC boss re-sends the roster so guests receive its sword image', () => {
+  const s = setup({ soloMode: true }, 2);
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  const before = s.host.assetVersion;
+  const rosters = () => s.links.map(([hostEnd]) => hostEnd.sent.filter(m => m.type === 'ROSTER').length);
+  const sentBefore = rosters();
+  s.host.setNpcBoss(true);
+  assert.equal(s.host.assetVersion, before + 1);
+  assert.deepEqual(rosters(), sentBefore.map(n => n + 1));
+  // ゲストが受け取りを返すまでは開始できない（NPC の剣画像が届く前に始めない）
+  awaitReady(s);
+  assert.equal(s.host.view().canStart, false);
+  s.net.flush();
+  for (const guest of s.guests) {
+    const room = guest.view().room;
+    assert.equal(room.npcBoss, true);
+    assert.equal(room.bossPlayerId, 'npc');
+    const npc = room.players.find(p => p.playerId === 'npc');
+    assert.ok(npc?.npc && npc.ready, 'NPC は最初から準備完了で名簿に載る');
+    assert.ok(npc.swordData.imageStr, 'NPC の剣画像も ROSTER で届いている');
+  }
+  awaitReady(s);
+  assert.equal(s.host.view().canStart, true);
+});
+
+test('an NPC boss room starts once the three humans are ready and the two guests load', () => {
+  const s = setupNpcBoss();
+  assert.equal(s.host.view().room.players.length, 4);
+  s.host.setReady(true); s.guests[0].setReady(true); s.net.flush();
+  awaitReady(s);
+  assert.equal(s.host.view().canStart, false, '人間が1人でも準備中なら開始できない');
+  s.guests[1].setReady(true); s.net.flush();
+  assert.equal(s.host.view().canStart, true);
+  s.host.prepare(); s.net.flush();
+  const matchId = s.host.view().room.matchId;
+  // NPC は INITIALIZED を送らない。人間3人の読み込みだけでカウントダウンに入る
+  s.host.unityEvent('INITIALIZED', { matchId }); s.guests[0].unityEvent('INITIALIZED', { matchId }); s.net.flush();
+  assert.equal(s.host.view().room.phase, 'LOADING');
+  s.guests[1].unityEvent('INITIALIZED', { matchId }); s.net.flush();
+  assert.equal(s.host.view().room.phase, 'COUNTDOWN');
+  s.advance(LOBBY_FADE_MS + MATCH_INTRO_MS); s.host.pump();
+  assert.equal(s.commands[0].filter(c => c.method === 'BeginMultiplayer').length, 1);
+});
+
 test('a suppress input reaches the host as its own action', () => {
   const s = setup({ soloMode: true });
   const matchId = startSolo(s);
