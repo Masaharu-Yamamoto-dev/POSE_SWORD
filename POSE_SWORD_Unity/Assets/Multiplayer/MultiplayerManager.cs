@@ -420,10 +420,14 @@ public class MultiplayerManager : MonoBehaviour
         if (!config.soloMode)
         {
             // 通常の試合では陣営を使わない。全員0で来るはずで、そうでなければ設定が壊れている。
-            if (config.players.Any(p => p.team != BossTeam))
+            // NPCは1vs3のボス専用なので、通常の試合に混ざっていたら同じく設定が壊れている。
+            if (config.players.Any(p => p.team != BossTeam || p.isNpc))
                 throw new ArgumentException("A normal match must not carry teams.");
             return;
         }
+        // ▼【新規追加】NPCはボス1人だけ。トリオ側にNPCがいると誰も入力しない剣が味方に混ざってしまう
+        if (config.players.Count(p => p.isNpc) > 1 || config.players.Any(p => p.isNpc && p.team != BossTeam))
+            throw new ArgumentException("Only the boss may be an NPC.");
         if (config.players.Length != SoloModePlayers || config.soloBuff == null ||
             config.players.Any(p => p.team != BossTeam && p.team != TrioTeam) ||
             config.players.Count(p => p.team == BossTeam) != 1 ||
@@ -955,6 +959,22 @@ public class MultiplayerManager : MonoBehaviour
         return Mathf.Max(0f, until - Time.unscaledTime);
     }
 
+    // ▼【新規追加】NPCボスの判断用。いま掌握斬を撃ったら何人巻き込めるかを、ApplySuppress と同じ判定で数える。
+    // 撃てるかどうか(SP・拘束など)はここでは見ない。それは SwordBattle.SuppressReady と ApplySuppress の役目。
+    public int CountSuppressTargets(string bossId)
+    {
+        if (!soloModeActive || config.soloBuff == null || bossId == null || !swords.ContainsKey(bossId)) return 0;
+        return SuppressTargetsAt(bossId, swords[bossId].currentCenterPosition).Length;
+    }
+
+    // 掌握斬の範囲判定。発動(ApplySuppress)とNPCの見積もり(CountSuppressTargets)で同じ式を使うための共通部分。
+    // 別々に書くと、NPCが「巻き込める」と判断したのに実際は誰も捕まらない、といった食い違いが起きうる。
+    string[] SuppressTargetsAt(string bossId, Vector3 centre)
+    {
+        return BattlePolicies.SuppressTargets(bossId, centre.x, centre.y,
+            config.soloBuff.suppressRadius, TargetCandidates());
+    }
+
     // ボスが制圧を撃った。範囲判定は発動の瞬間に一度だけ行い、以降どちらが動いても対象は変わらない。
     public void ApplySuppress(string bossId)
     {
@@ -965,8 +985,7 @@ public class MultiplayerManager : MonoBehaviour
             boss.isDashing, IsSuppressed(bossId), isBoss)) return;
 
         var centre = boss.currentCenterPosition;
-        var caught = BattlePolicies.SuppressTargets(bossId, centre.x, centre.y,
-            config.soloBuff.suppressRadius, TargetCandidates());
+        var caught = SuppressTargetsAt(bossId, centre);
         boss.ConsumeSuppressSp();
         // カットインは技番号(dashType)の同期に乗るので、ここでHost側が立てれば全員の画面に出る
         boss.PlaySuppressCutin();
@@ -1271,6 +1290,9 @@ public class MultiplayerManager : MonoBehaviour
         // 残りの強化は生成後に掛ける。攻撃力はSwordGeneratorが1〜100を10〜90へ変換した後の
         // 実数値に掛けたいので、変換前の素の値をいじってはいけない。
         if (IsBoss(player)) ApplyBossBuff(battle);
+        // ▼【新規追加】NPCボスの入力はホストだけが作る。ゲストのNPCの剣はSYNCで動くだけなので頭脳は要らない。
+        // 剣はarenaの子なので、試合の後始末(StopCurrent)で剣ごと破棄され、頭脳の後始末は不要
+        if (IsHost && player.isNpc) obj.AddComponent<BossNpcBrain>().Init(this, battle);
         controller.ApplyPhysicsMode();
         swords.Add(player.playerId, battle); bodies.Add(player.playerId, rb);
         sequences[player.playerId] = 0; inputTimes[player.playerId] = -100;
