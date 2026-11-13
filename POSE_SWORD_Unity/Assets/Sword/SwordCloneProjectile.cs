@@ -208,8 +208,9 @@ public class SwordCloneProjectile : MonoBehaviour
                 // ▼【修正】target.TakeDamage()を直接呼ぶと、targetがマルチプレイ中(MultiplayerOwner != null)の時に
                 // 何もせず握りつぶしてしまう（HPはQueueHit経由のMatchRulesでのみ確定するため）。
                 // GiantSpin/LeafShieldと同様にDealDamageTo()を通すことで、オンラインでも正しくダメージが反映されるようにする
-                // オレ達アタック：分身が実際に減らしたHPの一部を本体が回復する（ライフスティール）
-                owner.DealDamageTo(target, damage, hitPoint, true, false, false, owner.cloneLifestealRate);
+                // ▼【変更】以前は分身が減らしたHPの2割を本体が回復していた（ライフスティール）。今のバランスでは要らないのでやめた。
+                // 回復の仕組み自体（DealDamageTo の lifestealRate・MatchRules の回復・回復の数字）は残してある
+                owner.DealDamageTo(target, damage, hitPoint, true, false, false);
             }
             End(CloneRushEnd.Hit, hitPoint);
             return;

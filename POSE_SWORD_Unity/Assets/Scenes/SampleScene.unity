@@ -2520,7 +2520,6 @@ MonoBehaviour:
   cloneRetargetTurnRate: 300
   cloneRetargetTime: 0.6
   cloneTintLighten: 0.5
-  cloneLifestealRate: 0.2
   leafShieldCount: 5
   leafShieldDuration: 10
   leafShieldOrbitRadius: 5
@@ -4108,7 +4107,6 @@ MonoBehaviour:
   cloneRetargetTurnRate: 300
   cloneRetargetTime: 0.6
   cloneTintLighten: 0.5
-  cloneLifestealRate: 0.2
   leafShieldCount: 5
   leafShieldDuration: 10
   leafShieldOrbitRadius: 5

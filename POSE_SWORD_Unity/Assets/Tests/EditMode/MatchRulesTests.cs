@@ -724,7 +724,7 @@ public class MatchRulesTests
         Assert.AreEqual(1f, BattlePolicies.GiantSpinHitRate(2, float.NaN, .5f));
     }
 
-    // ===== ライフスティール（オレ達アタックの分身）：実際に減らした量の一部を、攻撃した側が回復する =====
+    // ===== ライフスティール：実際に減らした量の一部を、攻撃した側が回復する（今は使っている技はないが、仕組みは残してある） =====
 
     [Test]
     public void LifestealHealsAShareOfTheDamageActuallyDealt()

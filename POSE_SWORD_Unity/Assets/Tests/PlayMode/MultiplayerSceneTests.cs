@@ -423,7 +423,7 @@ public class MultiplayerSceneTests
     // ===== オレ達アタック：分身が減らしたHPの2割を本体が回復する =====
 
     [UnityTest]
-    public IEnumerator CloneLifestealHealsTheOwnerByAShareOfTheDamageDealt()
+    public IEnumerator LifestealHealsTheAttackerByAShareOfTheDamageDealt()
     {
         Call("InitializeMultiplayer", Config("lifesteal", true));
         yield return null; yield return null;
@@ -435,9 +435,8 @@ public class MultiplayerSceneTests
         yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
         Assert.AreEqual(500, Hp(p0));
 
-        // 分身の一撃（本体ではない・回復率は剣の設定値）
-        float rate = (float)p0.GetType().GetField("cloneLifestealRate").GetValue(p0);
-        Assert.AreEqual(.2f, rate, .001f);
+        // 回復する一撃（本体ではない・回復率2割）。今はオレ達アタックでは使っていないが、回復の仕組みとして残してある
+        float rate = .2f;
         p0.GetType().GetMethod("DealDamageTo").Invoke(p0, new object[] { p2, 100, Vector2.zero, true, false, false, rate });
         yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
         Assert.AreEqual(900, Hp(p2));

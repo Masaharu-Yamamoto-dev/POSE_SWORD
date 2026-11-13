@@ -144,7 +144,6 @@ public static bool matchEnded = false;
     public float cloneRetargetTurnRate = 300f; // その時だけ曲がれる速さ（度/秒）
     public float cloneRetargetTime = 0.6f;     // その時だけ追尾する時間
     [Range(0f, 1f)] public float cloneTintLighten = 0.5f; // 分身を染める色を、プレイヤーの色からどれだけ白に寄せるか
-    public float cloneLifestealRate = 0.2f; // 分身が相手のHPを実際に減らした量のうち、本体が回復する割合（ライフスティール）
     public int leafShieldCount = 3; // リーフシールド（hiltType:"3"）の展開枚数
     public float leafShieldDuration = 15f; // リーフシールドの持続時間（秒）
     public float leafShieldOrbitRadius = 3.5f; // 本体からの周回半径（＝防御圏の広さ）
