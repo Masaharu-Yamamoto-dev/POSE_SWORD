@@ -22,16 +22,10 @@ using UnityEngine;
     public float scaleMultiplier;
     public float maxSp;
     public float suppressRadius;
-    public float suppressDuration;
-    // 掌握は「引き寄せ → 薙ぎ払い」の2段構え
-    public float judgmentPullSeconds;
-    public float judgmentPullForce;
+    // 掌握斬の強さ。動きと時間（吸引・溜め・薙ぎ払いの秒数、拘束時間など）は配らず、
+    // MultiplayerManager の Inspector で決める（全員が同じビルドを使うので値は揃う）
     public float judgmentDamageMultiplier;
     public float judgmentKnockback;
-    // 薙ぎ払いの動き（ボスが範囲の中心で大きく回って斬り抜ける）
-    public float judgmentSweepSeconds;
-    public float judgmentSweepSpin;
-    public float judgmentSweepScale;
 }
 [Serializable] public class MultiplayerConfig
 {
@@ -131,6 +125,10 @@ using UnityEngine;
     // 前回のSYNC以降に通ったダメージ（Hostが溜めて、SYNCを送るたびに空にする）
     public MultiplayerHitEvent[] hits;
     public MultiplayerCloneEnd[] cloneEnds;
+    // 1vs3：ボスが掌握を撃った回数と撃った場所。ゲストは回数が増えたのを見て範囲の輪を出す
+    public int judgmentSeq;
+    public float judgmentX;
+    public float judgmentY;
 }
 [Serializable] public class MultiplayerScore
 {

@@ -317,7 +317,7 @@ public static bool matchEnded = false;
     {
         if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
         string action = PoseSword.Multiplayer.BattlePolicies.PrimaryAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, InputBlockedBySkill, right, MultiplayerOwner.IsSuppressed(PlayerId) || IsStaggered);
+            MultiplayerOwner.IsPlaying, IsAlive, InputBlockedBySkill, right, MultiplayerOwner.IsSuppressed(PlayerId) || MultiplayerOwner.IsRooted(PlayerId) || IsStaggered);
         switch (action)
         {
             case "KomaDash": StartCoroutine(DashRoutine()); break;
@@ -335,7 +335,7 @@ public static bool matchEnded = false;
         // 閾値はUIと同じ ultimateSp を渡す。ここを固定値にすると、ボス(maxSp=200)で
         // 「ボタンは出ていないのに撃てる」ような食い違いが起きる。
         string action = PoseSword.Multiplayer.BattlePolicies.UltimateAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, isDashing, MultiplayerOwner.IsSuppressed(PlayerId) || IsStaggered, ultimateSp);
+            MultiplayerOwner.IsPlaying, IsAlive, isDashing, MultiplayerOwner.IsSuppressed(PlayerId) || MultiplayerOwner.IsRooted(PlayerId) || IsStaggered, ultimateSp);
         if (action == null) return;
         StartCoroutine(UltimateRoutine());
     }
@@ -377,23 +377,98 @@ public static bool matchEnded = false;
             transform.localScale.y * multiplier, transform.localScale.z);
     }
 
-    // ▼【新規追加】1vs3：掌握の2段目。範囲の中心で剣を大きくして回し、集めた相手を薙ぎ払う。
-    // 大きさの退避と復帰は既存の巨大回転斬(GiantSpinRoutine)と同じ作法にしてある。
-    // 位置・回転・大きさはいずれも同期に乗っているので、ゲストの画面にもそのまま見える。
-    public void BeginJudgmentSweep(float seconds, float scale)
+    // ▼【新規追加】1vs3：掌握の3段目（薙ぎ払い）の動き。巨大回転斬(GiantSpinRoutine)を参考にした流れで、
+    // 振りかぶり → ちょうど一回転 → 余韻。巨大回転斬と違い、剣の大きさは変えない。
+    // 相手は「刀身が通り過ぎた瞬間」に1人ずつ斬る（onPass）。ダメージと吹き飛ばしはMultiplayerManagerが持つ。
+    // 位置・回転・大きさはいずれも同期に乗っているので、ゲストの画面にもそのまま見える。Hostだけが呼ぶ。
+    public struct JudgmentSweepMotion
     {
-        if (!IsAlive) return;
-        StartCoroutine(JudgmentSweepRoutine(seconds, scale));
+        public float windupSeconds;  // 振りかぶり
+        public float windupAngle;    // 振りかぶりで回転と逆向きに引く角度（度）
+        public float spinSpeed;      // 一回転の速さ（度/秒）。一回転にかかる時間は 360 / spinSpeed
+        public float lingerSeconds;  // 一回転した後、その場に止まる余韻
     }
 
-    IEnumerator JudgmentSweepRoutine(float seconds, float scale)
+    public void BeginJudgmentSweep(JudgmentSweepMotion motion, IList<SwordBattle> targets, System.Action<SwordBattle> onPass, System.Action onFinished)
     {
-        Vector3 originalScale = transform.localScale;
-        // 奥行き(z)は拡大しない（柄がカメラの後ろに回り込んで消えるため。ScaledFlat参照）
-        if (scale > 0f) transform.localScale = ScaledFlat(originalScale, scale);
-        yield return new WaitForSecondsRealtime(seconds);
-        transform.localScale = originalScale;
-        if (rb != null) rb.angularVelocity *= 0.25f;   // 回したままにせず、振り抜いたところで収める
+        if (!IsAlive) { onFinished?.Invoke(); return; }
+        StartCoroutine(JudgmentSweepRoutine(motion, targets, onPass, onFinished));
+    }
+
+    IEnumerator JudgmentSweepRoutine(JudgmentSweepMotion motion, IList<SwordBattle> targets, System.Action<SwordBattle> onPass, System.Action onFinished)
+    {
+        bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
+        float originalGravityScale = 0f;
+        if (controlsPhysics)
+        {
+            // 技の間はその場に留める（巨大回転斬と同じ）
+            originalGravityScale = rb.gravityScale;
+            rb.gravityScale = 0f;
+            rb.linearVelocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+        }
+        // 集めた相手は中心に固まっているので、当たり判定をトリガーにして引っかからずに回り切れるようにする
+        Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
+        bool[] originalTriggerStates = new bool[myColliders.Length];
+        for (int i = 0; i < myColliders.Length; i++)
+        {
+            originalTriggerStates[i] = myColliders[i].isTrigger;
+            myColliders[i].isTrigger = true;
+        }
+
+        // 回る向き：巨大回転斬と同じく、狙っている相手の方へ振り下ろす向き
+        float spinDir = 1f;
+        if (controller != null && controller.enemyTarget != null)
+        {
+            float dx = controller.enemyTarget.position.x - transform.position.x;
+            if (Mathf.Abs(dx) > 0.01f) spinDir = Mathf.Sign(dx) * -1f;
+        }
+
+        // 1. 振りかぶり：回る向きと逆に少し引く
+        if (controlsPhysics && motion.windupSeconds > 0f) rb.angularVelocity = -spinDir * motion.windupAngle / motion.windupSeconds;
+        yield return StartCoroutine(WaitSkillTime(motion.windupSeconds));
+
+        // 2. ちょうど一回転。刀身の向き(transform.up)から回る向きに測って、相手のいる角度を通り過ぎた瞬間に斬る
+        float speed = Mathf.Max(1f, Mathf.Abs(motion.spinSpeed));
+        float duration = 360f / speed;
+        var remaining = new List<(SwordBattle target, float angle)>();
+        if (targets != null)
+        {
+            Vector2 centre = transform.position;
+            float bladeAngle = Mathf.Atan2(transform.up.y, transform.up.x) * Mathf.Rad2Deg;
+            foreach (var target in targets)
+            {
+                if (target == null) continue;
+                Vector2 toTarget = (Vector2)target.transform.position - centre;
+                float targetAngle = Mathf.Atan2(toTarget.y, toTarget.x) * Mathf.Rad2Deg;
+                remaining.Add((target, Mathf.Repeat((targetAngle - bladeAngle) * spinDir, 360f)));
+            }
+            remaining.Sort((a, b) => a.angle.CompareTo(b.angle));
+        }
+        float swept = 0f;
+        while (swept < 360f)
+        {
+            // 摩擦で減速しないよう、回っている間は毎フレーム速さを掛け直す
+            if (controlsPhysics) rb.angularVelocity = speed * spinDir;
+            yield return null;
+            if (!SkillClockStopped) swept += speed * Time.deltaTime;
+            while (remaining.Count > 0 && remaining[0].angle <= swept)
+            {
+                onPass?.Invoke(remaining[0].target);
+                remaining.RemoveAt(0);
+            }
+        }
+        // 取りこぼし（中心に重なっていた相手など）は回り切った時点で斬る
+        foreach (var rest in remaining) onPass?.Invoke(rest.target);
+        if (controlsPhysics) rb.angularVelocity = 0f;
+
+        // 3. 余韻
+        yield return StartCoroutine(WaitSkillTime(motion.lingerSeconds));
+
+        for (int i = 0; i < myColliders.Length; i++)
+            if (myColliders[i] != null) myColliders[i].isTrigger = originalTriggerStates[i];
+        if (controlsPhysics) rb.gravityScale = originalGravityScale;
+        onFinished?.Invoke();
     }
 
     // ▼【新規追加】剣本体以外（分身・リーフシールドなど）からも、TakeDamage/QueueHitへの正しい経路で

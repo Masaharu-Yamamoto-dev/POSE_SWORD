@@ -789,8 +789,8 @@ public class MultiplayerSceneTests
         for (int i = 0; i < 4; i++)
             config = config.Replace("\"slotIndex\":" + i + ",", "\"slotIndex\":" + i + ",\"team\":" + (i == 0 ? 0 : 1) + ",");
         string buff = "{\"hpMultiplier\":1,\"attackMultiplier\":1,\"spGainMultiplier\":1,\"scaleMultiplier\":1,\"maxSp\":200," +
-            "\"suppressRadius\":1,\"suppressDuration\":1,\"judgmentPullSeconds\":1,\"judgmentPullForce\":1," +
-            "\"judgmentDamageMultiplier\":1,\"judgmentKnockback\":1,\"judgmentSweepSeconds\":1,\"judgmentSweepSpin\":1,\"judgmentSweepScale\":1}";
+            "\"suppressRadius\":1," +
+            "\"judgmentDamageMultiplier\":1,\"judgmentKnockback\":1}";
         return config.Replace("\"players\":[", "\"soloMode\":true,\"soloBuff\":" + buff + ",\"players\":[");
     }
 
