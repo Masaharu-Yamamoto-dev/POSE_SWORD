@@ -14,7 +14,7 @@ export const NPC_PLAYER_ID = 'npc';
 export const BOSS_NPC_SWORD = Object.freeze({
   name: '鬼神の大太刀',
   hp: 800,
-  attack: 50,
+  attack: 70,
   weight: 60,
   imageStr: BOSS_NPC_BLADE_BASE64,
   // 柄はデフォルト（"0"）。必殺技も柄で決まるので、NPC の必殺技を変えたいときはここを変える。
