@@ -69,6 +69,13 @@ using UnityEngine;
     // ▼【新規追加】1vs3：ボスの制圧を受けている残り秒数。0なら通常。ゲストはこの値から
     // 操作不能の表示を出し、自分の必殺技ボタンを隠す
     public float suppressedRemaining;
+    // ▼【新規追加】大回転斬の段階（SpinDashStage）。ゲストはこれを見て、跳ぶ・溜める・撃ち出す・終わり際の演出を出す
+    public int spinPhase;
+    // ▼【新規追加】巨大回転斬の段階（GiantSpinStage。ふらつきは含まない）。ゲストはこれを見て、柄が光る・巨大化・一回転などの演出を出す
+    public int giantPhase;
+    // ▼【新規追加】オレ達アタックの段階（CloneRushChargeStage）と、残りの発射数。ゲストはこれを見て溜めと残りの数の演出を出す
+    public int clonePhase;
+    public int cloneShots;
 }
 // ▼【新規追加】分身突進（hiltType:"2"）・リーフシールド（hiltType:"3"）など、
 // 本体以外に複数体表示する"付随体"1体分の見た目同期用データ
@@ -81,6 +88,16 @@ using UnityEngine;
     // ▼【新規追加】残機モード：この分身が持ち主の何番目の剣(0=現在装備中)の形をしているか。
     // -1は「残機モードでない、または特定の剣に紐付かない」ことを表し、持ち主の現在の刀身を使う
     public int spriteIndex = -1;
+    // ▼【新規追加】オレ達アタックの分身の段階（CloneRushPhase。オレ達シールドの分身は0）。
+    // ゲストは段階が0でない分身にオレ達アタックの演出を付け、0の分身にはオレ達シールドの演出を付ける
+    public int phase;
+}
+// ▼【新規追加】前回のSYNC以降に消えたオレ達アタックの分身と、その消え方（CloneRushEnd）。ゲストが同じ消え方の演出を出す
+[Serializable] public class MultiplayerCloneEnd
+{
+    public string id;
+    public int kind;
+    public float x, y, angle;
 }
 // ▼【新規追加】実際に通ったダメージ1件分。ダメージ数字を「与えた／受けた／他人同士」で出し分けるため、
 // 攻撃した人と当たった位置も一緒に送る。seq は試合ごとの通し番号で、ゲストは前回より大きいものだけ表示する
@@ -107,6 +124,7 @@ using UnityEngine;
     public MultiplayerCloneState[] clones;
     // 前回のSYNC以降に通ったダメージ（Hostが溜めて、SYNCを送るたびに空にする）
     public MultiplayerHitEvent[] hits;
+    public MultiplayerCloneEnd[] cloneEnds;
     // 1vs3：ボスが掌握を撃った回数と撃った場所。ゲストは回数が増えたのを見て範囲の輪を出す
     public int judgmentSeq;
     public float judgmentX;

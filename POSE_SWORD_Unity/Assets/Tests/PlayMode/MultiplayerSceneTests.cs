@@ -312,8 +312,8 @@ public class MultiplayerSceneTests
         Assert.AreEqual(.05f, Time.timeScale, .001f, "A hit stop must not cut the cutin's slow motion short.");
         Assert.IsFalse((bool)p0.GetType().GetField("isDashShooting").GetValue(p0));
 
-        // カットインが抜けた後で、跳んで止まって発射する
-        yield return new WaitForSecondsRealtime(1.1f);
+        // カットイン（約1.35秒）が抜けた後で、跳んで止まって発射する
+        yield return new WaitForSecondsRealtime(1.5f);
         Assert.AreEqual(1f, Time.timeScale, .001f);
         Assert.IsTrue((bool)p0.GetType().GetField("isDashShooting").GetValue(p0) ||
             !(bool)p0.GetType().GetField("isDashing").GetValue(p0), "The dash starts once the cutin is over.");
@@ -357,7 +357,16 @@ public class MultiplayerSceneTests
         yield return new WaitForSecondsRealtime(.5f);
         Assert.AreEqual(baseScale, p1.transform.localScale.x, .001f, "Nothing grows while the cutin plays.");
 
+        // 柄が光る：段階が同期用の値に出て、柄のまわりに光のにじみが出る
         float giveUp = Time.realtimeSinceStartup + 3f;
+        while (GiantPhase(p1) != 1 && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.AreEqual(1, GiantPhase(p1), "The hilt glows first.");
+        yield return null;
+        var halo = GameObject.Find("GiantSpinHiltHalo");
+        Assert.IsNotNull(halo, "The glowing hilt has a halo.");
+        Assert.IsTrue(halo.GetComponent<SpriteRenderer>().enabled);
+
+        giveUp = Time.realtimeSinceStartup + 3f;
         while (p1.transform.localScale.x < baseScale * 1.05f && Time.realtimeSinceStartup < giveUp) yield return null;
         Assert.Greater(p1.transform.localScale.x, baseScale * 1.05f, "The sword grows once the cutin is over.");
         Assert.IsFalse(Field(p1, "giantSpinHitActive"), "Growing does not hit anyone yet.");
@@ -370,7 +379,14 @@ public class MultiplayerSceneTests
         giveUp = Time.realtimeSinceStartup + 3f;
         while (!Field(p1, "giantSpinHitActive") && Time.realtimeSinceStartup < giveUp) yield return null;
         Assert.IsTrue(Field(p1, "giantSpinHitActive"));
-        Assert.AreEqual(baseScale * 6f, p1.transform.localScale.x, .01f, "The sword is fully grown before it turns.");
+        float giantScale = (float)p1.GetType().GetField("giantSpinScale").GetValue(p1);
+        Assert.AreEqual(5f, giantScale, .001f, "The sword grows five times as big.");
+        Assert.AreEqual(baseScale * giantScale, p1.transform.localScale.x, .01f, "The sword is fully grown before it turns.");
+        Assert.AreEqual(4, GiantPhase(p1), "The turning stage is shared with guests.");
+        yield return new WaitForSecondsRealtime(.15f);
+        var slash = GameObject.Find("GiantSpinSlash");
+        Assert.IsNotNull(slash, "The turn leaves a slash behind the blade.");
+        Assert.IsTrue(slash.GetComponent<MeshRenderer>().enabled);
         // 奥行きまで拡大すると、手前(z=-5)に置いた柄がカメラ(z=-10)の後ろへ回り込んで消える
         Assert.AreEqual(baseDepth, p1.transform.localScale.z, .001f, "Growing must not stretch the depth.");
         var hilt = p1.GetComponentsInChildren<Transform>().First(t => t.CompareTag("Handle"));
@@ -382,17 +398,32 @@ public class MultiplayerSceneTests
         Assert.IsTrue(Flag(p1, "IsStaggered"));
         Assert.AreEqual(baseScale, p1.transform.localScale.x, .001f);
         Assert.IsFalse(Field(p1, "isDashing"), "A staggering sword can be hit.");
+        Assert.AreEqual(0, GiantPhase(p1), "The stage is cleared once the sword is back to size.");
         Assert.IsFalse(reach.GetComponent<LineRenderer>().enabled);
+        Assert.IsFalse(slash.GetComponent<MeshRenderer>().enabled, "The slash is gone by then.");
+        // ふらつき：本物の刀身は隠し、揺れる写しと黄色い星を見せる（本物を回すと当たり判定まで回るため）
+        yield return null;
+        var blade = p1.transform.Find("Blade").GetComponent<SpriteRenderer>();
+        Assert.IsTrue(blade.forceRenderingOff, "The real blade is hidden behind its wobbling stand-in.");
+        Assert.IsNotNull(GameObject.Find("GiantStaggerStandIn"));
+        var star = GameObject.Find("GiantStaggerStar");
+        Assert.IsNotNull(star, "Stars circle above a staggering sword.");
+        Assert.IsTrue(star.GetComponent<SpriteRenderer>().enabled);
 
         giveUp = Time.realtimeSinceStartup + 2f;
         while (Flag(p1, "IsStaggered") && Time.realtimeSinceStartup < giveUp) yield return null;
         Assert.IsFalse(Flag(p1, "IsStaggered"), "The stagger wears off.");
+        yield return null;
+        Assert.IsFalse(blade.forceRenderingOff, "The real blade shows again after the stagger.");
+        Assert.IsFalse(star.GetComponent<SpriteRenderer>().enabled);
     }
+
+    private static int GiantPhase(Component sword) => (int)sword.GetType().GetField("giantSpinPhase").GetValue(sword);
 
     // ===== オレ達アタック：分身が減らしたHPの2割を本体が回復する =====
 
     [UnityTest]
-    public IEnumerator CloneLifestealHealsTheOwnerByAShareOfTheDamageDealt()
+    public IEnumerator LifestealHealsTheAttackerByAShareOfTheDamageDealt()
     {
         Call("InitializeMultiplayer", Config("lifesteal", true));
         yield return null; yield return null;
@@ -404,9 +435,8 @@ public class MultiplayerSceneTests
         yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
         Assert.AreEqual(500, Hp(p0));
 
-        // 分身の一撃（本体ではない・回復率は剣の設定値）
-        float rate = (float)p0.GetType().GetField("cloneLifestealRate").GetValue(p0);
-        Assert.AreEqual(.2f, rate, .001f);
+        // 回復する一撃（本体ではない・回復率2割）。今はオレ達アタックでは使っていないが、回復の仕組みとして残してある
+        float rate = .2f;
         p0.GetType().GetMethod("DealDamageTo").Invoke(p0, new object[] { p2, 100, Vector2.zero, true, false, false, rate });
         yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
         Assert.AreEqual(900, Hp(p2));
@@ -419,8 +449,28 @@ public class MultiplayerSceneTests
             "The healed amount is shown.");
     }
 
+    // 撃ち出された分身を、出てきた順に集める（出てきた時刻と、撃ち出した位置の本体からの距離も）
+    private static IEnumerator CollectFiredClones(Component master, System.Collections.Generic.List<(Component clone, float at, float fromMaster)> fired, float seconds)
+    {
+        var cloneType = RuntimeType("SwordCloneProjectile");
+        var launchedFlag = cloneType.GetProperty("Launched");
+        var seen = new System.Collections.Generic.HashSet<int>();
+        float giveUp = Time.realtimeSinceStartup + seconds;
+        while (fired.Count < 3 && Time.realtimeSinceStartup < giveUp)
+        {
+            foreach (Component clone in UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None))
+            {
+                if (clone == null || !seen.Add(clone.GetInstanceID())) continue;
+                Assert.IsTrue((bool)launchedFlag.GetValue(clone), "A clone is fired the moment it appears.");
+                var from = (Vector2)cloneType.GetProperty("LaunchedFrom").GetValue(clone);
+                fired.Add((clone, Time.realtimeSinceStartup, Vector2.Distance(from, master.transform.position)));
+            }
+            yield return null;
+        }
+    }
+
     [UnityTest]
-    public IEnumerator CloneRushHoldsItsClonesThenFiresThemOneAtATime()
+    public IEnumerator CloneRushChargesThenFiresClonesFromTheMasterOneAtATime()
     {
         Call("InitializeMultiplayer", Config("clone-rush", true));
         yield return null; yield return null;
@@ -428,39 +478,67 @@ public class MultiplayerSceneTests
         yield return new WaitForSecondsRealtime(3.2f);
         var p0 = Sword("p0");
         var cloneType = RuntimeType("SwordCloneProjectile");
-        var launchedFlag = cloneType.GetProperty("Launched");
-        Func<Component[]> clones = () => UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None).Cast<Component>().ToArray();
-        Func<Component, bool> launched = c => (bool)launchedFlag.GetValue(c);
+        var phaseField = p0.GetType().GetField("cloneRushPhase");
 
         FireUltimate(p0, "2"); // オレ達アタック
+        // まず溜める：その間は分身は出ていない
         float giveUp = Time.realtimeSinceStartup + 3f;
-        while (clones().Length < 3 && Time.realtimeSinceStartup < giveUp) yield return null;
-        var held = clones();
-        Assert.AreEqual(3, held.Length, "Three clones come out once the cutin is over.");
-        Assert.IsTrue(held.All(c => !launched(c)), "The clones take aim before anything is fired.");
-        Assert.IsTrue(held.All(c => c.GetComponent<Collider2D>().isTrigger), "Held clones cannot hit or be pushed.");
-        // 壁や床の向こう側に出ていない（自分の中心との間に壁がない）
-        foreach (var clone in held)
-            Assert.IsFalse(Physics2D.LinecastAll(p0.transform.position, clone.transform.position).Any(h =>
-                !h.collider.isTrigger && h.collider.GetComponentInParent(RuntimeType("SwordBattle")) == null &&
-                h.collider.GetComponent(cloneType) == null), "A clone must not appear behind a wall.");
+        while ((int)phaseField.GetValue(p0) != 1 && Time.realtimeSinceStartup < giveUp) yield return null;
+        Assert.AreEqual(1, (int)phaseField.GetValue(p0), "The master charges first.");
+        Assert.AreEqual(3, (int)p0.GetType().GetField("cloneRushShotsLeft").GetValue(p0), "Three shots are ready.");
+        Assert.AreEqual(0, UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None).Length, "No clone is out while charging.");
 
-        // 1体ずつ、間を空けて撃つ
-        var fired = new System.Collections.Generic.Dictionary<int, float>();
-        giveUp = Time.realtimeSinceStartup + 3f;
-        while (fired.Count < 3 && Time.realtimeSinceStartup < giveUp)
+        // 本体の位置から、1体ずつ間を空けてそのまま撃ち出す
+        var fired = new System.Collections.Generic.List<(Component clone, float at, float fromMaster)>();
+        yield return CollectFiredClones(p0, fired, 3f);
+        Assert.AreEqual(3, fired.Count, "Every clone is fired.");
+        Assert.IsTrue(fired.All(f => f.fromMaster < .5f), "Each clone is fired from where the master is.");
+        Assert.Greater(fired[1].at - fired[0].at, .2f, "There is a pause between shots.");
+        Assert.Greater(fired[2].at - fired[1].at, .2f, "There is a pause between shots.");
+        Assert.IsTrue(fired.Where(f => f.clone != null).All(f => !f.clone.GetComponent<Collider2D>().isTrigger), "A fired clone can hit.");
+        yield return null;
+        Assert.AreEqual(0, (int)phaseField.GetValue(p0), "The stage is cleared once all are fired.");
+    }
+
+    [UnityTest]
+    public IEnumerator CloneRushAimsEachShotAtSomeoneStillStanding()
+    {
+        Call("InitializeMultiplayer", Config("clone-retarget", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"clone-retarget\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        var targetField = RuntimeType("SwordCloneProjectile").GetField("target", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        FireUltimate(p0, "2");
+        var fired = new System.Collections.Generic.List<(Component clone, float at, float fromMaster)>();
+        // 1体目が撃たれたら、それが狙った相手を倒す
+        float giveUp = Time.realtimeSinceStartup + 4f;
+        while (fired.Count == 0 && Time.realtimeSinceStartup < giveUp)
         {
-            foreach (var clone in held)
-                if (clone != null && launched(clone) && !fired.ContainsKey(clone.GetInstanceID())) fired[clone.GetInstanceID()] = Time.realtimeSinceStartup;
-            if (fired.Count == 1)
-                Assert.AreEqual(2, held.Count(c => c != null && !launched(c)), "Only one clone is fired at a time.");
+            var first = UnityEngine.Object.FindObjectsByType(RuntimeType("SwordCloneProjectile"), FindObjectsSortMode.None).Cast<Component>().FirstOrDefault();
+            if (first != null) fired.Add((first, Time.realtimeSinceStartup, 0f));
             yield return null;
         }
-        Assert.AreEqual(3, fired.Count, "Every clone is fired in the end.");
-        Assert.IsTrue(held.Where(c => c != null).All(c => !c.GetComponent<Collider2D>().isTrigger), "A fired clone can hit.");
-        var times = fired.Values.OrderBy(t => t).ToArray();
-        Assert.Greater(times[1] - times[0], .1f, "There is a pause between shots.");
-        Assert.Greater(times[2] - times[1], .1f, "There is a pause between shots.");
+        Assert.AreEqual(1, fired.Count, "The first clone is fired.");
+        var aimed = ((Transform)targetField.GetValue(fired[0].clone)).GetComponentInParent(RuntimeType("SwordBattle"));
+        QueueHit(p0, aimed, 5000);
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        Assert.IsFalse(Flag(aimed, "IsAlive"), "The aimed enemy is down.");
+
+        // 次の分身は、まだ立っている相手を狙って撃たれる
+        Component second = null;
+        giveUp = Time.realtimeSinceStartup + 2f;
+        while (second == null && Time.realtimeSinceStartup < giveUp)
+        {
+            second = UnityEngine.Object.FindObjectsByType(RuntimeType("SwordCloneProjectile"), FindObjectsSortMode.None).Cast<Component>()
+                .FirstOrDefault(c => c != fired[0].clone);
+            yield return null;
+        }
+        Assert.IsNotNull(second, "The next clone is fired.");
+        var next = ((Transform)targetField.GetValue(second)).GetComponentInParent(RuntimeType("SwordBattle"));
+        Assert.AreNotEqual(aimed, next, "It is aimed at someone else.");
+        Assert.IsTrue(Flag(next, "IsAlive"), "Its target is still standing.");
     }
 
     [UnityTest]
@@ -475,92 +553,14 @@ public class MultiplayerSceneTests
         // 横向きに寝かせて、地面に落ち着くまで待つ
         body.rotation = 90f; body.angularVelocity = 0f;
         yield return new WaitForSecondsRealtime(1.5f);
-        Debug.Log($"[テスト] 寝かせた剣: 位置={p0.transform.position}, 向き={p0.transform.eulerAngles.z:F0}°");
-
-        var cloneType = RuntimeType("SwordCloneProjectile");
-        var launchedFlag = cloneType.GetProperty("Launched");
-        FireUltimate(p0, "2");
-        float giveUp = Time.realtimeSinceStartup + 3f;
-        Component[] held = new Component[0];
-        while (held.Length < 3 && Time.realtimeSinceStartup < giveUp)
-        {
-            held = UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None).Cast<Component>().ToArray();
-            yield return null;
-        }
-        // 分身は本体の位置で生まれてから持ち場へ飛び出すので、着くまで待ってから見る
-        yield return new WaitForSecondsRealtime(.15f);
-        foreach (var clone in held) Debug.Log($"[テスト] 分身の持ち場={clone.transform.position}");
-        Assert.AreEqual(3, held.Length, "Three clones come out even when the sword lies on the ground.");
-        // 寝ている剣より低い（地面すれすれの）場所には出さない
-        foreach (var clone in held)
-            Assert.Greater(clone.transform.position.y, p0.transform.position.y, "Clones appear above the sword, not down by the ground.");
-
-        // 撃った直後（0.1秒以内）に壁や床に当たって消えた分身がないか
-        var firedAt = new System.Collections.Generic.Dictionary<Component, float>();
-        int lostRightAfterLaunch = 0;
-        giveUp = Time.realtimeSinceStartup + 3f;
-        while (Time.realtimeSinceStartup < giveUp)
-        {
-            foreach (var clone in held)
-            {
-                if (clone == null)
-                    continue;
-                if ((bool)launchedFlag.GetValue(clone) && !firedAt.ContainsKey(clone)) firedAt[clone] = Time.realtimeSinceStartup;
-            }
-            foreach (var pair in firedAt.ToArray())
-                if (pair.Key == null && Time.realtimeSinceStartup - pair.Value < .1f) { lostRightAfterLaunch++; firedAt.Remove(pair.Key); }
-            if (firedAt.Count + lostRightAfterLaunch >= 3 && held.All(c => c == null || (bool)launchedFlag.GetValue(c))) break;
-            yield return null;
-        }
-        Assert.AreEqual(3, firedAt.Count + lostRightAfterLaunch, "All three clones are fired.");
-        Assert.AreEqual(0, lostRightAfterLaunch, "No clone may vanish the moment it is fired.");
-    }
-
-    [UnityTest]
-    public IEnumerator ClonesAreBornFromTheirMasterAndStepBackBeforeTheyStrike()
-    {
-        Call("InitializeMultiplayer", Config("clone-familiar", true));
-        yield return null; yield return null;
-        Call("BeginMultiplayer", "{\"matchId\":\"clone-familiar\"}");
-        yield return new WaitForSecondsRealtime(3.2f);
-        var p0 = Sword("p0");
-        var cloneType = RuntimeType("SwordCloneProjectile");
-        var launchedFlag = cloneType.GetProperty("Launched");
 
         FireUltimate(p0, "2");
-        float giveUp = Time.realtimeSinceStartup + 3f;
-        Component first = null;
-        while (first == null && Time.realtimeSinceStartup < giveUp)
-        {
-            first = UnityEngine.Object.FindObjectsByType(cloneType, FindObjectsSortMode.None).Cast<Component>().FirstOrDefault();
-            yield return null;
-        }
-        Assert.IsNotNull(first);
-        // 見つけた時には既に持ち場へ飛び出し始めているので、分身が覚えている「生まれた場所」で確かめる
-        var bornAt = (Vector2)cloneType.GetField("emergeFrom", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(first);
-        Assert.Less(Vector2.Distance(bornAt, p0.transform.position), 1f, "A clone is born where its master stands.");
-
-        yield return new WaitForSecondsRealtime(.3f);
-        Assert.Greater(Vector2.Distance(first.transform.position, p0.transform.position), 1.5f, "It then moves out to its post.");
-
-        // 撃つ直前に、相手と反対側へ身を引く（身を引いている間だけ、相手から離れていく）
-        var target = Sword("p1").transform;
-        var windingUp = cloneType.GetField("windingUp", BindingFlags.NonPublic | BindingFlags.Instance);
-        float startDistance = -1f, farthest = 0f;
-        giveUp = Time.realtimeSinceStartup + 2f;
-        while (first != null && !(bool)launchedFlag.GetValue(first) && Time.realtimeSinceStartup < giveUp)
-        {
-            if ((bool)windingUp.GetValue(first))
-            {
-                float distance = Vector2.Distance(first.transform.position, target.position);
-                if (startDistance < 0f) startDistance = distance;
-                farthest = Mathf.Max(farthest, distance);
-            }
-            yield return new WaitForFixedUpdate();
-        }
-        Assert.IsTrue(first == null || (bool)launchedFlag.GetValue(first), "The clone is fired.");
-        Assert.GreaterOrEqual(startDistance, 0f, "The clone draws back before it is fired.");
-        Assert.Greater(farthest - startDistance, .2f, "Drawing back moves the clone away from its target.");
+        var fired = new System.Collections.Generic.List<(Component clone, float at, float fromMaster)>();
+        yield return CollectFiredClones(p0, fired, 4f);
+        Assert.AreEqual(3, fired.Count, "All three clones are fired even when the sword lies on the ground.");
+        // 撃った直後（0.1秒以内）に床などに当たって消えた分身がないか
+        yield return new WaitForSecondsRealtime(.1f);
+        Assert.IsNotNull(fired[2].clone, "The last clone does not vanish the moment it is fired.");
     }
 
     [UnityTest]
@@ -583,7 +583,7 @@ public class MultiplayerSceneTests
             yield return null;
         }
         Assert.IsNotNull(clone);
-        Assert.IsTrue(Field(p0, "isDashing"), "The master is still protected while its clones come out.");
+        Assert.IsTrue(Field(p0, "isDashing"), "The master is still protected when the first clone is fired.");
 
         // 無敵の間でも、本体はジャンプできる
         float before = body.linearVelocity.y;
@@ -717,50 +717,49 @@ public class MultiplayerSceneTests
         Action<float> placeAt = d => enemy.position = (Vector2)p0.transform.position + Vector2.right * (d + gap);
 
         yield return RaiseShield(p0);
-        Debug.Log("[テスト] 実射程の外の敵：" + state());
-        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "An enemy beyond reach does not stretch the ring.");
+        Debug.Log("[テスト] 感知射程の外の敵：" + state());
+        Assert.Less(farthest, sense, "Sensing reaches further than the ring can stretch.");
+        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "An enemy beyond sensing range does not stretch the ring.");
         Assert.AreEqual(usualSpeed, (float)speed.GetValue(p0), .01f);
+        Assert.IsNull(GameObject.Find("ShieldRingGuide_" + p0.name), "The temporary ring guide is gone.");
+        var aura = GameObject.Find("LeafShieldAura");
+        Assert.IsNotNull(aura, "The master is outlined while shielded.");
+        Assert.IsTrue(aura.GetComponent<SpriteRenderer>().enabled);
 
-        // 感知射程の外（実射程の内側）にいるだけでは、広げ始めない
+        // 感知射程に入っても最大より遠い敵には、最大まで広げて止まる（届かない）
         float between = (sense + farthest) * .5f;
         placeAt(between);
-        yield return new WaitForSecondsRealtime(1f);
-        Debug.Log("[テスト] 感知射程の外：" + state());
-        Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "An enemy outside sensing range does not start the ring.");
+        yield return new WaitForSecondsRealtime(.5f);
+        Debug.Log("[テスト] 感知射程の中・最大より遠い：" + state());
+        Assert.AreEqual(farthest, (float)radius.GetValue(p0), .3f, "The ring stretches to its limit toward a sensed enemy that is still too far.");
+        Assert.AreEqual(usualSpeed, (float)speed.GetValue(p0), .01f, "The shields keep their usual speed while reaching.");
+        Assert.AreEqual(usualSpeed, chaseSpeed, .01f);
 
-        // 感知射程に入った敵には、その距離（の少し外）まで素早く広げ、速く回って何度も通る
-        placeAt((5f + sense) * .5f);
-        yield return new WaitForSecondsRealtime(.4f);
-        Debug.Log("[テスト] 感知射程の中：" + state());
-        Assert.AreEqual(expected(), (float)radius.GetValue(p0), .3f, "The ring quickly reaches out to a sensed enemy.");
-        Assert.AreEqual(chaseSpeed, (float)speed.GetValue(p0), .01f, "The shields spin faster while chasing an enemy.");
-        var guide = GameObject.Find("ShieldRingGuide_" + p0.name);
-        Assert.IsNotNull(guide, "The ring is drawn so its size can be checked.");
-        Assert.IsTrue(guide.GetComponent<LineRenderer>().enabled);
+        // 最大より近い敵には、その距離（の少し外）まで広げる
+        placeAt((5f + farthest) * .5f);
+        yield return new WaitForSecondsRealtime(1.5f);
+        Debug.Log("[テスト] 最大より近い敵：" + state());
+        Assert.AreEqual(expected(), (float)radius.GetValue(p0), .3f, "The ring fits a nearer enemy.");
 
-        // 広げた後は、感知射程の外へ出ても実射程まで追いかける
+        // 感知射程の境目を出入りしても、輪はすぐには戻らない
         placeAt(between);
         yield return new WaitForSecondsRealtime(.6f);
-        Debug.Log("[テスト] 広げた後に感知射程の外へ：" + state());
-        Assert.AreEqual(expected(), (float)radius.GetValue(p0), .3f, "Once reaching, the ring follows the enemy out to its full reach.");
-
-        // 感知射程の境目を出入りしても、輪は戻ったり広がったりしない
         for (int i = 0; i < 4; i++)
         {
             placeAt(i % 2 == 0 ? sense + .5f : sense - .5f);
             yield return new WaitForSecondsRealtime(.25f);
             Debug.Log("[テスト] 感知射程の境目を出入り：" + state());
-            Assert.Greater((float)radius.GetValue(p0), sense - 1.5f, "Brushing the edge of sensing range does not make the ring snap back.");
+            Assert.Greater((float)radius.GetValue(p0), farthest - 1f, "Brushing the edge of sensing range does not make the ring snap back.");
         }
 
-        // 実射程の外へ離れたら、少し待ってからゆっくり普段の半径へ戻る
-        placeAt(farthest + 3f);
+        // 感知射程の外へ離れたら、少し待ってからゆっくり普段の半径へ戻る
+        placeAt(sense + 3f);
         yield return new WaitForSecondsRealtime(.2f);
-        Assert.Greater((float)radius.GetValue(p0), sense - 1.5f, "The ring waits a moment before drawing back.");
-        yield return new WaitForSecondsRealtime(.6f + (farthest - 5f) / 3f);
+        Assert.Greater((float)radius.GetValue(p0), farthest - 1f, "The ring waits a moment before drawing back.");
+        float returnSpeed = (float)p0.GetType().GetField("leafShieldRadiusReturnSpeed").GetValue(p0);
+        yield return new WaitForSecondsRealtime(.6f + (farthest - 5f) / returnSpeed);
         Debug.Log("[テスト] 離れた後：" + state());
         Assert.AreEqual(5f, (float)radius.GetValue(p0), .01f, "The ring returns to its usual size.");
-        Assert.AreEqual(usualSpeed, (float)speed.GetValue(p0), .01f, "The shields slow back down once they stop chasing.");
 
         // 近い敵には縮めない（普段の半径のまま）
         placeAt(2.5f);
@@ -810,13 +809,269 @@ public class MultiplayerSceneTests
         Assert.AreEqual(4f, (float)bonus.GetValue(p0), .001f, "大回転斬 multiplies its hit by four.");
 
         // 相手に当たって突進が終わった瞬間を再現する。同じ物理ステップの残りの衝突でダメージを受けないよう、無敵はまだ残る
-        p0.GetType().GetMethod("EndSwordDash").Invoke(p0, null);
+        p0.GetType().GetMethod("EndSwordDash").Invoke(p0, new object[] { true });
         Assert.IsTrue(Field(p0, "isDashing"), "The sword stays protected for the rest of the physics step.");
         Assert.IsFalse(Field(p0, "isDashShooting"));
 
         yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
         Assert.IsFalse(Field(p0, "isDashing"));
         Assert.AreEqual(1f, (float)bonus.GetValue(p0), .001f, "An unused bonus must not carry over to the next ordinary hit.");
+    }
+
+    private static int SpinPhase(Component sword) => (int)sword.GetType().GetField("spinDashPhase").GetValue(sword);
+
+    private static bool InputBlocked(Component sword) =>
+        (bool)sword.GetType().GetProperty("InputBlockedBySkill", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(sword);
+
+    private static IEnumerator WaitUntilSpinPhase(Component sword, int phase, float seconds = 4f)
+    {
+        float giveUp = Time.realtimeSinceStartup + seconds;
+        while (SpinPhase(sword) != phase && Time.realtimeSinceStartup < giveUp) yield return null;
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashThatMissesSlowsDownThenDescendsAndAJumpEndsTheDescent()
+    {
+        Call("InitializeMultiplayer", Config("spin-miss", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-miss\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        // 相手には当たらないようにして、2秒たって外れる終わり方を見る
+        // 突進は速さを保って遠くまで届くので、自分以外の全員に当たらないようにする
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        Assert.AreEqual(3, SpinPhase(p0), "The dash stage is shown while it flies.");
+        yield return null; // 演出は LateUpdate で段階の変わり目を見て出る
+        Assert.IsNotNull(GameObject.Find("SpinDashBurst"), "Launching leaves the flash and shock ring where it started.");
+        Assert.IsNotNull(GameObject.Find("SpinDashTrail"), "The dash draws a brush trail.");
+
+        yield return WaitUntilSpinPhase(p0, 4);
+        Assert.AreEqual(4, SpinPhase(p0), "Missing ends in the slow-down.");
+        Assert.Greater(body.linearVelocity.magnitude, 1f, "It slows down instead of stopping dead.");
+        Assert.AreEqual(0f, body.gravityScale, .001f, "It does not fall while slowing down.");
+        Assert.IsTrue(InputBlocked(p0), "Input is not taken while it slows down.");
+
+        yield return WaitUntilSpinPhase(p0, 6, 1f);
+        Assert.AreEqual(6, SpinPhase(p0), "Then it descends gently.");
+        Assert.IsFalse(InputBlocked(p0), "The descent can be controlled.");
+        Assert.Less(body.gravityScale, 1f, "Gravity comes back gradually.");
+
+        float before = body.linearVelocity.y;
+        p0.GetType().GetMethod("ExecuteMultiplayerAction").Invoke(p0, new object[] { true });
+        Assert.AreEqual(0, SpinPhase(p0), "A jump ends the descent at once.");
+        Assert.AreEqual(1f, body.gravityScale, .001f, "Ordinary gravity is back after the jump.");
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        Assert.Greater(body.linearVelocity.y, before + 1f, "The jump itself happened.");
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashGrazingAWallBehindItKeepsGoingInsteadOfTurningBack()
+    {
+        Call("InitializeMultiplayer", Config("spin-graze", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-graze\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        // 突進は速さを保って遠くまで届くので、自分以外の全員に当たらないようにする
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        // 天井ぎわから真下へ撃った時と同じ形を、床に邪魔されないよう横向きで再現する：
+        // 右へ飛ばし、回っている刀身の左端がわずかに重なる所に、背中側の壁を置く
+        // 突進中は保っている速さ（spinDashVelocity）が毎ステップ入るので、そちらを右向きにする
+        p0.GetType().GetField("spinDashVelocity", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(p0, new Vector2(50f, 0f));
+        body.linearVelocity = new Vector2(50f, 0f);
+        yield return new WaitForFixedUpdate();
+        float left = float.MaxValue;
+        foreach (var c in p0.GetComponentsInChildren<Collider2D>()) if (c.enabled && !c.isTrigger) left = Mathf.Min(left, c.bounds.min.x);
+        var ceiling = new GameObject("TestWallBehind").AddComponent<BoxCollider2D>();
+        ceiling.size = new Vector2(4f, 40f);
+        ceiling.transform.position = new Vector2(left + .2f - 2f, body.worldCenterOfMass.y);
+        bool touched = false;
+        try
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                touched |= body.IsTouching(ceiling);
+                Assert.Greater(body.linearVelocity.x, 30f, "Grazing the wall behind it must not turn the dash back.");
+            }
+            Assert.IsTrue(touched, "The spinning blade did graze the wall behind it.");
+        }
+        finally { UnityEngine.Object.Destroy(ceiling.gameObject); }
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashSkimmingTheFloorSlidesAlongItInsteadOfBouncing()
+    {
+        Call("InitializeMultiplayer", Config("spin-skim", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-skim\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        // 地上どうしで撃った時と同じ形：右へ少し下向き（約11°）に飛ばし、回る刀身の下端がわずかに重なる所に床を置く
+        Vector2 heading = new Vector2(50f, -10f);
+        p0.GetType().GetField("spinDashVelocity", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(p0, heading);
+        body.linearVelocity = heading;
+        yield return new WaitForFixedUpdate();
+        float bottom = float.MaxValue;
+        foreach (var c in p0.GetComponentsInChildren<Collider2D>()) if (c.enabled && !c.isTrigger) bottom = Mathf.Min(bottom, c.bounds.min.y);
+        var floor = new GameObject("TestFloor").AddComponent<BoxCollider2D>();
+        floor.size = new Vector2(200f, 4f);
+        floor.transform.position = new Vector2(body.worldCenterOfMass.x, bottom + .2f - 2f);
+        // 回る刀身が床を叩くと、そのステップだけ体が上へ弾かれる（次のステップで保っている速さに戻る）。
+        // 刀身が床に届かない高さまで数回持ち上がったら、あとは床に沿ってなめらかに滑る
+        int touchingSteps = 0;
+        float startY = body.position.y;
+        try
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                if (body.IsTouching(floor)) touchingSteps++;
+                Assert.Greater(body.linearVelocity.x, 40f, "It keeps going forward at full speed.");
+            }
+            Assert.Greater(touchingSteps, 0, "The spinning blade did touch the floor.");
+            Assert.LessOrEqual(touchingSteps, 6, "It soon clears the floor instead of crawling along it.");
+            Assert.Less(Mathf.Abs(body.linearVelocity.y), 5f, "Once clear it glides level.");
+            Assert.Less(body.position.y - startY, 4f, "It is not knocked up into the air.");
+            Assert.AreEqual(0f, ((Vector2)p0.GetType().GetField("spinDashVelocity", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(p0)).y, .5f,
+                "After touching it, the dash runs along the floor.");
+        }
+        finally { UnityEngine.Object.Destroy(floor.gameObject); }
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashSlidingOffALiftTurnsBackTowardsItsTarget()
+    {
+        Call("InitializeMultiplayer", Config("spin-lift", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-lift\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+        var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        var held = p0.GetType().GetField("spinDashVelocity", flags);
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        // リフトの上から、右下の地上の相手へ撃った時を再現する：足元に右端が少し先で終わるリフトを置き、狙う相手を右下に置く
+        var target = new GameObject("TestTarget").transform;
+        Vector2 heading = new Vector2(50f, -12f);
+        held.SetValue(p0, heading);
+        body.linearVelocity = heading;
+        yield return new WaitForFixedUpdate();
+        float bottom = float.MaxValue;
+        foreach (var c in p0.GetComponentsInChildren<Collider2D>()) if (c.enabled && !c.isTrigger) bottom = Mathf.Min(bottom, c.bounds.min.y);
+        Vector2 pivot = body.worldCenterOfMass;
+        target.position = pivot + new Vector2(18f, -12f);
+        p0.GetType().GetField("spinAimTarget", flags).SetValue(p0, target);
+        var lift = new GameObject("TestLift").AddComponent<BoxCollider2D>();
+        lift.size = new Vector2(10f, 1f);
+        lift.transform.position = new Vector2(pivot.x + 1f, bottom + .2f - .5f); // 右端は 6 先
+        // 向かい直した後に場面の床で跳ね返ることもあるので、滑った後に一度でも相手の方へ向かったかを見る
+        bool skimmed = false, turned = false;
+        try
+        {
+            for (int i = 0; i < 16 && !turned; i++)
+            {
+                yield return new WaitForFixedUpdate();
+                Vector2 v = (Vector2)held.GetValue(p0);
+                if (Mathf.Abs(v.y) < .5f) skimmed = true;
+                else if (skimmed && v.y < -10f && v.x > 0f) turned = true;
+            }
+            Assert.IsTrue(skimmed, "It first slides along the lift.");
+            Assert.IsTrue(turned, "Past the lift's edge it turns back down towards its target.");
+        }
+        finally { UnityEngine.Object.Destroy(lift.gameObject); UnityEngine.Object.Destroy(target.gameObject); }
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashKeepsItsSpeedAndDirectionUntilItBounces()
+    {
+        Call("InitializeMultiplayer", Config("spin-keep", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-keep\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        // 突進は速さを保って遠くまで届くので、自分以外の全員に当たらないようにする
+        for (int i = 1; i < 4; i++)
+        {
+            var other = GameObject.Find("Sword_p" + i);
+            if (other != null) foreach (var c in other.GetComponentsInChildren<Collider2D>()) c.enabled = false;
+        }
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        yield return new WaitForFixedUpdate();
+        Vector2 launched = body.linearVelocity;
+        float spin = body.angularVelocity;
+        // 天井をかすって蹴られた時を再現する：速さと回転を乱しても、次のステップで元に戻る
+        body.linearVelocity = launched * .3f + Vector2.Perpendicular(launched) * .5f;
+        body.angularVelocity = spin * .2f;
+        yield return new WaitForFixedUpdate();
+        Assert.AreEqual(launched.x, body.linearVelocity.x, .5f, "The dash keeps the speed it was launched with.");
+        Assert.AreEqual(launched.y, body.linearVelocity.y, .5f);
+        Assert.AreEqual(spin, body.angularVelocity, 1f, "The dash keeps its spin.");
+    }
+
+    [UnityTest]
+    public IEnumerator SpinDashThatHitsRecoilsBackwardsThenDescends()
+    {
+        Call("InitializeMultiplayer", Config("spin-hit", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"spin-hit\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        var p0 = Sword("p0");
+        var body = p0.GetComponent<Rigidbody2D>();
+
+        FireUltimate(p0, "0");
+        yield return WaitUntilShooting(p0);
+        yield return new WaitForFixedUpdate(); yield return new WaitForFixedUpdate();
+        Vector2 travel = body.linearVelocity.normalized;
+
+        // 敵に当たって突進が終わった時を再現する
+        p0.GetType().GetMethod("EndSwordDash").Invoke(p0, new object[] { true });
+        Assert.AreEqual(5, SpinPhase(p0), "A hit ends in the recoil.");
+        Assert.IsTrue(InputBlocked(p0), "Input is not taken while it is knocked back.");
+        yield return null;
+        Assert.Less(Vector2.Dot(body.linearVelocity, travel), -1f, "It is knocked back against the way it was dashing.");
+        Assert.IsNotNull(GameObject.Find("SpinDashSplash"), "Hitting another sword throws a splash in the player's colour.");
+
+        yield return WaitUntilSpinPhase(p0, 6, 1f);
+        Assert.AreEqual(6, SpinPhase(p0), "Then it descends gently.");
+        yield return WaitUntilSpinPhase(p0, 0, 1.5f);
+        Assert.AreEqual(0, SpinPhase(p0), "The descent ends by itself.");
+        Assert.AreEqual(1f, body.gravityScale, .001f, "Ordinary gravity is back once it has descended.");
     }
 
     [UnityTest]

@@ -1840,6 +1840,31 @@ public class MultiplayerManager : MonoBehaviour
         if (id != null) activeClones.Remove(id);
     }
 
+    // ▼【新規追加】オレ達アタックの分身が消えた時：消え方も次のSYNCでゲストへ送る（同じ消え方の演出を出すため）
+    readonly List<MultiplayerCloneEnd> pendingCloneEnds = new List<MultiplayerCloneEnd>();
+
+    public void UnregisterClone(string id, CloneRushEnd kind, Vector2 position, float angle)
+    {
+        UnregisterClone(id, (int)kind, position, angle);
+    }
+
+    // kind はオレ達アタックなら CloneRushEnd、オレ達シールドなら LeafShieldEnd の値
+    public void UnregisterClone(string id, int kind, Vector2 position, float angle)
+    {
+        if (id == null || !activeClones.ContainsKey(id)) return;
+        activeClones.Remove(id);
+        pendingCloneEnds.Add(new MultiplayerCloneEnd { id = id, kind = kind, x = position.x, y = position.y, angle = angle });
+    }
+
+    // ▼【新規追加】ゲストの画面に、このプレイヤーのオレ達シールドの分身が出ているか（守っている間のふちどりに使う）
+    public bool HasShieldVisuals(string ownerId)
+    {
+        foreach (var pair in cloneSyncTargets)
+            if (pair.Value != null && pair.Value.ownerId == ownerId && pair.Value.phase == 0 &&
+                cloneVisuals.TryGetValue(pair.Key, out var visual) && visual != null) return true;
+        return false;
+    }
+
     public void SubmitLocalInput(bool right)
     {
         if (!IsPlaying || !swords[config.localPlayerId].IsAlive) return;
@@ -1904,7 +1929,9 @@ public class MultiplayerManager : MonoBehaviour
     {
         var hitEvents = pendingHitEvents.ToArray();
         pendingHitEvents.Clear();
-        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, phase = phase, hits = hitEvents,
+        var cloneEnds = pendingCloneEnds.ToArray();
+        pendingCloneEnds.Clear();
+        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, phase = phase, hits = hitEvents, cloneEnds = cloneEnds,
             judgmentSeq = judgmentSeq, judgmentX = judgmentSyncCentre.x, judgmentY = judgmentSyncCentre.y,
             countdownRemaining = phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0,
             players = config.players.Select(p => {
@@ -1913,7 +1940,8 @@ public class MultiplayerManager : MonoBehaviour
                 sword.currentCenterPosition = center;
                 return new MultiplayerPlayerState { playerId = p.playerId, x = pos.x, y = pos.y,
                     rotation = sword.transform.eulerAngles.z, centerX = center.x, centerY = center.y,
-                    hp = sword.hp, sp = sword.currentSp, isDashing = sword.isDashing, dashType = sword.currentDashType,
+                    hp = sword.hp, sp = sword.currentSp, isDashing = sword.isDashing, dashType = sword.currentDashType, spinPhase = sword.spinDashPhase, giantPhase = sword.giantSpinPhase,
+                    clonePhase = sword.cloneRushPhase, cloneShots = sword.cloneRushShotsLeft,
                     // ▼ 巨大化一回転(hiltType:"1")の拡大がクライアント側にも見えるよう、剣本体のスケールも同期する
                     scale = sword.transform.localScale.x,
                     targetPlayerId = targets[p.playerId],
@@ -1927,7 +1955,8 @@ public class MultiplayerManager : MonoBehaviour
             clones = activeClones.Where(kv => kv.Value.obj != null).Select(kv => new MultiplayerCloneState {
                 id = kv.Key, ownerId = kv.Value.ownerId,
                 x = kv.Value.obj.transform.position.x, y = kv.Value.obj.transform.position.y,
-                rotation = kv.Value.obj.transform.eulerAngles.z, color = kv.Value.color, spriteIndex = kv.Value.spriteIndex
+                rotation = kv.Value.obj.transform.eulerAngles.z, color = kv.Value.color, spriteIndex = kv.Value.spriteIndex,
+                phase = CloneRushPhaseOf(kv.Value.obj)
             }).ToArray() };
     }
 
@@ -1962,7 +1991,7 @@ public class MultiplayerManager : MonoBehaviour
             }
             sword.ApplyMultiplayerHealth(data.hp, wasCrit);
             if (clashed) sword.PlayClashEffect();
-            sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale);
+            sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale, data.spinPhase, data.giantPhase, data.clonePhase, data.cloneShots);
             // 残り秒数を「解ける時刻」に直して持つ。こうするとHostと同じ IsSuppressed() が使える。
             if (data.suppressedRemaining > 0f) suppressUntil[data.playerId] = Time.unscaledTime + data.suppressedRemaining;
             else suppressUntil.Remove(data.playerId);
@@ -1973,7 +2002,7 @@ public class MultiplayerManager : MonoBehaviour
         if (receivedJudgmentSeq >= 0 && sync.judgmentSeq > receivedJudgmentSeq)
             StartJudgmentVisual(new Vector3(sync.judgmentX, sync.judgmentY, 0));
         receivedJudgmentSeq = sync.judgmentSeq;
-        SyncClones(sync.clones);
+        SyncClones(sync.clones, sync.cloneEnds);
         // ▼【新規追加】Hostから届いたダメージの記録を、まだ出していない番号のものだけ表示する
         if (sync.hits != null)
             foreach (var evt in sync.hits.Where(h => h != null).OrderBy(h => h.seq))
@@ -1988,8 +2017,27 @@ public class MultiplayerManager : MonoBehaviour
     // ▼【新規追加】Hostから届いた分身の一覧に合わせて、クライアント側の見た目専用オブジェクトを
     // 生成・削除する。位置・回転は即座にスナップさせず、Update()側で剣本体と同じ補間で滑らかに追従させる
     // （新規出現時だけは目標位置にスナップして、原点から一瞬で飛んでくるのを防ぐ）
-    void SyncClones(MultiplayerCloneState[] cloneStates)
+    static int CloneRushPhaseOf(GameObject obj)
     {
+        var clone = obj != null ? obj.GetComponent<SwordCloneProjectile>() : null;
+        return clone != null ? (int)clone.Phase : 0;
+    }
+
+    void SyncClones(MultiplayerCloneState[] cloneStates, MultiplayerCloneEnd[] cloneEnds = null)
+    {
+        // ▼【新規追加】消えたオレ達アタックの分身：ホストと同じ消え方の演出を出してから消す
+        if (cloneEnds != null)
+            foreach (var end in cloneEnds)
+            {
+                if (end == null || end.id == null || !cloneVisuals.TryGetValue(end.id, out var visual) || visual == null) continue;
+                var look = visual.GetComponent<ICloneRushLook>();
+                if (look != null) look.PlayEnd((CloneRushEnd)end.kind, new Vector3(end.x, end.y, 0f), end.angle);
+                var shieldLook = visual.GetComponent<ILeafShieldLook>();
+                if (shieldLook != null) { visual.transform.position = new Vector3(end.x, end.y, 0f); shieldLook.PlayEnd((LeafShieldEnd)end.kind); }
+                Destroy(visual);
+                cloneVisuals.Remove(end.id);
+                cloneSyncTargets.Remove(end.id);
+            }
         var incomingIds = new HashSet<string>();
         if (cloneStates != null)
         {
@@ -2004,7 +2052,16 @@ public class MultiplayerManager : MonoBehaviour
                     cloneVisuals[c.id] = obj;
                     obj.transform.position = new Vector3(c.x, c.y, 0);
                     obj.transform.rotation = Quaternion.Euler(0, 0, c.rotation);
+                    // オレ達アタックの分身には、ホストと同じ演出を付ける
+                    if (swords.TryGetValue(c.ownerId, out var cloneOwner))
+                    {
+                        if (c.phase != 0) SkillEffects.CloneRush.Attach(obj, cloneOwner);
+                        // オレ達シールドの分身（段階0）には、シールドの演出を付ける
+                        else SkillEffects.LeafShield.AttachOrb(obj, cloneOwner);
+                    }
                 }
+                var rushLook = obj.GetComponent<ICloneRushLook>();
+                if (rushLook != null) rushLook.SetPhase((CloneRushPhase)c.phase);
                 // 色が変わった時（オレ達シールドの分身が削れた時など）は見た目に反映する
                 var look = obj.GetComponent<SpriteRenderer>();
                 if (look != null && look.color != c.color) look.color = c.color;
@@ -2171,6 +2228,7 @@ public class MultiplayerManager : MonoBehaviour
         hits.Clear(); forfeits.Clear(); invulnerable.Clear(); syncTargets.Clear();
         cloneSyncTargets.Clear();
         activeClones.Clear();
+        pendingCloneEnds.Clear();
         foreach (var visual in cloneVisuals.Values) if (visual != null) Destroy(visual);
         cloneVisuals.Clear();
         clashSeq.Clear(); criticalHitThisTick.Clear(); critSeq.Clear();

@@ -71,7 +71,7 @@ public class DamagePopup : MonoBehaviour
         return popup;
     }
 
-    // ▼【新規追加】ライフスティール（オレ達アタック）で回復した量。緑の「+数字」を、回復した剣の上に
+    // ▼【新規追加】ライフスティールで回復した量（今は使っている技はない）。緑の「+数字」を、回復した剣の上に
     // ダメージの数字より少し小さく出し、ダメージの数字と同じく剣についていく
     public static DamagePopup SpawnHeal(GameObject prefab, SwordBattle healed, int amount, string healedId)
     {
