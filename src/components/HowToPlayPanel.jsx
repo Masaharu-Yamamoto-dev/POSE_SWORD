@@ -1,24 +1,48 @@
 import { useState } from 'react';
 import './HowToPlayPanel.css';
-import kenSeiseiImg from './Ken_Seisei.png';
-import swordModeImg from './Sword_Mode.png';
-import komaModeImg from './Koma_Mode.png';
+import forgeImg from './HowTo_Forge.jpg';
+import armoryImg from './HowTo_Armory.jpg';
+import swordBattleImg from './HowTo_SwordBattle.jpg';
+import specialImg from './HowTo_Special.jpg';
+import komaBattleImg from './HowTo_KomaBattle.jpg';
+import soloImg from './HowTo_Solo.jpg';
+import resultImg from './HowTo_Result.jpg';
 
 const PAGES = [
   {
     title: '剣を作ろう',
-    image: kenSeiseiImg,
+    image: forgeImg,
     description: '自分の写真を撮ると、自動的に画像が切り抜かれて、ステータスが生成され、剣が作られます。',
   },
   {
+    title: '武器庫で剣を整えよう',
+    image: armoryImg,
+    description: '剣は3本まで持てます。柄を付け替えると、HP・攻撃・重さが変わります。プライバシー設定で、写真をシルエットなどに隠して戦うこともできます。',
+  },
+  {
     title: '剣モードの遊び方',
-    image: swordModeImg,
-    description: '画面の左右をタップ／クリックすると、左右に移動できます。SPが100たまると、必殺技を放てます。',
+    image: swordBattleImg,
+    description: '画面の左右をタップ／クリックすると、その方向へ移動できます。剣をぶつけて、相手のHPを0にしましょう。',
+  },
+  {
+    title: '必殺技を放とう',
+    image: specialImg,
+    description: 'SPがたまると、画面下の丸いボタンが光ります。ボタンを押すと（PCならスペースキーでも）必殺技を放てます。必殺技は柄によって変わります。剣モードではSP100、コマモードではSP70から放てます。',
   },
   {
     title: 'コマモードの遊び方',
-    image: komaModeImg,
-    description: '半自動で対戦が進みます。SPが70以上たまると、必殺技を放てます。',
+    image: komaBattleImg,
+    description: '剣がコマのように回りながら、半自動で対戦が進みます。タップ／クリックするとSPを使って突進し、相手を牽制できます。',
+  },
+  {
+    title: '特殊ルール',
+    image: soloImg,
+    description: 'ロビーでは特殊ルールを選べます。「残機制」は手持ちの剣で順番に戦います。「1 vs 3」はボス1人と3人で戦い、ボスはSPを200までためると「掌握斬」を放てます。',
+  },
+  {
+    title: '結果を確認しよう',
+    image: resultImg,
+    description: '試合が終わると順位が出ます。与えたダメージ・受けたダメージ・撃破数も確認できます。',
   },
 ];
 
