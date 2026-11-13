@@ -394,3 +394,21 @@ test('補正前の値が無い・おかしい剣は、独楽モードでも補�
     assert.equal(validateSword({ ...sword, base }).base, null);
   }
 });
+
+test('bossStats matches Unity: buffs HP and attack with half-even rounding, caps HP, keeps weight', async () => {
+  const { bossStats, SOLO_BUFF, SOLO_MAX_HP } = await import('../src/network/HostRoom.js');
+  const plain = { hp: 400, attack: 40, weight: 30 };
+  assert.deepEqual(bossStats(plain), {
+    hp: Math.round(400 * SOLO_BUFF.hpMultiplier), attack: Math.round(40 * SOLO_BUFF.attackMultiplier), weight: 30,
+  });
+  // Mathf.RoundToInt rounds .5 to even (101 * 2.5 = 252.5 -> 252, 103 * 2.5 = 257.5 -> 258)
+  if (SOLO_BUFF.hpMultiplier === 2.5) {
+    assert.equal(bossStats({ hp: 101, attack: 1, weight: 1 }).hp, 252);
+    assert.equal(bossStats({ hp: 103, attack: 1, weight: 1 }).hp, 258);
+  }
+  if (SOLO_BUFF.attackMultiplier === 3.5) {
+    assert.equal(bossStats({ hp: 1, attack: 3, weight: 1 }).attack, 10); // 10.5 -> 10
+    assert.equal(bossStats({ hp: 1, attack: 1, weight: 1 }).attack, 4);  // 3.5 -> 4
+  }
+  assert.equal(bossStats({ hp: 100000, attack: 1, weight: 1 }).hp, SOLO_MAX_HP);
+});

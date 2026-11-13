@@ -17,7 +17,7 @@ export const SOLO_MODE_PLAYERS = 4;
 // ボス側の強化。全クライアントが同じ値を使う必要があるため、ここで決めて試合設定に載せて配る。
 // 数値はすべて調整中。ここだけを直せば全員に反映される。
 export const SOLO_BUFF = Object.freeze({
-  hpMultiplier: 2.5,        // MatchRules へ渡すHPと Unity 側の maxHp に掛ける
+  hpMultiplier: 2.0,        // MatchRules へ渡すHPと Unity 側の maxHp に掛ける
   // 攻撃力に掛ける。ボスの通常攻撃・必殺技・薙ぎ払いのすべてに効く。
   // 3人を相手にするので、通常攻撃1発でトリオの一撃を上回るくらいを狙っている。
   attackMultiplier: 3.5,
@@ -26,25 +26,34 @@ export const SOLO_BUFF = Object.freeze({
   scaleMultiplier: 2.5,
   maxSp: 200,               // ボスだけSPゲージが2段階（100=通常必殺 / 200=制圧）
   suppressRadius: 12.0,      // 掌握が届く半径
-  // 操作不能になる秒数。溜め1秒＋薙ぎ払いの後、ボスが自由に殴れる時間がここから引いた分になる。
-  // 長くすると「3人が何もできずに見ているだけ」の時間がそのまま伸びるので、上げ下げの影響が一番大きい。
-  suppressDuration: 4.0,
-  // 掌握は「引き寄せ → 薙ぎ払い」の2段構え。下は薙ぎ払いまでの調整値。
-  judgmentPullSeconds: 1.0,      // 引き寄せてから斬るまでの溜め
-  judgmentPullForce: 60.0,       // 引き寄せる力（質量に掛ける）。重力の約6倍
+  // 掌握斬の動きと時間（拘束時間・吸引・溜め・薙ぎ払いの秒数と回転速度）はここでは決めない。
+  // Unity の MultiplayerManager の Inspector（「1vs3：掌握斬の動き」）で調整する。
   // 通常攻撃のダメージ式は「衝突速度(上限20) × 攻撃力 × 0.05」なので、最大の一撃が攻撃力ぶん。
   // 薙ぎ払いはその2発ぶんに留め、とどめは残りの拘束時間で自分で殴って取る想定。
   judgmentDamageMultiplier: 1.3,
   // Impulse で質量を掛けるため、この値がそのまま「速度変化(units/秒)」になる。
-  // シーンの通常衝突が bounceForce 20 なので、その2倍を手応えの基準にしている。
+  // シーンの通常衝突が bounceForce 20 なので、その2.75倍。一気に力強く薙ぎ払った手応えを出すため強めにしている。
   // 上げすぎると相手が遠くへ散り、せっかくの拘束時間を追いかけるだけで使ってしまう。
-  judgmentKnockback: 40.0,
-  // 薙ぎ払いの動き。ボスが範囲の中心で大きく回って斬り抜ける。
-  judgmentSweepSeconds: 0.4,   // 薙ぎ払っている時間
-  // 回転速度（度/秒）。既存の巨大回転斬が1080なので、それより遅くして一振りとして読めるようにする。
-  // 720 × 0.4秒 ＝ 約0.8回転。ちょうど一回転させたいなら judgmentSweepSeconds を 0.5 にする。
-  judgmentSweepSpin: 720.0,
-  judgmentSweepScale: 2.0,     // 薙ぎ払い中の剣の大きさ（元の大きさに掛ける）
+  judgmentKnockback: 55.0,
+});
+
+// ボスのHPの上限。Unity の MatchRules.MaxHitPoints と同じ値にすること。
+export const SOLO_MAX_HP = 4000;
+// Unity の Mathf.RoundToInt と同じ丸め（.5 は偶数側へ）。Math.round は .5 を切り上げるので、
+// 倍率 2.5 / 3.5 で奇数の値を掛けると試合の値と1ずれる。
+const roundHalfEven = value => {
+  const floor = Math.floor(value);
+  const diff = value - floor;
+  if (diff > 0.5) return floor + 1;
+  if (diff < 0.5) return floor;
+  return floor % 2 === 0 ? floor : floor + 1;
+};
+// 1vs3 のボスが試合で実際に戦う値（ロビーの表示用）。Unity 側の
+// MultiplayerManager.BuffedHp / ApplyBossBuff と必ず同じ式にすること。重さには倍率を掛けない。
+export const bossStats = stats => ({
+  hp: Math.min(SOLO_MAX_HP, Math.max(1, roundHalfEven(stats.hp * SOLO_BUFF.hpMultiplier))),
+  attack: Math.max(1, roundHalfEven(stats.attack * SOLO_BUFF.attackMultiplier)),
+  weight: stats.weight,
 });
 
 // 柄の補正を外した剣本体の値（錬成で出る範囲: hp 100〜1000 / attack・weight 1〜100）。

@@ -5060,7 +5060,7 @@ MonoBehaviour:
   ownedSwordCount: 1
   livesMode: 1
   isHost: 1
-  soloMode: 0
+  soloMode: 1
   bossSlot: 0
   hpMultiplier: 3
   attackMultiplier: 2
@@ -5068,14 +5068,8 @@ MonoBehaviour:
   scaleMultiplier: 1.5
   bossMaxSp: 200
   suppressRadius: 8
-  suppressDuration: 4
-  judgmentPullSeconds: 1
-  judgmentPullForce: 60
   judgmentDamageMultiplier: 1.3
   judgmentKnockback: 40
-  judgmentSweepSeconds: 0.4
-  judgmentSweepSpin: 720
-  judgmentSweepScale: 2
 --- !u!114 &618030785
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5102,6 +5096,19 @@ MonoBehaviour:
   bossSpFontSize: 18
   trioNameFontSize: 20
   trioValueFontSize: 16
+  suppressDuration: 6
+  judgmentPullSeconds: 2.2
+  judgmentGatherRadius: 2
+  judgmentPullTumble: 90
+  judgmentPullHeaviness: 2.5
+  judgmentHoldSeconds: 0.6
+  judgmentHoldSlow: 0.15
+  judgmentSweepWindupSeconds: 0.15
+  judgmentSweepWindupAngle: 30
+  judgmentSweepSpin: 1080
+  judgmentHitShake: 0.6
+  judgmentSweepLingerSeconds: 0.15
+  bossGiantSpinScale: 3
 --- !u!1 &619394800
 GameObject:
   m_ObjectHideFlags: 0

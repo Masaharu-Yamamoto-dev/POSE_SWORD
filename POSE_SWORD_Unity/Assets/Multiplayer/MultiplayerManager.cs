@@ -149,6 +149,51 @@ public class MultiplayerManager : MonoBehaviour
     [Tooltip("トリオのHPの数値と、状態表示（あなた／操作不能／撃破）")]
     [SerializeField] float trioValueFontSize = 16f;
 
+    // 掌握斬の動きと時間。Inspectorで調整する（本番のWebGLビルドにもこのシーンの値がそのまま入る）。
+    // 全員が同じビルドを使うので、ホストとゲストで値が食い違うことはない。
+    // ダメージ・吹き飛ばし・半径などの強さの値は、これまでどおり HostRoom.js の SOLO_BUFF で決める。
+    [Header("1vs3：掌握斬の動き（吸引 → 溜め → 薙ぎ払い）")]
+    [Tooltip("操作不能になる秒数（発動の瞬間から数える）。吸引＋溜め＋振りかぶり＋一回転を引いた残りが、ボスが自由に殴れる時間。" +
+        "既定値は 6.0 −（2.2 + 0.6 + 0.3 + 360/1080）＝ 約2.57秒。演出の秒数を変えたら、ここも合わせて足し引きする")]
+    [Min(0.1f)] public float suppressDuration = 6.0f;
+    // 吸引は力で引っぱるのではなく、各自の元の位置から「ボスの周り」までの道筋を、決まった時間でなぞらせる。
+    // 動き出しはゆっくり、途中で少し速まり、最後はじわっと止まる（重い物を引きずる動き）。行き過ぎて揺れ戻ることはない。
+    [Tooltip("吸引：引き寄せている時間。長いほど重々しい")]
+    [Min(0.05f)] public float judgmentPullSeconds = 2.2f;
+    [Tooltip("吸引：最後にボスの中心からどれだけ離れたところで止めるか。0にすると全員が中心に重なる")]
+    [Min(0f)] public float judgmentGatherRadius = 2.0f;
+    [Tooltip("吸引：引きずられている間の、相手の剣のゆっくりした回転（度/秒）。0で回さない")]
+    public float judgmentPullTumble = 90f;
+    [Tooltip("吸引：動き出しの重さ。1で一定の速さ、大きいほど出だしがゆっくりで後半に寄せて動く")]
+    [Range(1f, 4f)] public float judgmentPullHeaviness = 2.5f;
+    [Tooltip("吸引の後の溜め（スロー）の時間。0で溜めなし")]
+    [Min(0f)] public float judgmentHoldSeconds = 0.6f;
+    [Tooltip("溜めに入った瞬間、吸い込まれた相手の速さ・回転に掛ける倍率（ボスは撃った場所で止まったまま）。0で完全に止まる、1でスローなし。" +
+        "画面全体ではなく技に関わる剣だけが遅くなる")]
+    [Range(0f, 1f)] public float judgmentHoldSlow = 0.15f;
+    // 薙ぎ払いは巨大回転斬（SwordBattle.GiantSpinRoutine）を参考にした流れ：振りかぶり → ちょうど一回転 → 余韻。
+    // 巨大回転斬と違い、剣の大きさは変えない。
+    [Tooltip("薙ぎ払い：振りかぶりの時間。大きく引いてためを作り、一回転で一気に解き放つ")]
+    [Min(0f)] public float judgmentSweepWindupSeconds = 0.3f;
+    [Tooltip("薙ぎ払い：振りかぶりで回転と逆向きに引く角度（度）")]
+    [Min(0f)] public float judgmentSweepWindupAngle = 60f;
+    [Tooltip("薙ぎ払い：一回転の速さ（度/秒）。一回転にかかる時間は 360 ÷ この値（1080なら0.33秒）。既存の巨大回転斬と同じ1080")]
+    [Min(1f)] public float judgmentSweepSpin = 1080f;
+    [Tooltip("薙ぎ払い：1人斬るごとの画面の揺れの強さ")]
+    [Min(0f)] public float judgmentHitShake = 0.6f;
+    [Tooltip("薙ぎ払い：一回転した後、その場に止まる余韻")]
+    [Min(0f)] public float judgmentSweepLingerSeconds = 0.15f;
+
+    [Header("1vs3：ボスの必殺技")]
+    [Tooltip("ボスが巨大回転斬（柄の必殺技 hiltType:\"1\"）を撃った時の巨大化の倍率。ボス以外は SwordBattle.giantSpinScale（6）のまま。" +
+        "ボスはもともと SOLO_BUFF の scaleMultiplier（2.5）で大きくなっているので、見た目の大きさは素の剣の「2.5 × この値」倍になる")]
+    [Min(1f)] public float bossGiantSpinScale = 6f;
+
+    // 振りかぶりから一回転し終えるまでの時間（輪の演出の長さに使う）
+    float JudgmentSweepActiveSeconds => judgmentSweepWindupSeconds + 360f / judgmentSweepSpin;
+    // 薙ぎ払いの最初から最後まで（余韻まで）
+    float JudgmentSweepTotalSeconds => JudgmentSweepActiveSeconds + judgmentSweepLingerSeconds;
+
     private GameObject soloHudRoot;
     // 1vs3の間だけ動かす必殺技ボタンと、その元の位置。StopCurrent()で必ず戻す。
     private RectTransform ultimateButtonRect;
@@ -159,20 +204,40 @@ public class MultiplayerManager : MonoBehaviour
     private readonly List<GameObject> hiddenSceneBars = new List<GameObject>();
     private readonly Dictionary<string, TextMeshProUGUI> soloHudStates = new Dictionary<string, TextMeshProUGUI>();
     private Image bossSpFill;
-    // 制圧の対象領域を示す輪。狙いを付けるための下見(ボス本人のみ)と、撃った瞬間の明滅(全員)に使う。
+    // 制圧の対象領域を示す輪。撃てる間の下見と、撃った瞬間の明滅に使う（どちらも全員の画面に出る）。
     private SpriteRenderer suppressRange;
     private Sprite suppressRangeSprite;
     private string bossPlayerId;
-    // ゲストは「誰かが制圧され始めた」瞬間を検知して明滅を出す。専用の同期項目を足さずに済ませるため。
-    private readonly HashSet<string> wasSuppressed = new HashSet<string>();
+    // 掌握を撃った回数と、撃った場所。Hostが撃つたびに回数を増やしてSYNCに載せ、ゲストは回数が増えたのを見て輪を出す。
+    // 以前は「誰かが拘束され始めた」ことで検知していたが、それだと範囲に誰もいない空振りの時に
+    // ゲストの画面に輪が出なかった（ボスがゲストなら本人の画面にも出ない）。
+    private int judgmentSeq;
+    private Vector3 judgmentSyncCentre;
+    private int receivedJudgmentSeq = -1;
     // 掌握の2段目（引き寄せ → 薙ぎ払い）の進行状態。対象は発動時に確定し、途中で増減しない。
     private readonly List<string> judgmentTargets = new List<string>();
     private Vector3 judgmentCentre;
     private float judgmentStrikeAt;
+    // 薙ぎ払いの最中か、と、終わっているはずの時刻。途中でボスが倒れて薙ぎ払いの後始末が呼ばれなくても、
+    // この時刻を過ぎたら残っている相手の重力を戻す（宙に浮いたままにしない）
+    private bool judgmentSweeping;
+    // 吸引開始から薙ぎ払いが終わるまで、ボスの剣と範囲内の相手の剣の当たり判定を切っておく。
+    // 切っておかないと、引き寄せた相手が先にボスの剣へ普通にぶつかり、衝突のダメージと弾き返しで
+    // 薙ぎ払う前に吹き飛んでしまう。切った組を覚えておき、同じ組だけ戻す（大回転斬の味方すり抜けと同じ作法）
+    // 掌握斬を撃ってから薙ぎ払いが終わるまで、ボスを撃った場所に縫い止める。移動の入力も受け付けない
+    private bool judgmentRooted;
+    private Vector2 judgmentRootPosition;
+    // 吸引の道筋。各自の撃たれた瞬間の位置と、最後に止める位置（ボスの周り）
+    private readonly Dictionary<string, (Vector2 from, Vector2 to)> judgmentPullPaths = new Dictionary<string, (Vector2 from, Vector2 to)>();
+    private readonly List<(Collider2D boss, Collider2D target)> judgmentIgnoredContacts = new List<(Collider2D boss, Collider2D target)>();
+    private float judgmentSweepDeadline;
+    // 吸引が終わって溜め（スロー）に入る時刻と、入った時の減速を済ませたか
+    private float judgmentHoldAt;
+    private bool judgmentHoldStarted;
     private bool judgmentPending;
     // 吸引中だけ重力を切るので、元の値を預かっておく
     private readonly Dictionary<string, float> judgmentGravity = new Dictionary<string, float>();
-    // 輪の演出の起点。Hostは発動時、ゲストは同期で拘束が始まった瞬間に入れる。
+    // 輪の演出の起点。Hostは発動時、ゲストは同期で judgmentSeq が増えた瞬間に入れる。
     // どちらも soloBuff の溜め時間を持っているので、同じ時間割で動かせる。
     private float judgmentVisualStart = -999f;
     const float JudgmentBurstSeconds = 0.35f;
@@ -182,6 +247,14 @@ public class MultiplayerManager : MonoBehaviour
         foreach (var pair in judgmentGravity)
             if (bodies.ContainsKey(pair.Key)) bodies[pair.Key].gravityScale = pair.Value;
         judgmentGravity.Clear();
+    }
+
+    // 1人分だけ重力を元へ戻す（薙ぎ払いで斬られた相手から順に落ちていくように）
+    void RestoreGravity(string playerId)
+    {
+        if (playerId == null || !judgmentGravity.TryGetValue(playerId, out var gravity)) return;
+        if (bodies.ContainsKey(playerId)) bodies[playerId].gravityScale = gravity;
+        judgmentGravity.Remove(playerId);
     }
     private Dictionary<string, List<SwordSlotData>> ownedSwordsByPlayer;
     private Dictionary<string, Vector3> spawnPositionByPlayer;
@@ -360,11 +433,8 @@ public class MultiplayerManager : MonoBehaviour
         if (!IsUsableMultiplier(buff.hpMultiplier) || !IsUsableMultiplier(buff.attackMultiplier) ||
             !IsUsableMultiplier(buff.spGainMultiplier) || !IsUsableMultiplier(buff.scaleMultiplier) ||
             !IsUsableMultiplier(buff.maxSp) ||
-            !IsUsableMultiplier(buff.suppressRadius) || !IsUsableMultiplier(buff.suppressDuration) ||
-            !IsUsableMultiplier(buff.judgmentPullSeconds) || !IsUsableMultiplier(buff.judgmentPullForce) ||
-            !IsUsableMultiplier(buff.judgmentDamageMultiplier) || !IsUsableMultiplier(buff.judgmentKnockback) ||
-            !IsUsableMultiplier(buff.judgmentSweepSeconds) || !IsUsableMultiplier(buff.judgmentSweepSpin) ||
-            !IsUsableMultiplier(buff.judgmentSweepScale))
+            !IsUsableMultiplier(buff.suppressRadius) ||
+            !IsUsableMultiplier(buff.judgmentDamageMultiplier) || !IsUsableMultiplier(buff.judgmentKnockback))
             throw new ArgumentException("The solo buff carries an unusable value.");
     }
 
@@ -385,21 +455,26 @@ public class MultiplayerManager : MonoBehaviour
     }
 
     // 制圧の対象領域。半径いっぱいの輪を描いて「どこまで届くか」を見せる。
-    // ・下見（ボス本人だけ）：ゲージが満タンで撃てる間、自分の周りに薄く出し続ける
-    // ・明滅（全員）：撃った瞬間に濃く出す。判定は発動時の一度きりなので、輪はその場に置いたまま動かさない
+    // ・下見（全員）：ゲージが満タンで撃てる間、ボスの周りに薄く出し続ける。ボス本人には狙いの目安、
+    //   3人側には「今近づくと掌握される」という警告になる。SPと最大SPはゲストにも同期されているので全員で同じ判定になる
+    // ・明滅（全員）：撃った瞬間に濃く出す。判定は発動時の一度きりなので、輪はその場に置いたまま動かさない。
+    //   吸引ですぼまり → 溜めの間はすぼまったまま脈打ち → 薙ぎ払いで広がって消える
     void UpdateSuppressRange()
     {
         if (!soloModeActive || config.soloBuff == null) { HideSuppressRange(); return; }
         var buff = config.soloBuff;
         float elapsed = Time.unscaledTime - judgmentVisualStart;
-        bool pulling = elapsed >= 0f && elapsed < buff.judgmentPullSeconds;
-        bool bursting = elapsed >= buff.judgmentPullSeconds &&
-            elapsed < buff.judgmentPullSeconds + JudgmentBurstSeconds;
+        float holdEnd = judgmentPullSeconds + judgmentHoldSeconds;
+        // 広がって消えるまでの時間は、一回転し終えるまでに合わせる（短すぎると振り抜く前に輪が消える）
+        float burstSeconds = Mathf.Max(JudgmentBurstSeconds, JudgmentSweepActiveSeconds);
+        bool pulling = elapsed >= 0f && elapsed < judgmentPullSeconds;
+        bool holding = elapsed >= judgmentPullSeconds && elapsed < holdEnd;
+        bool bursting = elapsed >= holdEnd && elapsed < holdEnd + burstSeconds;
 
         SwordBattle boss = bossPlayerId != null && swords.ContainsKey(bossPlayerId) ? swords[bossPlayerId] : null;
-        bool aiming = !pulling && !bursting && boss != null && IsPlaying && boss.IsAlive &&
-            boss.PlayerId == config.localPlayerId && boss.currentSp >= boss.maxSp && !IsSuppressed(boss.PlayerId);
-        if (!pulling && !bursting && !aiming) { HideSuppressRange(); return; }
+        bool aiming = !pulling && !holding && !bursting && boss != null && IsPlaying && boss.IsAlive &&
+            boss.currentSp >= boss.maxSp && !IsSuppressed(boss.PlayerId);
+        if (!pulling && !holding && !bursting && !aiming) { HideSuppressRange(); return; }
 
         if (suppressRange == null) BuildSuppressRange();
         if (suppressRange == null) return;
@@ -409,14 +484,22 @@ public class MultiplayerManager : MonoBehaviour
         if (pulling)
         {
             // 輪が中心へすぼまっていく。これが「吸い込まれている」ことの一番の手がかりになる
-            float t = elapsed / buff.judgmentPullSeconds;
-            diameter = Mathf.Lerp(buff.suppressRadius * 2f, buff.suppressRadius * 0.35f, t * t);
+            float t = elapsed / judgmentPullSeconds;
+            // 相手が引きずられる動きと同じ曲線ですぼめる
+            diameter = Mathf.Lerp(buff.suppressRadius * 2f, buff.suppressRadius * 0.35f, HeavyEase(t, judgmentPullHeaviness));
             alpha = Mathf.Lerp(0.35f, 0.95f, t);
+        }
+        else if (holding)
+        {
+            // 溜め：すぼまった大きさのまま、鼓動のように小さく脈打たせる（1秒に約3回）
+            float pulse = Mathf.Sin((elapsed - judgmentPullSeconds) * Mathf.PI * 6f);
+            diameter = buff.suppressRadius * (0.35f + 0.04f * pulse);
+            alpha = 0.95f;
         }
         else if (bursting)
         {
-            // 薙ぎ払いの瞬間に一気に広がって消える
-            float t = (elapsed - buff.judgmentPullSeconds) / JudgmentBurstSeconds;
+            // 薙ぎ払いに合わせて広がって消える
+            float t = (elapsed - holdEnd) / burstSeconds;
             diameter = Mathf.Lerp(buff.suppressRadius * 0.35f, buff.suppressRadius * 2.6f, t);
             alpha = Mathf.Lerp(0.95f, 0f, t);
         }
@@ -887,37 +970,70 @@ public class MultiplayerManager : MonoBehaviour
         boss.ConsumeSuppressSp();
         // カットインは技番号(dashType)の同期に乗るので、ここでHost側が立てれば全員の画面に出る
         boss.PlaySuppressCutin();
-        float until = Time.unscaledTime + config.soloBuff.suppressDuration;
+        float until = Time.unscaledTime + suppressDuration;
         foreach (var id in caught) suppressUntil[id] = until;
         // 輪は撃った場所に置いたままにする。判定が発動時の一度きりであることを見た目でも示すため。
         StartJudgmentVisual(centre);
+        judgmentSeq++;
+        judgmentSyncCentre = centre;
         RefreshSuppression();
 
         // ここから2段目。捕らえた相手を撃った場所へ引き寄せ、溜めが終わったら薙ぎ払う。
         judgmentTargets.Clear();
         judgmentTargets.AddRange(caught);
+        IgnoreJudgmentCollisions(bossId, caught);
+        judgmentPullPaths.Clear();
+        foreach (var id in caught)
+        {
+            if (!bodies.ContainsKey(id)) continue;
+            Vector2 from = bodies[id].position;
+            Vector2 outward = from - (Vector2)centre;
+            if (outward.sqrMagnitude < 0.0001f) outward = Vector2.up;
+            // すでに止める位置より内側にいる相手は、その場から動かさない
+            float radius = Mathf.Min(judgmentGatherRadius, outward.magnitude);
+            judgmentPullPaths[id] = (from, (Vector2)centre + outward.normalized * radius);
+        }
         judgmentCentre = centre;
-        judgmentStrikeAt = Time.unscaledTime + config.soloBuff.judgmentPullSeconds;
-        judgmentPending = judgmentTargets.Count > 0;
+        judgmentHoldAt = Time.unscaledTime + judgmentPullSeconds;
+        judgmentStrikeAt = judgmentHoldAt + judgmentHoldSeconds;
+        judgmentHoldStarted = false;
+        // 範囲に誰もいなくても技は最後まで出す（その場で吸引・溜め・空振りの一回転）。
+        // ボスが止まっている時間を、当たったかどうかで変えないため
+        judgmentPending = true;
+        judgmentRooted = true;
+        judgmentRootPosition = bodies.ContainsKey(bossId) ? bodies[bossId].position : (Vector2)centre;
     }
 
-    // 掌握の2段目。引き寄せ中は毎ステップ力を加え、溜めが終わった瞬間に一度だけ斬る。
+    // 掌握の2段目。吸引中は毎ステップ力を加え、溜め（スロー）で漂わせ、溜めが終わった瞬間に一度だけ斬る。
     // Physics2D.Simulate の前に呼ぶこと。QueueHit で積んだダメージは、そのステップの
     // rules.ResolveStep() でまとめて裁定される。
     void UpdateJudgment()
     {
+        if (judgmentSweeping && Time.unscaledTime >= judgmentSweepDeadline) EndJudgment();
         if (!judgmentPending) return;
         var buff = config.soloBuff;
-        if (Time.unscaledTime < judgmentStrikeAt)
+        if (Time.unscaledTime >= judgmentHoldAt && Time.unscaledTime < judgmentStrikeAt)
         {
-            // ボスは渦の要としてその場に踏みとどまる。剣モードでは1秒で5ユニット近く落ちてしまい、
-            // 薙ぎ払う頃には集めた相手から離れてしまうため。
+            // 溜め：入った瞬間に一度だけ、吸い込まれた相手の速さ・回転を落とす（ボスは HoldBossInPlace で止めてある）。
+            // 毎ステップ掛けると数ステップで止まりきってしまうので、一度落としたらそのまま漂わせる
+            // （重力は吸引の時から切ったままなので、落ちずにゆっくり流れ続ける＝スローに見える）。
+            if (!judgmentHoldStarted)
+            {
+                judgmentHoldStarted = true;
+                foreach (var id in judgmentTargets)
+                    if (bodies.ContainsKey(id) && swords[id].IsAlive) SlowBody(bodies[id], judgmentHoldSlow);
+            }
+            return;
+        }
+        if (Time.unscaledTime < judgmentHoldAt)
+        {
+            // ボスは渦の要として撃った場所に留まる（位置は HoldBossInPlace が毎ステップ固定する）。
+            // 重力も切っておく。固定していても、重力が残っていると毎ステップ落ちかけては戻されて震えるため
             if (bossPlayerId != null && bodies.ContainsKey(bossPlayerId) && swords[bossPlayerId].IsAlive)
             {
                 var bossRb = bodies[bossPlayerId];
                 if (!judgmentGravity.ContainsKey(bossPlayerId))
                 { judgmentGravity[bossPlayerId] = bossRb.gravityScale; bossRb.gravityScale = 0f; }
-                bossRb.linearVelocity *= 0.85f;
             }
             foreach (var id in judgmentTargets)
             {
@@ -926,48 +1042,135 @@ public class MultiplayerManager : MonoBehaviour
                 // 吸引中だけ重力を切る。剣モードで落下と綱引きになると「吸われている」ではなく
                 // 「落ちている」ように見えてしまうため。元の値は覚えておいて薙ぎ払いの時に戻す。
                 if (!judgmentGravity.ContainsKey(id)) { judgmentGravity[id] = rb.gravityScale; rb.gravityScale = 0f; }
-                Vector2 toCentre = (Vector2)judgmentCentre - rb.position;
-                if (toCentre.sqrMagnitude < 0.09f) continue;
-                Vector2 dir = toCentre.normalized;
-                // 中心へ向かう速度はそのまま伸ばし、横滑りの成分だけを削る。
-                // 一律に減衰させると等速移動になって加速感が消える（＝吸われている感じが出ない）。
-                Vector2 velocity = rb.linearVelocity;
-                Vector2 radial = dir * Vector2.Dot(velocity, dir);
-                rb.linearVelocity = radial + (velocity - radial) * 0.80f;
-                rb.AddForce(dir * (buff.judgmentPullForce * rb.mass), ForceMode2D.Force);
-                // 揉まれている感じを出すため、引かれながら回す
-                rb.AddTorque(buff.judgmentPullForce * rb.mass * Time.fixedDeltaTime * 4f, ForceMode2D.Force);
+                if (!judgmentPullPaths.TryGetValue(id, out var path)) continue;
+                // 道筋の上で「今いるべき場所」へ、このステップでちょうど届く速さを与える。
+                // 位置を直接書き換えると衝突を無視してすり抜けるので、速さで動かして物理に任せる
+                float t = Mathf.Clamp01(1f - (judgmentHoldAt - Time.unscaledTime) / judgmentPullSeconds);
+                Vector2 desired = Vector2.Lerp(path.from, path.to, HeavyEase(t, judgmentPullHeaviness));
+                // 何かに引っかかって遅れた時に、追いつこうとして急に飛んでいかないよう速さに上限を設ける
+                rb.linearVelocity = Vector2.ClampMagnitude((desired - rb.position) / Time.fixedDeltaTime, JudgmentPullMaxSpeed);
+                // 引きずられながら、ゆっくり回る（引き寄せが進むほど少し速く）
+                rb.angularVelocity = judgmentPullTumble * (0.4f + 0.6f * t);
             }
             return;
         }
 
         judgmentPending = false;
-        RestoreJudgmentGravity();
         // 溜めの途中でボスが倒れていたら斬撃は出ない。拘束だけが残る
         if (bossPlayerId == null || !swords.ContainsKey(bossPlayerId) || !swords[bossPlayerId].IsAlive)
         {
+            EndJudgment();
             judgmentTargets.Clear();
             return;
         }
         var attacker = swords[bossPlayerId];
-        // ボスの剣が実際に範囲を薙ぎ払う。位置・回転・大きさは同期に乗るのでゲストにも見える。
-        bodies[bossPlayerId].angularVelocity = buff.judgmentSweepSpin;
-        attacker.BeginJudgmentSweep(buff.judgmentSweepSeconds, buff.judgmentSweepScale);
+        // ボスの重力は薙ぎ払い側（JudgmentSweepRoutine）が預かり直すので、先に元へ戻しておく。
+        // 相手の重力は切ったまま、斬られた瞬間に1人ずつ戻す（それまでは宙に浮いたまま待たせる）
+        RestoreGravity(bossPlayerId);
         int damage = Mathf.Max(1, Mathf.RoundToInt(attacker.attack * buff.judgmentDamageMultiplier));
-        foreach (var id in judgmentTargets)
-        {
-            if (!bodies.ContainsKey(id) || !swords[id].IsAlive) continue;
-            QueueHit(attacker, swords[id], damage, swords[id].currentCenterPosition);
-            var rb = bodies[id];
-            Vector2 outward = rb.position - (Vector2)judgmentCentre;
-            if (outward.sqrMagnitude < 0.01f) outward = Vector2.up;
-            rb.AddForce(outward.normalized * (buff.judgmentKnockback * rb.mass), ForceMode2D.Impulse);
-        }
+        var victims = judgmentTargets.Where(id => swords.ContainsKey(id)).Select(id => swords[id]).ToList();
         judgmentTargets.Clear();
-        TriggerShake(0.25f, 0.5f);
+        var motion = new SwordBattle.JudgmentSweepMotion
+        {
+            windupSeconds = judgmentSweepWindupSeconds,
+            windupAngle = judgmentSweepWindupAngle,
+            spinSpeed = judgmentSweepSpin,
+            lingerSeconds = judgmentSweepLingerSeconds,
+        };
+        judgmentSweeping = true;
+        // 撃破の一時停止などで少し延びても足りるよう、余裕を持たせる
+        judgmentSweepDeadline = Time.unscaledTime + JudgmentSweepTotalSeconds + 1f;
+        // ボスの剣がその場で一回転し、刀身が通り過ぎた相手から順に斬る。
+        // 位置・回転・大きさは同期に乗るのでゲストにも見える。
+        attacker.BeginJudgmentSweep(motion, victims, victim => JudgmentHit(attacker, victim, damage), EndJudgment);
     }
 
-    // 輪の演出（すぼまる → 炸裂）の起点。溜め時間は全員が同じ soloBuff を持っているので、
+    // 掌握の後始末。重力と当たり判定を元に戻す。薙ぎ払いが終わった時のほか、溜めの途中でボスが倒れた時・
+    // 薙ぎ払いが中断されて期限を過ぎた時・試合が終わった時にも呼ぶ（何度呼んでも安全）
+    void EndJudgment()
+    {
+        judgmentSweeping = false;
+        judgmentPullPaths.Clear();
+        judgmentRooted = false;
+        RestoreJudgmentGravity();
+        RestoreJudgmentCollisions();
+    }
+
+    // 掌握斬の発動中、ボスを撃った場所に留める。物理を進める前に毎ステップ呼ぶ。
+    // 位置だけを固定し、回転は止めない（薙ぎ払いの一回転は JudgmentSweepRoutine が回す）。
+    // 吸引・溜めの間は回転も止めて、構えたまま動かないようにする。
+    void HoldBossInPlace()
+    {
+        if (!judgmentRooted || bossPlayerId == null || !bodies.ContainsKey(bossPlayerId)) return;
+        if (!swords[bossPlayerId].IsAlive) { judgmentRooted = false; return; }
+        var rb = bodies[bossPlayerId];
+        rb.position = judgmentRootPosition;
+        rb.linearVelocity = Vector2.zero;
+        if (!judgmentSweeping) rb.angularVelocity = 0f;
+    }
+
+    // 掌握斬の発動中のボスか。移動・必殺技の入力を受け付けないために SwordBattle から見る
+    public bool IsRooted(string playerId)
+    {
+        return judgmentRooted && playerId != null && playerId == bossPlayerId;
+    }
+
+    void IgnoreJudgmentCollisions(string bossId, IEnumerable<string> targetIds)
+    {
+        RestoreJudgmentCollisions();
+        if (bossId == null || !swords.ContainsKey(bossId)) return;
+        var bossColliders = swords[bossId].GetComponentsInChildren<Collider2D>(true);
+        foreach (var id in targetIds)
+        {
+            if (id == null || !swords.ContainsKey(id)) continue;
+            foreach (var theirs in swords[id].GetComponentsInChildren<Collider2D>(true))
+                foreach (var own in bossColliders)
+                {
+                    Physics2D.IgnoreCollision(own, theirs, true);
+                    judgmentIgnoredContacts.Add((own, theirs));
+                }
+        }
+    }
+
+    void RestoreJudgmentCollisions()
+    {
+        foreach (var pair in judgmentIgnoredContacts)
+            if (pair.boss != null && pair.target != null) Physics2D.IgnoreCollision(pair.boss, pair.target, false);
+        judgmentIgnoredContacts.Clear();
+    }
+
+    // 薙ぎ払いの刀身が相手を通り過ぎた瞬間。ダメージを積んで、外へ弾き飛ばす。
+    // コルーチン（Update側）から呼ばれるが、QueueHit は次の物理ステップの裁定にまとめて乗るので問題ない
+    void JudgmentHit(SwordBattle attacker, SwordBattle victim, int damage)
+    {
+        string id = victim.PlayerId;
+        RestoreGravity(id);
+        if (!IsPlaying || !bodies.ContainsKey(id) || !victim.IsAlive || !attacker.IsAlive) return;
+        QueueHit(attacker, victim, damage, victim.currentCenterPosition);
+        var rb = bodies[id];
+        Vector2 outward = rb.position - (Vector2)attacker.transform.position;
+        if (outward.sqrMagnitude < 0.01f) outward = Vector2.up;
+        rb.AddForce(outward.normalized * (config.soloBuff.judgmentKnockback * rb.mass), ForceMode2D.Impulse);
+        TriggerShake(0.2f, judgmentHitShake);
+    }
+
+    // 重い物を引きずる動き。出だしは重さ(heaviness)ぶんゆっくりで、終わりはなめらかに止まる。
+    // heaviness=1 でただのなめらかな加減速（smoothstep）
+    const float JudgmentPullMaxSpeed = 25f;
+
+    static float HeavyEase(float t, float heaviness)
+    {
+        float k = Mathf.Pow(Mathf.Clamp01(t), heaviness);
+        return k * k * (3f - 2f * k);
+    }
+
+    static void SlowBody(Rigidbody2D rb, float rate)
+    {
+        rb.linearVelocity *= rate;
+        rb.angularVelocity *= rate;
+    }
+
+    // 輪の演出（すぼまる → 脈打つ → 炸裂）の起点。溜め時間は全員が同じ soloBuff を持っているので、
     // Hostとゲストで同じ時間割になり、専用の同期項目を足さずに揃う。
     void StartJudgmentVisual(Vector3 centre)
     {
@@ -998,10 +1201,15 @@ public class MultiplayerManager : MonoBehaviour
         // 見た目と当たり判定を一回り大きくする。ConfigureMultiplayerが素の大きさを
         // 記録した後に呼ばれるので、ここで掛ければ以降の復帰処理にも引き継がれる。
         battle.ApplyBaseScale(buff.scaleMultiplier);
+        // 巨大回転斬の巨大化はボスだけ別の倍率にする。巨大化を動かすのはホストで、大きさは同期でゲストに届く。
+        // 「届く範囲の円」は今の剣の大きさから測るので、倍率を変えても全員の画面で自動的に合う
+        battle.giantSpinScale = bossGiantSpinScale;
     }
 
     // ボスのHPは倍率ぶん増える。MatchRulesへ渡す値と、Unity側のmaxHp(=HPバーの上限)を
     // 必ず同じ計算で出すこと。片方だけ強化するとHPバーが頭打ちになって嘘の数値を表示する。
+    // ※ ロビーの表示用に、同じ式を JS 側（src/network/HostRoom.js の bossStats）でも持っている。
+    //    ここ・ApplyBossBuff の攻撃の式・MaxHitPoints を変えたら、あちらも合わせること。
     int BuffedHp(MultiplayerPlayerConfig player, int hp)
     {
         if (!IsBoss(player)) return hp;
@@ -1326,6 +1534,7 @@ public class MultiplayerManager : MonoBehaviour
         RefreshSuppression();
         // 引き寄せの力と薙ぎ払いは、物理を進める前に積む（QueueHitはこのステップの裁定に乗る）
         UpdateJudgment();
+        HoldBossInPlace();
         // ▼【修正】オレ達シールド展開中も本体は無敵にする(SwordBattle.TakeDamage側の無敵判定と同じ条件)。
         // これが無いと、Client側は正しいHPを受け取れても、Host自身のOnCollisionEnter2D→QueueHitでは
         // シールドの反射に加えて本体にも通常ダメージが通ってしまっていた。
@@ -1696,6 +1905,7 @@ public class MultiplayerManager : MonoBehaviour
         var hitEvents = pendingHitEvents.ToArray();
         pendingHitEvents.Clear();
         return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, phase = phase, hits = hitEvents,
+            judgmentSeq = judgmentSeq, judgmentX = judgmentSyncCentre.x, judgmentY = judgmentSyncCentre.y,
             countdownRemaining = phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0,
             players = config.players.Select(p => {
                 var sword = swords[p.playerId]; var pos = sword.transform.position;
@@ -1754,17 +1964,15 @@ public class MultiplayerManager : MonoBehaviour
             if (clashed) sword.PlayClashEffect();
             sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale);
             // 残り秒数を「解ける時刻」に直して持つ。こうするとHostと同じ IsSuppressed() が使える。
-            if (data.suppressedRemaining > 0f)
-            {
-                suppressUntil[data.playerId] = Time.unscaledTime + data.suppressedRemaining;
-                // 0秒から立ち上がった瞬間＝ボスが今撃った、とみなして輪を明滅させる。
-                // 専用の同期項目を足さずに済ませるため、ボスの現在位置を中心として使う。
-                if (wasSuppressed.Add(data.playerId) && bossPlayerId != null && swords.ContainsKey(bossPlayerId))
-                    StartJudgmentVisual(swords[bossPlayerId].currentCenterPosition);
-            }
-            else { suppressUntil.Remove(data.playerId); wasSuppressed.Remove(data.playerId); }
+            if (data.suppressedRemaining > 0f) suppressUntil[data.playerId] = Time.unscaledTime + data.suppressedRemaining;
+            else suppressUntil.Remove(data.playerId);
             targets[data.playerId] = data.targetPlayerId;
         }
+        // ボスが掌握を撃った（回数が増えた）ら、撃った場所に輪を出す。範囲に誰もいなくても出す。
+        // 初回の同期では比べる相手がないので、途中から見始めた時に古い輪を出さないよう回数だけ覚える。
+        if (receivedJudgmentSeq >= 0 && sync.judgmentSeq > receivedJudgmentSeq)
+            StartJudgmentVisual(new Vector3(sync.judgmentX, sync.judgmentY, 0));
+        receivedJudgmentSeq = sync.judgmentSeq;
         SyncClones(sync.clones);
         // ▼【新規追加】Hostから届いたダメージの記録を、まだ出していない番号のものだけ表示する
         if (sync.hits != null)
@@ -1971,10 +2179,12 @@ public class MultiplayerManager : MonoBehaviour
         extraCameraTargets.Clear(); finalKoTargets.Clear(); finalKoNumbers.Clear(); finishCameraSize = -1f;
         shakeDuration = 0f; hasLockedCameraPosition = false;
         livesModeActive = false; soloModeActive = false;
-        suppressUntil.Clear(); wasSuppressed.Clear();
+        suppressUntil.Clear();
+        judgmentSeq = 0; receivedJudgmentSeq = -1; judgmentSyncCentre = Vector3.zero;
         judgmentTargets.Clear(); judgmentPending = false; judgmentStrikeAt = 0f;
+        judgmentHoldAt = 0f; judgmentHoldStarted = false;
         bossPlayerId = null; judgmentVisualStart = -999f;
-        RestoreJudgmentGravity();
+        EndJudgment();
         if (suppressRange != null) { Destroy(suppressRange.gameObject); suppressRange = null; }
         // 1vs3 専用HUDを片付け、隠していた元のHPバーと必殺技ボタンの位置を必ず戻す
         if (soloHudRoot != null) { soloHudRoot.SetActive(false); Destroy(soloHudRoot); soloHudRoot = null; }
