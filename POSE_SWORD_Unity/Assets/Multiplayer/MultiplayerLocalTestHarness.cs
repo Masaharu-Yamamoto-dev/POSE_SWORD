@@ -13,7 +13,7 @@ using UnityEngine;
 // 使い方：GameManagerオブジェクトにこのコンポーネントを追加してPlayを押すだけ
 // (「POSE SWORD/Add Multiplayer Local Test Harness」メニューからワンクリックで追加できる)。
 // AI対戦相手は用意していないため、剣モードは自キャラだけが動き、独楽モードは全員が
-// 既存の自動追尾ロジックでその場で戦い始める。
+// 既存の自動追尾ロジックでその場で戦い始める。ただし1vs3でbossIsNpcをONにすると、ボスだけはNPCとして動く。
 [RequireComponent(typeof(MultiplayerManager))]
 public class MultiplayerLocalTestHarness : MonoBehaviour
 {
@@ -59,9 +59,13 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
     public bool soloMode = false;
 
     [Range(0, 3)]
-    [Tooltip("どのスロットをボスにするか。本番は開始時にReact側が抽選するが、ここでは固定で選ぶ。" +
-        "AI対戦相手がいないため、制圧を実際に撃てるのは自分が操作するP1(=0)にした時だけ")]
+    [Tooltip("どのスロットをボスにするか。本番はホストがロビーで指名するが、ここでは固定で選ぶ。" +
+        "bossIsNpcがOFFのときは、制圧を実際に撃てるのは自分が操作するP1(=0)にした時だけ")]
     public int bossSlot = 0;
+
+    [Tooltip("ONにするとボスをNPC(playerId=\"npc\")にする。本番の「ボス：NPC」と同じく、ホストのUnityで" +
+        "BossNpcBrainが付いて自分で動く。自分(P1)はトリオ側で操作するので、bossSlotが0なら3番へずらす")]
+    public bool bossIsNpc = false;
 
     [Header("1vs3：ボス強化（本番の既定値は HostRoom.js の SOLO_BUFF）")]
     public float hpMultiplier = 3.0f;
@@ -139,6 +143,15 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
         if (livesMode && soloMode)
             Debug.LogWarning("MultiplayerLocalTestHarness: 1vs3と残機モードは併用できないため、残機モードをOFFにしました。");
         int boss = Mathf.Clamp(bossSlot, 0, count - 1);
+        bool npcBoss = soloMode && bossIsNpc;
+        if (bossIsNpc && !soloMode)
+            Debug.LogWarning("MultiplayerLocalTestHarness: NPCボスは1vs3専用のため無視しました。soloModeもONにしてください。");
+        // 自分(p0)はNPCにできない（自分の入力とNPCの頭脳が同じ剣を取り合ってしまう）。本番でもホストはトリオ側になる
+        if (npcBoss && boss == 0)
+        {
+            Debug.LogWarning("MultiplayerLocalTestHarness: NPCボスのため、ボスを3番のスロットへずらしました。");
+            boss = count - 1;
+        }
 
         var players = new MultiplayerPlayerConfig[count];
         int nextTrioSpawn = 1;
@@ -146,9 +159,12 @@ public class MultiplayerLocalTestHarness : MonoBehaviour
         {
             // 手持ちの剣データが人数分無ければ使い回す
             var sword = data.players[i % data.players.Length];
+            bool isNpc = npcBoss && i == boss;
             players[i] = new MultiplayerPlayerConfig
             {
-                playerId = "p" + i,
+                // 本番(HostRoom.js の NPC_PLAYER_ID)と同じIDにして、剣の名前も Sword_npc で揃える
+                playerId = isNpc ? "npc" : "p" + i,
+                isNpc = isNpc,
                 slotIndex = i,
                 // 1vs3では陣営ごとにまとめて配置したいので、ボスを0番の位置に固定する
                 // (本番のRoomSession.assignRolesと同じ割り当て)

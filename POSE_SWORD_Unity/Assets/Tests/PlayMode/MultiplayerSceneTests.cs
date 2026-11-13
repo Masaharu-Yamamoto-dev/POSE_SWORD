@@ -793,6 +793,86 @@ public class MultiplayerSceneTests
         return config.Replace("\"players\":[", "\"soloMode\":true,\"soloBuff\":" + buff + ",\"players\":[");
     }
 
+    // 1vs3 の NPC ボス：p0〜p2 がトリオ、"npc" がボス（本番の RoomSession.assignRoles と同じ割り当て）。
+    // ホストは p0、ゲストは p1 として初期化する。強化は等倍にして、NPC の動きだけを見る
+    private string NpcSoloConfig(string id, bool host)
+    {
+        var config = Config(id, host);
+        for (int i = 0; i < 3; i++)
+            config = config.Replace("\"slotIndex\":" + i + ",", "\"slotIndex\":" + i + ",\"team\":1,\"isNpc\":false,");
+        config = config.Replace("\"playerId\":\"p3\",\"slotIndex\":3,\"spawnIndex\":3,",
+            "\"playerId\":\"npc\",\"slotIndex\":3,\"team\":0,\"isNpc\":true,\"spawnIndex\":0,");
+        for (int i = 0; i < 3; i++)
+            config = config.Replace("\"slotIndex\":" + i + ",\"team\":1,\"isNpc\":false,\"spawnIndex\":" + i,
+                "\"slotIndex\":" + i + ",\"team\":1,\"isNpc\":false,\"spawnIndex\":" + (i + 1));
+        string buff = "{\"hpMultiplier\":1,\"attackMultiplier\":1,\"spGainMultiplier\":1,\"scaleMultiplier\":1,\"maxSp\":200," +
+            "\"suppressRadius\":1,\"judgmentDamageMultiplier\":1,\"judgmentKnockback\":1}";
+        return config.Replace("\"players\":[", "\"soloMode\":true,\"soloBuff\":" + buff + ",\"players\":[");
+    }
+
+    private static Component[] Brains()
+    {
+        return GameObject.Find("MultiplayerArena").GetComponentsInChildren(RuntimeType("BossNpcBrain"));
+    }
+
+    [UnityTest]
+    public IEnumerator NpcBossGetsItsBrainOnTheHostOnly()
+    {
+        Call("InitializeMultiplayer", NpcSoloConfig("npc-host", true));
+        yield return null; yield return null;
+        Assert.IsNotNull(GameObject.Find("Sword_npc"), "The NPC boss is created like any other sword.");
+        var brains = Brains();
+        Assert.AreEqual(1, brains.Length, "Only the NPC drives itself; the humans are driven by their inputs.");
+        Assert.AreEqual("Sword_npc", brains[0].name);
+        // ホスト(p0)が操作するのは自分の剣だけで、NPC の剣は誰の操作でもない
+        var controllers = GameObject.Find("MultiplayerArena").GetComponentsInChildren(RuntimeType("SwordController"));
+        var local = controllers.Where(c => (bool)c.GetType().GetField("isLocalControlled").GetValue(c)).ToArray();
+        Assert.AreEqual(1, local.Length);
+        Assert.AreEqual("Sword_p0", local[0].name);
+    }
+
+    [UnityTest]
+    public IEnumerator GuestNeverRunsTheNpcBrain()
+    {
+        Call("InitializeMultiplayer", NpcSoloConfig("npc-guest", false));
+        yield return null; yield return null;
+        Assert.IsNotNull(GameObject.Find("Sword_npc"), "The guest still shows the NPC boss.");
+        Assert.AreEqual(0, Brains().Length, "A guest only mirrors the host's SYNC, so it must not decide anything for the NPC.");
+    }
+
+    [UnityTest]
+    public IEnumerator NpcBossMovesTowardsTheTrioOnItsOwn()
+    {
+        Call("InitializeMultiplayer", NpcSoloConfig("npc-moves", true));
+        yield return null; yield return null;
+        Call("BeginMultiplayer", "{\"matchId\":\"npc-moves\"}");
+        yield return new WaitForSecondsRealtime(3.2f);
+        Assert.IsTrue(Playing);
+        // 人間側は誰も入力しない。NPC だけが自分の判断でジャンプするので、横に動けば頭脳が働いている
+        var npc = GameObject.Find("Sword_npc").transform;
+        float startX = npc.position.x, farthest = 0f;
+        float until = Time.realtimeSinceStartup + 2.5f;
+        while (Time.realtimeSinceStartup < until)
+        {
+            farthest = Mathf.Max(farthest, Mathf.Abs(npc.position.x - startX));
+            yield return null;
+        }
+        Assert.Greater(farthest, 0.5f, "The NPC boss jumps sideways without anyone pressing anything.");
+    }
+
+    [UnityTest]
+    public IEnumerator AnNpcOutsideTheBossSeatIsRejected()
+    {
+        // NPC はボス専用。通常の試合に NPC が混ざっていたら、設定が壊れているので試合を始めない
+        var broken = Config("npc-broken", true).Replace("\"playerId\":\"p3\",", "\"playerId\":\"p3\",\"isNpc\":true,");
+        LogAssert.Expect(LogType.Error, new System.Text.RegularExpressions.Regex("Multiplayer initialization failed"));
+        Call("InitializeMultiplayer", broken);
+        yield return null; yield return null;
+        // 検証は剣を作る前に行うので、アリーナも剣も作られないまま止まる
+        Assert.IsNull(GameObject.Find("MultiplayerArena"), "The broken match is not started.");
+        Assert.IsNull(GameObject.Find("Sword_p3"));
+    }
+
     [UnityTest]
     public IEnumerator SpinDashStaysProtectedUntilItsHitIsResolvedAndDropsItsBonusAfterwards()
     {

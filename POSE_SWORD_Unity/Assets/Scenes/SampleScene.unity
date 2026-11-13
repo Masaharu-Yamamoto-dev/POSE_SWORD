@@ -5084,6 +5084,7 @@ MonoBehaviour:
   isHost: 1
   soloMode: 1
   bossSlot: 0
+  bossIsNpc: 1
   hpMultiplier: 3
   attackMultiplier: 2
   spGainMultiplier: 1.5
