@@ -2624,7 +2624,9 @@ public static bool matchEnded = false;
         if (owner == null || sprite == null || sprite.bounds.size.x <= 0f) return 1f;
         var generator = owner.GetComponent<SwordGenerator>();
         float bladeWidth = generator != null ? generator.targetBladeWidth : 1.5f;
-        return bladeWidth * Mathf.Abs(owner.transform.lossyScale.x) / sprite.bounds.size.x;
+        float maxLength = generator != null ? generator.maxBladeLength : 8f;
+        // 本体の刀身と同じく、長すぎる剣は長さの上限に収める
+        return SwordGenerator.BladeScale(sprite.bounds.size, bladeWidth, maxLength) * Mathf.Abs(owner.transform.lossyScale.x);
     }
 
     // 分身の行く手をふさぐ物（壁・床）。剣・分身・シールドなどの当たり判定は含めない

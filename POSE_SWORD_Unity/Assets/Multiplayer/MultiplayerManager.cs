@@ -383,7 +383,9 @@ public class MultiplayerManager : MonoBehaviour
             // 以前はhostGeneratorという別枠の値を使っており、Inspector設定次第でローカルとサイズがズレていた
             float bladeWidth = scene.generators != null && scene.generators.Length > 0 && scene.generators[0] != null
                 ? scene.generators[0].targetBladeWidth : scene.hostGenerator.targetBladeWidth;
-            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], bladeWidth, spawnPositions[player.spawnIndex]);
+            float maxBladeLength = scene.generators != null && scene.generators.Length > 0 && scene.generators[0] != null
+                ? scene.generators[0].maxBladeLength : scene.hostGenerator.maxBladeLength;
+            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], bladeWidth, maxBladeLength, spawnPositions[player.spawnIndex]);
             // 1vs3 は「1人 対 3人」の構図が伝わる専用HUDに差し替える。剣を作り終えてから配線する。
             if (soloModeActive) BuildSoloHud();
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
@@ -1235,7 +1237,7 @@ public class MultiplayerManager : MonoBehaviour
         return Mathf.Clamp(Mathf.RoundToInt(hp * config.soloBuff.hpMultiplier), 1, MatchRules.MaxHitPoints);
     }
 
-    void CreateSword(MultiplayerPlayerConfig player, GameObject template, float bladeWidth, Vector3 spawnPosition)
+    void CreateSword(MultiplayerPlayerConfig player, GameObject template, float bladeWidth, float maxBladeLength, Vector3 spawnPosition)
     {
         var obj = Instantiate(template, arena.transform);
         obj.name = "Sword_" + player.playerId;
@@ -1274,6 +1276,7 @@ public class MultiplayerManager : MonoBehaviour
         if (generator == null) generator = obj.AddComponent<SwordGenerator>();
         generator.generateOnStart = false;
         generator.targetBladeWidth = bladeWidth;
+        generator.maxBladeLength = maxBladeLength;
         generator.targetSpriteRenderer = blade.GetComponent<SpriteRenderer>();
         generator.bladeCollider = blade.GetComponent<PolygonCollider2D>();
         generator.swordRigidbody = rb;
