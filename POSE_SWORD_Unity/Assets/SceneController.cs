@@ -264,6 +264,7 @@ public class SceneController : MonoBehaviour
         if (generator == null) generator = clone.AddComponent<SwordGenerator>();
         generator.generateOnStart = false;
         generator.targetBladeWidth = (generators != null && generators.Length > 0 && generators[0] != null) ? generators[0].targetBladeWidth : 1.5f;
+        generator.maxBladeLength = (generators != null && generators.Length > 0 && generators[0] != null) ? generators[0].maxBladeLength : 8f;
         generator.targetSpriteRenderer = blade != null ? blade.GetComponent<SpriteRenderer>() : null;
         generator.bladeCollider = blade != null ? blade.GetComponent<PolygonCollider2D>() : null;
         generator.swordRigidbody = rb;
