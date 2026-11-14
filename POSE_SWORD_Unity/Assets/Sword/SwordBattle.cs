@@ -1328,8 +1328,12 @@ public static bool matchEnded = false;
                     spinDashAngular = rb.angularVelocity;
 
                     // 壁に当たった音とエフェクト
-                    if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
-                    if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
+                    // ▼【変更】オンライン対戦では、火花と音は表示用の位置に合わせて MultiplayerManager が遅らせて出す(PlayClashEffect)
+                    if (MultiplayerOwner == null)
+                    {
+                        if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+                        if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
+                    }
 
                     // 画面も軽く揺らす
                     ShakeCamera(0.1f, 0.2f);
@@ -1360,8 +1364,12 @@ public static bool matchEnded = false;
             if (isHandleClash && !wasDashing)
             {
                 // 火花を出して音を鳴らす
-                if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
-                if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+                // ▼【変更】オンライン対戦では、火花と音は表示用の位置に合わせて MultiplayerManager が遅らせて出す(PlayClashEffect)
+                if (MultiplayerOwner == null)
+                {
+                    if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
+                    if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+                }
                 if (MultiplayerOwner != null) MultiplayerOwner.NotifyClash(PlayerId);
 
                 if (rb != null)

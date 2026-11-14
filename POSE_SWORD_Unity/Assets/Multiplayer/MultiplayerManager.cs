@@ -91,6 +91,23 @@ public class MultiplayerManager : MonoBehaviour
     private int physicsTick, syncTick, receivedTick = -1;
     private float countdownEnd, nextSync, nextTargetUpdate;
     private float receivedCountdownRemaining;
+    // ▼【新規追加】表示の遅延。SYNCをため込んで「displayDelaySeconds 秒前」を前後のSYNCの間で補間しながら見せる(SyncPlayback)。
+    // ホストも自分が作ったSYNCを同じ経路で見るので、ホストとゲストの画面は同じだけ遅れて同じ滑らかさになる。
+    // 物理と判定は従来どおりホストで遅れなく進み、遅れるのは見た目だけ(DisplayPoseDriver が本当の位置と表示用の位置を付け替える)
+    [Header("表示の遅延（ホスト・ゲスト共通）")]
+    [Tooltip("一番新しい同期からどれだけ過去を表示するか(秒)。短いほど操作への反応が早く、長いほど通信の乱れに強い")]
+    public float displayDelaySeconds = 0.1f;
+    private readonly SyncPlayback playback = new SyncPlayback();
+    private readonly List<MultiplayerSync> dueSnapshots = new List<MultiplayerSync>();
+    // ホスト：表示用の位置に置き換える前の本当の位置(物理・判定が使う)。次の FixedUpdate / Update の先頭で戻す
+    private readonly Dictionary<Transform, (Vector3 pos, Quaternion rot)> truePoses = new Dictionary<Transform, (Vector3, Quaternion)>();
+    private bool displayPosesApplied;
+    // 表示用の位置での各プレイヤーの重心。カメラはこれを追う(本当の位置の重心 currentCenterPosition は判定用のまま)
+    private readonly Dictionary<string, Vector3> displayCenters = new Dictionary<string, Vector3>();
+    // 決着(RESULT)後：ため込んだ残りのSYNCを再生し切ってから決着演出(FinishPresentation)を始めるための待ち
+    private bool finishPresentationPending, playbackStopped;
+    // 前後のSYNCでこれ以上離れていたら、補間せず(間を飛ばさず)次のSYNCが反映されるまで手前で待つ(持ち替えの出現位置への移動など)
+    const float TeleportDistance = 6f;
     private SimulationMode2D previousSimulationMode;
     private bool ownsSimulation;
     private BattleCamera battleCamera;
@@ -263,6 +280,14 @@ public class MultiplayerManager : MonoBehaviour
     // 見た目を使えるよう、各playerの手持ちの剣の画像から一度だけ生成したSpriteをキャッシュしておく
     private readonly Dictionary<string, Sprite[]> lifeSpriteCache = new Dictionary<string, Sprite[]>();
 
+    // ▼【新規追加】表示用の位置の付け外しを、他のどのスクリプトよりも先に行う部品を自分に付ける(DisplayPoseDriver 参照)
+    void Awake()
+    {
+        var driver = GetComponent<DisplayPoseDriver>();
+        if (driver == null) driver = gameObject.AddComponent<DisplayPoseDriver>();
+        driver.manager = this;
+    }
+
     void Start() { Emit("READY", new MultiplayerCommand()); }
 
     [UnityEngine.Scripting.Preserve]
@@ -387,6 +412,7 @@ public class MultiplayerManager : MonoBehaviour
             // 1vs3 は「1人 対 3人」の構図が伝わる専用HUDに差し替える。剣を作り終えてから配線する。
             if (soloModeActive) BuildSoloHud();
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
+            ResetPlayback();
             hitEventSeq = 0; shownHitEventSeq = 0; pendingHitEvents.Clear(); hitDetailsThisStep.Clear(); killerFreezes.Clear();
             extraCameraTargets.Clear(); finalKoTargets.Clear(); finalKoNumbers.Clear(); finishCameraSize = -1f;
             StartCoroutine(CompleteInitialization());
@@ -992,7 +1018,9 @@ public class MultiplayerManager : MonoBehaviour
         float until = Time.unscaledTime + suppressDuration;
         foreach (var id in caught) suppressUntil[id] = until;
         // 輪は撃った場所に置いたままにする。判定が発動時の一度きりであることを見た目でも示すため。
-        StartJudgmentVisual(centre);
+        // ▼【変更】輪の表示(StartJudgmentVisual)はホストでもSYNCの再生(ApplySnapshotState)が judgmentSeq の増加を見て、
+        // 表示用の位置に合わせて遅らせて出す。引き寄せの中心(judgmentCentre)は判定用なのでここで即座に決める
+        judgmentCentre = centre;
         judgmentSeq++;
         judgmentSyncCentre = centre;
         RefreshSuppression();
@@ -1496,32 +1524,26 @@ public class MultiplayerManager : MonoBehaviour
         if (IsHost && (phase == "COUNTDOWN" || IsPlaying) && Time.unscaledTime >= nextSync)
         {
             nextSync = Time.unscaledTime + 1f / 30;
-            Emit("SYNC", Snapshot());
+            EmitSync();
         }
-        // ▼【変更】決着後は同期が届かないので、ゲストも位置の補間をやめる（決着で跳ね上がる剣を引き戻さないように）
-        if (!IsHost && phase != "RESULT")
-        {
-            // ▼【修正】位置と回転で追従速度を分ける。巨大化一回転(1080°/秒)のような速い回転は、
-            // 位置と同じ補間レート(25)だと定常的な追従遅れ(角速度/レート ≈ 1080/25 ≈ 43°)が生じ、
-            // クライアント側では「あまり回っていない」ように見えていた。回転だけ大幅に追従を速くして
-            // (1080/150 ≈ 7°まで遅れを圧縮)、実際の回転速度に近い見た目にする
-            float posT = 1 - Mathf.Exp(-25 * Time.unscaledDeltaTime);
-            float rotT = 1 - Mathf.Exp(-150 * Time.unscaledDeltaTime);
-            foreach (var pair in syncTargets)
-            {
-                var sword = swords[pair.Key]; var state = pair.Value;
-                sword.transform.position = Vector3.Lerp(sword.transform.position, new Vector3(state.x, state.y, 0), posT);
-                sword.transform.rotation = Quaternion.Slerp(sword.transform.rotation, Quaternion.Euler(0, 0, state.rotation), rotT);
-            }
-            // ▼ 分身・リーフシールドの見た目も、剣本体と同じ補間で滑らかに追従させる
-            foreach (var pair in cloneSyncTargets)
-            {
-                if (!cloneVisuals.TryGetValue(pair.Key, out var obj) || obj == null) continue;
-                var state = pair.Value;
-                obj.transform.position = Vector3.Lerp(obj.transform.position, new Vector3(state.x, state.y, 0), posT);
-                obj.transform.rotation = Quaternion.Slerp(obj.transform.rotation, Quaternion.Euler(0, 0, state.rotation), rotT);
-            }
-        }
+        // ▼【変更】ゲストの位置の追従(毎フレーム最新の位置へ寄せる)はやめた。ホスト・ゲストとも PlaybackLateUpdate が
+        // ため込んだSYNCの間を補間して表示する(SyncPlayback)
+    }
+
+    // ▼【新規追加】SYNCをゲストへ送ると同時に、ホスト自身の再生の時計(SyncPlayback)にも同じものをため込む
+    void EmitSync()
+    {
+        var sync = Snapshot();
+        Emit("SYNC", sync);
+        playback.Enqueue(sync);
+    }
+
+    void ResetPlayback()
+    {
+        playback.Clear();
+        playback.Delay = Mathf.Max(0f, displayDelaySeconds);
+        dueSnapshots.Clear(); truePoses.Clear(); displayPosesApplied = false; displayCenters.Clear();
+        finishPresentationPending = false; playbackStopped = false;
     }
 
     // ▼【新規追加】React側ではカウントダウンを表示しないため、SceneController.countdownText
@@ -1594,7 +1616,7 @@ public class MultiplayerManager : MonoBehaviour
             // 完全停止する前に一度だけ反映させる(ローカルのDefeatRoutineも力を加えた直後にまだ動ける)
             Physics2D.Simulate(Time.fixedDeltaTime);
             // Deliver final HP/death state before the separately acknowledged result.
-            Emit("SYNC", Snapshot());
+            EmitSync();
             var result = new MultiplayerResult { matchId = config.matchId, winnerId = rules.WinnerId, draw = rules.Draw,
                 winnerTeam = rules.WinnerTeam,
                 standings = rules.Players.Select(p => new MultiplayerScore { playerId = p.PlayerId, rank = p.Rank,
@@ -1662,7 +1684,7 @@ public class MultiplayerManager : MonoBehaviour
                 evt.x = fallback.currentCenterPosition.x; evt.y = fallback.currentCenterPosition.y;
             }
             pendingHitEvents.Add(evt);
-            ShowHitEvent(evt);
+            // ▼【変更】数字と火花はホストでもここでは出さず、SYNCの再生(ApplySnapshotState)が表示用の位置に合わせて遅らせて出す
             // 本体で剣を壊した側を短く止める。決着の一撃は試合全体のスロー（MatchEndCinematic）に任せ、
             // 同じ一撃で自分も倒れた（相打ち）時は止めない
             if (record.Lethal && !rules.Ended && detail.body && rules.Get(record.AttackerId).OnField) FreezeKiller(record.AttackerId);
@@ -1955,7 +1977,7 @@ public class MultiplayerManager : MonoBehaviour
         pendingHitEvents.Clear();
         var cloneEnds = pendingCloneEnds.ToArray();
         pendingCloneEnds.Clear();
-        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, phase = phase, hits = hitEvents, cloneEnds = cloneEnds,
+        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, time = Time.unscaledTime, phase = phase, hits = hitEvents, cloneEnds = cloneEnds,
             judgmentSeq = judgmentSeq, judgmentX = judgmentSyncCentre.x, judgmentY = judgmentSyncCentre.y,
             countdownRemaining = phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0,
             players = config.players.Select(p => {
@@ -1992,19 +2014,38 @@ public class MultiplayerManager : MonoBehaviour
         if (sync.players == null || sync.players.Length != config.players.Length ||
             sync.players.Any(p => p == null || p.playerId == null || !swords.ContainsKey(p.playerId)) ||
             sync.players.Select(p => p.playerId).Distinct().Count() != config.players.Length) return;
-        phase = sync.phase; SwordBattle.isRoundStarted = IsPlaying;
-        receivedCountdownRemaining = sync.countdownRemaining;
+        receivedTick = sync.tick;
+        // ▼【変更】届いた瞬間には反映せず、再生の時計(SyncPlayback)にため込む。反映は PlaybackLateUpdate が時刻順に行う
+        playback.Enqueue(sync);
+    }
+
+    // ▼【変更】以前の SyncMultiplayer の本体。再生の時計がそのSYNCの時刻に達した時に、位置以外(HP・技の段階・演出の合図など)を反映する。
+    // ホストは物理と判定を自分で進めているので、ここでは「当たった場所に出す演出」(ダメージの数字と火花・柄迫り合い・掌握の輪)だけを
+    // 表示用の位置に合わせて遅らせて出す。ゲストは従来どおり全部をここで反映する
+    void ApplySnapshotState(MultiplayerSync sync)
+    {
+        if (config == null || sync == null || sync.players == null) return;
+        if (!IsHost)
+        {
+            // 決着(RESULT)後にため込んだ残りを再生し切る間は、phaseを巻き戻さない
+            if (phase != "RESULT") { phase = sync.phase; SwordBattle.isRoundStarted = IsPlaying; }
+            receivedCountdownRemaining = sync.countdownRemaining;
+        }
         foreach (var data in sync.players)
         {
-            var sword = swords[data.playerId];
-            if (receivedTick < 0) { sword.transform.position = new Vector3(data.x, data.y, 0); sword.transform.rotation = Quaternion.Euler(0, 0, data.rotation); }
+            if (data == null || data.playerId == null || !swords.TryGetValue(data.playerId, out var sword) || sword == null) continue;
             // ▼【新規追加】クリティカル演出・柄迫り合い等の演出は増分(カウンタが増えたか)でしか検知できないため、
             // 上書きする前の直近の値と比較する。初回同期時は前回値が無い(比較対象なし)ので発火しない
             syncTargets.TryGetValue(data.playerId, out var previous);
             bool wasCrit = previous != null && data.critSeq > previous.critSeq;
             bool clashed = previous != null && data.clashSeq > previous.clashSeq;
             syncTargets[data.playerId] = data;
-            sword.currentCenterPosition = new Vector3(data.centerX, data.centerY, 0);
+            if (IsHost)
+            {
+                // 柄迫り合い・壁バウンドの火花と音。ホストの衝突(OnCollisionEnter2D)では出さず、表示用の位置に合わせてここで出す
+                if (clashed) sword.PlayClashEffect();
+                continue;
+            }
             // ▼【新規追加】残機モード：Hostから届いたlifeIndexがこれまで認識していた値より増えていれば、
             // Hostのfixedupdateと同じ手順(ReviveForNextLife)でこちらの見た目も持ち替えさせる。
             // 剣が壊れた時はまずhp=0が届いてやられ演出が始まり、待ち時間が明けた後のSYNCでlifeIndexが進む
@@ -2026,7 +2067,8 @@ public class MultiplayerManager : MonoBehaviour
         if (receivedJudgmentSeq >= 0 && sync.judgmentSeq > receivedJudgmentSeq)
             StartJudgmentVisual(new Vector3(sync.judgmentX, sync.judgmentY, 0));
         receivedJudgmentSeq = sync.judgmentSeq;
-        SyncClones(sync.clones, sync.cloneEnds);
+        // ホストの分身は本物(activeClones)がそのまま表示される。見た目だけの分身を作るのはゲストだけ
+        if (!IsHost) SyncClones(sync.clones, sync.cloneEnds);
         // ▼【新規追加】Hostから届いたダメージの記録を、まだ出していない番号のものだけ表示する
         if (sync.hits != null)
             foreach (var evt in sync.hits.Where(h => h != null).OrderBy(h => h.seq))
@@ -2035,7 +2077,104 @@ public class MultiplayerManager : MonoBehaviour
                 shownHitEventSeq = evt.seq;
                 ShowHitEvent(evt);
             }
-        receivedTick = sync.tick;
+    }
+
+    // ▼【新規追加】DisplayPoseDriver から LateUpdate の先頭で呼ばれる。再生の時計(SyncPlayback)を進め、
+    // 剣と分身を前後2つのSYNCの間で補間した「表示用の位置」に置いてから、時刻に達したSYNCの中身(HP・演出の合図)を反映する。
+    // 位置を先に置くのは、ここで出す演出(柄迫り合いの火花など)が表示用の位置を見るため。
+    // ホストは本当の位置(物理・判定用)を先に覚えておき、次の FixedUpdate / Update の先頭(RestoreTruePoses)で戻す
+    public void PlaybackLateUpdate()
+    {
+        if (config == null || playbackStopped || playback.Count == 0) return;
+        if (IsHost) CaptureTruePoses();
+        dueSnapshots.Clear();
+        playback.Advance(Time.unscaledDeltaTime, dueSnapshots.Add, out var from, out var to, out float t);
+        if (from != null) ApplyInterpolatedPoses(from, to, t);
+        foreach (var sync in dueSnapshots) ApplySnapshotState(sync);
+        dueSnapshots.Clear();
+        if (finishPresentationPending && playback.Drained) { finishPresentationPending = false; FinishPresentation(); }
+    }
+
+    static MultiplayerPlayerState FindPlayer(MultiplayerSync sync, string playerId)
+    {
+        if (sync?.players == null) return null;
+        foreach (var p in sync.players) if (p != null && p.playerId == playerId) return p;
+        return null;
+    }
+
+    static MultiplayerCloneState FindClone(MultiplayerSync sync, string id)
+    {
+        if (sync?.clones == null) return null;
+        foreach (var c in sync.clones) if (c != null && c.id == id) return c;
+        return null;
+    }
+
+    // 起点(from)と次(to)のSYNCの間を割合 t で補間した位置・回転に、剣と分身を置く。to が無ければ起点の位置で待つ
+    void ApplyInterpolatedPoses(MultiplayerSync from, MultiplayerSync to, float t)
+    {
+        if (from.players != null)
+            foreach (var a in from.players)
+            {
+                if (a == null || a.playerId == null || !swords.TryGetValue(a.playerId, out var sword) || sword == null) continue;
+                var b = to != null ? FindPlayer(to, a.playerId) : null;
+                // 持ち替えで出現位置へ飛ぶ時(lifeIndexが変わる)と、ありえない距離を動いた時は、間を補間せず次のSYNCが反映されるまで手前で待つ
+                if (b != null && (b.lifeIndex != a.lifeIndex ||
+                    (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) > TeleportDistance * TeleportDistance)) b = null;
+                float k = b != null ? t : 0f;
+                var tr = sword.transform;
+                Vector3 pos = b != null ? new Vector3(Mathf.Lerp(a.x, b.x, k), Mathf.Lerp(a.y, b.y, k), tr.position.z) : new Vector3(a.x, a.y, tr.position.z);
+                float rot = b != null ? Mathf.LerpAngle(a.rotation, b.rotation, k) : a.rotation;
+                Vector3 center = b != null ? new Vector3(Mathf.Lerp(a.centerX, b.centerX, k), Mathf.Lerp(a.centerY, b.centerY, k), 0)
+                    : new Vector3(a.centerX, a.centerY, 0);
+                tr.SetPositionAndRotation(pos, Quaternion.Euler(0, 0, rot));
+                displayCenters[a.playerId] = center;
+                if (IsHost) continue;
+                // ゲストは重心も大きさも同期からしか分からないので、ここで一緒に補間する(ホストは物理と技の処理が決める)
+                sword.currentCenterPosition = center;
+                if (!sword.IsAlive) continue;
+                float scale = b != null && a.scale > 0f && b.scale > 0f ? Mathf.Lerp(a.scale, b.scale, k) : a.scale;
+                if (scale > 0f) tr.localScale = new Vector3(scale, scale, tr.localScale.z);
+            }
+        if (from.clones != null)
+            foreach (var a in from.clones)
+            {
+                if (a == null || a.id == null) continue;
+                GameObject obj = null;
+                if (IsHost) { if (activeClones.TryGetValue(a.id, out var entry)) obj = entry.obj; }
+                else cloneVisuals.TryGetValue(a.id, out obj);
+                if (obj == null) continue;
+                var b = to != null ? FindClone(to, a.id) : null;
+                if (b != null && (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) > TeleportDistance * TeleportDistance) b = null;
+                float k = b != null ? t : 0f;
+                var tr = obj.transform;
+                Vector3 pos = b != null ? new Vector3(Mathf.Lerp(a.x, b.x, k), Mathf.Lerp(a.y, b.y, k), tr.position.z) : new Vector3(a.x, a.y, tr.position.z);
+                float rot = b != null ? Mathf.LerpAngle(a.rotation, b.rotation, k) : a.rotation;
+                tr.SetPositionAndRotation(pos, Quaternion.Euler(0, 0, rot));
+            }
+    }
+
+    // ホスト：表示用の位置に置き換える前に、剣と分身の本当の位置を覚えておく
+    void CaptureTruePoses()
+    {
+        truePoses.Clear();
+        foreach (var sword in swords.Values)
+            if (sword != null) truePoses[sword.transform] = (sword.transform.position, sword.transform.rotation);
+        foreach (var entry in activeClones.Values)
+            if (entry.obj != null) truePoses[entry.obj.transform] = (entry.obj.transform.position, entry.obj.transform.rotation);
+        displayPosesApplied = true;
+    }
+
+    // ▼【新規追加】DisplayPoseDriver から FixedUpdate / Update の先頭で呼ばれる。表示用の位置に置き換えた剣と分身を本当の位置へ戻す。
+    // 戻した直後に物理へ反映(SyncTransforms)しておく。こうしないと、この後の FixedUpdate で rb.position を書き換えた分が、
+    // 物理ステップの開始時に「変更済みのTransform」で上書きされてしまう
+    public void RestoreTruePoses()
+    {
+        if (!displayPosesApplied) return;
+        displayPosesApplied = false;
+        foreach (var pair in truePoses)
+            if (pair.Key != null) pair.Key.SetPositionAndRotation(pair.Value.pos, pair.Value.rot);
+        truePoses.Clear();
+        Physics2D.SyncTransforms();
     }
 
     // ▼【新規追加】Hostから届いた分身の一覧に合わせて、クライアント側の見た目専用オブジェクトを
@@ -2153,7 +2292,9 @@ public class MultiplayerManager : MonoBehaviour
         {
             hasLockedCameraPosition = false;
             // ▼【変更】生きている剣に加えて、撃破されてまだ消え切っていない剣と抜け殻も画角に含める
-            var points = swords.Values.Where(s => s.IsAlive).Select(s => s.currentCenterPosition).ToList();
+            // ▼【変更】カメラは表示用の位置の重心(displayCenters)を追う。まだ無ければ判定用の重心で代用する
+            var points = swords.Values.Where(s => s.IsAlive)
+                .Select(s => displayCenters.TryGetValue(s.PlayerId, out var center) ? center : s.currentCenterPosition).ToList();
             extraCameraTargets.RemoveAll(target => target == null);
             foreach (var target in extraCameraTargets) points.Add(target.position);
             if (points.Count == 0) return;
@@ -2195,7 +2336,9 @@ public class MultiplayerManager : MonoBehaviour
     {
         var result = JsonUtility.FromJson<MultiplayerResult>(json);
         if (config == null || result == null || result.matchId != config.matchId || phase == "RESULT") return;
-        phase = "RESULT"; SwordBattle.matchEnded = true; SwordBattle.isRoundStarted = false;
+        // ▼【変更】matchEnded は決着演出(FinishPresentation)で立てる。ため込んだ残りのSYNC(決着の一撃)を再生する間に
+        // 立っていると、ゲストでその一撃の音(PlayClientDamageEffect)が鳴らなくなる
+        phase = "RESULT"; SwordBattle.isRoundStarted = false;
         // ▼【修正】SwordBattle.Update()は isRoundStarted/matchEnded を見た時点で即returnするため、
         // ちょうど必殺技ボタンが表示中(SP満タン)のままここに来ると、ボタンの表示を消す
         // UpdateSpecialAttackButton()が二度と呼ばれなくなり、結果画面になってもボタンが
@@ -2204,6 +2347,17 @@ public class MultiplayerManager : MonoBehaviour
         var specialButton = firstSword != null ? firstSword.specialAttackButton : null;
         if (specialButton != null) specialButton.gameObject.SetActive(false);
         foreach (var sword in swords.Values) { sword.StopAllCoroutines(); bodies[sword.PlayerId].simulated = false; }
+        // ▼【変更】見た目の決着演出は、ため込んだ残りのSYNC(決着の一撃まで)を再生し切ってから始める(PlaybackLateUpdate → FinishPresentation)。
+        // 再生し切るまでは表示が決着の一撃の手前にあるので、ここで始めると数字も揺れも一撃より先に出てしまう
+        finishPresentationPending = true; playback.Draining = true;
+        if (playback.Count == 0) { finishPresentationPending = false; FinishPresentation(); }
+    }
+
+    void FinishPresentation()
+    {
+        // 以後は剣の位置を同期で動かさない(決着で跳ね上がる剣を引き戻さないように)。表示用の位置もそのまま残す
+        playbackStopped = true; displayPosesApplied = false; truePoses.Clear();
+        SwordBattle.matchEnded = true;
         // ▼【新規追加】決着の一撃で倒された剣は、その場で止めずにすぐ跳ね上げる（物理は止めたので、各自の画面で動かす）。
         // 決着後のカメラはこの剣を追う
         foreach (var id in finalKoTargets) if (swords.TryGetValue(id, out var fallen) && fallen != null) DefeatFlight.Launch(fallen.gameObject);
@@ -2250,6 +2404,7 @@ public class MultiplayerManager : MonoBehaviour
         if (ownsSimulation) { Physics2D.simulationMode = previousSimulationMode; ownsSimulation = false; }
         swords.Clear(); bodies.Clear(); targets.Clear(); sequences.Clear(); inputTimes.Clear();
         hits.Clear(); forfeits.Clear(); invulnerable.Clear(); syncTargets.Clear();
+        ResetPlayback();
         cloneSyncTargets.Clear();
         activeClones.Clear();
         pendingCloneEnds.Clear();

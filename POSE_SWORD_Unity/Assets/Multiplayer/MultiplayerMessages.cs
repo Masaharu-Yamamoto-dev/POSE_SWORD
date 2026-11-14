@@ -121,6 +121,8 @@ using UnityEngine;
 {
     public string matchId;
     public int tick;
+    // ▼【新規追加】このSYNCを作った時のホストの Time.unscaledTime。ゲストはこの目盛りで再生の時計(SyncPlayback)を進める
+    public float time;
     public string phase;
     public float countdownRemaining;
     public MultiplayerPlayerState[] players;
