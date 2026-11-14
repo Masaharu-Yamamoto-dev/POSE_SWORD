@@ -34,6 +34,20 @@ public class SwordGenerator : MonoBehaviour
     [Header("刀身の理想の太さ（横幅）")]
     public float targetBladeWidth = 1.5f;
 
+    [Header("刀身の長さの上限（縦）")]
+    [Tooltip("横幅を targetBladeWidth にそろえた結果これより長くなる剣は、この長さに収まるよう全体を縮める（太さも同じ比率で細くなる）。0以下で無制限")]
+    public float maxBladeLength = 8f;
+
+    // 刀身の見た目の倍率。横幅を width にそろえ、長さが maxLength を超える時だけ maxLength に収まるよう縮める。
+    // 本体（GenerateSword）と分身・シールド（SwordBattle.CloneVisualScale）で同じ計算を使う
+    public static float BladeScale(Vector2 spriteSize, float width, float maxLength)
+    {
+        if (spriteSize.x <= 0f) return 1f;
+        float scale = width / spriteSize.x;
+        if (maxLength > 0f && spriteSize.y * scale > maxLength) scale = maxLength / spriteSize.y;
+        return scale;
+    }
+
     [Header("テスト実行設定")]
     public bool generateOnStart = true; // チェックを入れるとゲーム開始時に自動生成
 
@@ -156,15 +170,14 @@ public class SwordGenerator : MonoBehaviour
                 {
                     targetSpriteRenderer.sprite = newSprite;
 
-                    // 画像サイズに関わらず、理想の太さに自動リサイズする処理
-                    float currentWidth = newSprite.bounds.size.x;
-                    if (currentWidth > 0)
+                    // 画像サイズに関わらず、理想の太さに自動リサイズする処理（長すぎる剣は maxBladeLength に収める）
+                    if (newSprite.bounds.size.x > 0)
                     {
-                        float scaleRatio = targetBladeWidth / currentWidth;
+                        float scaleRatio = BladeScale(newSprite.bounds.size, targetBladeWidth, maxBladeLength);
                         targetSpriteRenderer.transform.localScale = new Vector3(scaleRatio, scaleRatio, 1f);
                     }
 
-                    Debug.Log($"✅ 剣のスプライトを設定し、太さを {targetBladeWidth} に統一しました");
+                    Debug.Log($"✅ 剣のスプライトを設定しました（太さ {targetBladeWidth}・長さの上限 {maxBladeLength}）");
 
                     // コライダーの再生成（スケール変更後に実行するのがベストです）
                     if (bladeCollider != null)
