@@ -101,11 +101,11 @@ public static bool matchEnded = false;
     public TextMeshProUGUI spText;
     public float currentSp = 0f;       // 現在のSP
     public float maxSp = 100f;         // SPの最大値
-    public float passiveSpFill = 5f;   // 1秒間に自動で溜まる量
+    public float passiveSpFill = 7f;   // 1秒間に自動で溜まる量
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
-    public float spinDashDamageMultiplier = 5f; // 大回転斬（hiltType:"0"）が相手の剣に当たった時の、通常の衝突ダメージへの倍率（以前は4）
-    public float spinDashCritMultiplier = 1.3f; // 大回転斬が尖った所で当たった時の倍率（通常攻撃は3倍）
-    public float spinDashWeakPointMultiplier = 2f; // 大回転斬が相手の柄に当たった時の倍率
+    public float spinDashDamageMultiplier = 3.5f; // 大回転斬（hiltType:"0"）が相手の剣に当たった時の、通常の衝突ダメージへの倍率（以前は4）
+    public float spinDashCritMultiplier = 1f; // 大回転斬が尖った所で当たった時の倍率（通常攻撃は3倍）
+    public float spinDashWeakPointMultiplier = 1f; // 大回転斬が相手の柄に当たった時の倍率
     // ▼【新規追加】大回転斬の終わり方。以前はその場で速さも回転も0になって落ちていた。
     // 外れた（2秒たった）時は減速しながら回転がゆるみ、敵に当たった時は反動で少し弾かれてから、どちらもゆっくり降りる。
     // 減速・弾かれている間は操作を受け付けず、ゆっくり降りる間は操作でき、ジャンプするとすぐ普通の動きに戻る
@@ -117,7 +117,7 @@ public static bool matchEnded = false;
     // 地上どうしで撃つと、回る刀身が床に触れるたびに跳ね返って、凸凹と這うように見えていた
     public float spinGrazeAngle = 30f;
     public float giantSpinScale = 5f; // 巨大化一回転（hiltType:"1"）の拡大率（以前は6）
-    public float giantSpinDamageMultiplier = 4.5f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
+    public float giantSpinDamageMultiplier = 3f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
     public float giantSpinRotationSpeed = 1080f; // 巨大化一回転の回転速度（度/秒）。小さくするとゆっくり回るようになる（一回転にかかる時間もこれに応じて伸びる）
     // ▼【新規追加】巨大回転斬の流れ（カットインの後）：柄が光る → 3段階で巨大化 → 振りかぶり → 一回転（攻撃判定はここだけ）
     // → 余韻 → 縮む → ふらつき。秒数はゲーム内の時間で、撃破で止められている間は進まない（ふらつきを除く）
@@ -1030,6 +1030,10 @@ public static bool matchEnded = false;
                 bool clickedRight = Input.mousePosition.x > (Screen.width / 2f);
                 TryAction(clickedRight);
             }
+
+            // ▼【新規追加】PC操作時：Aキー＝画面左クリック、Dキー＝画面右クリックと同じ動作
+            if (Input.GetKeyDown(KeyCode.A)) TryAction(false);
+            if (Input.GetKeyDown(KeyCode.D)) TryAction(true);
 
             // ▼【新規追加】PC操作時のみ：スペースキーでも必殺技専用ボタンと同じ発動ができるようにする
             // ▼ 1vs3ではSPが満タンになると、このキーで出るものが掌握へ切り替わる（TryUltimate内で振り分ける）
