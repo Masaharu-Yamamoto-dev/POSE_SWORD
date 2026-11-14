@@ -2489,7 +2489,9 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
-  spinDashDamageMultiplier: 4
+  spinDashDamageMultiplier: 6
+  spinDashCritMultiplier: 1.5
+  spinDashWeakPointMultiplier: 2
   spinMissSlowTime: 0.45
   spinHitRecoilTime: 0.25
   spinHitRecoilDistance: 2
@@ -2510,12 +2512,12 @@ MonoBehaviour:
   giantSpinStaggerOnMiss: 1
   cloneCount: 3
   cloneDashSpeed: 43
-  cloneDamageMultiplier: 3
+  cloneDamageMultiplier: 2.5
   cloneLifeTime: 3
   cloneLaunchInterval: 0.35
   cloneChargeTime: 0.45
   cloneHomingTurnRate: 120
-  cloneHomingTime: 0.8
+  cloneHomingTime: 0.5
   cloneRetargetCone: 60
   cloneRetargetTurnRate: 300
   cloneRetargetTime: 0.6
@@ -4076,7 +4078,9 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
-  spinDashDamageMultiplier: 4
+  spinDashDamageMultiplier: 6
+  spinDashCritMultiplier: 1.5
+  spinDashWeakPointMultiplier: 2
   spinMissSlowTime: 0.45
   spinHitRecoilTime: 0.25
   spinHitRecoilDistance: 2
@@ -4097,12 +4101,12 @@ MonoBehaviour:
   giantSpinStaggerOnMiss: 1
   cloneCount: 3
   cloneDashSpeed: 43
-  cloneDamageMultiplier: 3
+  cloneDamageMultiplier: 2.5
   cloneLifeTime: 3
   cloneLaunchInterval: 0.35
   cloneChargeTime: 0.45
   cloneHomingTurnRate: 120
-  cloneHomingTime: 0.8
+  cloneHomingTime: 0.5
   cloneRetargetCone: 60
   cloneRetargetTurnRate: 300
   cloneRetargetTime: 0.6
@@ -5082,7 +5086,7 @@ MonoBehaviour:
   ownedSwordCount: 1
   livesMode: 1
   isHost: 1
-  soloMode: 1
+  soloMode: 0
   bossSlot: 0
   bossIsNpc: 1
   hpMultiplier: 3

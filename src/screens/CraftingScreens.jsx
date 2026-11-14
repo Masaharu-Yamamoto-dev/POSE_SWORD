@@ -5,6 +5,7 @@ import ForgeHammer3D from '../components/ForgeHammer3D.jsx';
 import '../components/SwordForgeParts.css';
 import '../components/Stage16x9.css';
 import { usePortrait, useStageScale } from '../components/swordForge.js';
+import { useMaxCharsInput } from '../components/nameLimit.js';
 import './CraftingScreens.css';
 
 // カメラ枠の縦横比をCSSへ渡す（枠の大きさと並びは CraftingScreens.css）
@@ -66,6 +67,7 @@ function ZoomIcon({ plus }) {
 // 入力欄は、錬成完了・武器庫の名前の書き換え欄と同じ形（朱の下線・右下に入れられる残りの文字数）
 export function NameInputScreen({ direction = "forward", userName, setUserName, setStep, handleCancel }) {
   const [animClass, leave] = useLeave(direction);
+  const limit = useMaxCharsInput(userName, setUserName, USER_NAME_MAX);
   const count = Array.from(userName).length;
   const ready = userName.trim() !== '';
   const next = () => { if (ready) setStep("CRAFT_POSE"); };
@@ -79,7 +81,7 @@ export function NameInputScreen({ direction = "forward", userName, setUserName, 
         <p className="craft-name__lead">あなたの名前を教えてください</p>
         <span className="name-edit__field craft-name__field">
           <input type="text" value={userName} aria-label="あなたの名前" placeholder="名前を入力" autoFocus
-            onChange={e => setUserName(Array.from(e.target.value).slice(0, USER_NAME_MAX).join(''))} onKeyDown={onKeyDown} />
+            {...limit} onKeyDown={onKeyDown} />
           <span className={`name-edit__count ${count >= USER_NAME_MAX ? 'is-full' : ''}`} aria-live="polite">{count} / {USER_NAME_MAX}</span>
         </span>
         <p className="craft-name__hint">名前は剣の名前に入ります（例：紅蓮〇〇ブレード）</p>

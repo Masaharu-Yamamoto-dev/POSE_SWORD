@@ -302,17 +302,12 @@ export default function SwordListScreen({
     </div>
   );
 
-  // 装備の札。「装備中」「控え」は同じ大きさ。控えのときは真下に下線付きの「装備する」。札かボタンを押すと装備する
+  // 装備の札。控えの剣は墨の札のボタン「装備する」。押すと同じ場所・同じ大きさの金の印「装備中」に変わる
   const equip = !nameEditing && (
     <div className="armory__equip">
       {isEquipped
         ? <span role="status" className={`armory__badge is-eq ${stampId === selected.id ? 'is-stamped' : ''}`}>装備中</span>
-        : (
-          <>
-            <button type="button" className="armory__badge is-spare" onClick={onEquip} aria-label="控え（押すとこの剣を装備します）">控え</button>
-            <button type="button" className="forge-link armory__equip-link" onClick={onEquip}>装備する</button>
-          </>
-        )}
+        : <button type="button" className="armory__badge is-spare" onClick={onEquip}>装備する</button>}
     </div>
   );
 
@@ -346,7 +341,7 @@ export default function SwordListScreen({
   );
 
   const hiltSection = (
-    <section className="armory__section" onPointerDown={endPriv}>
+    <section className="armory__section armory__hilt" onPointerDown={endPriv}>
       <div className="forge-label">柄</div>
       <HiltPicker hiltType={hiltType} onChange={onHilt} />
     </section>
