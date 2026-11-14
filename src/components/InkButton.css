@@ -15,6 +15,7 @@
 
 .ink-btn--usuzumi {
   --ink-text: var(--usuzumi);
+  --ink-rest: 0.09; /* 控えめな操作なので、敷く墨もさらに薄く */
 }
 
 /* 墨の筆跡。画像を型抜き（mask）に使い、色は --ink-stroke で塗る */
@@ -88,6 +89,14 @@
 .ink-btn--fit .ink-btn__label {
   font-size: 20px;
   padding: 12px 8px;
+}
+
+/* rest：ふだんから薄く敷いておく墨。走る墨と同じ形・大きさで、隠さずに透かして出す。
+   文字は白抜きにしない（濃い墨に白文字は、点灯した対戦開始の見た目なので） */
+.ink-btn__stroke--rest {
+  clip-path: none;
+  transition: none;
+  opacity: var(--ink-rest, 0.18);
 }
 
 /* lit：墨を出したまま、文字を白抜きにして脈打たせる。乗せると墨色に変わる */

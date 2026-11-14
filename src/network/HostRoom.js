@@ -315,8 +315,9 @@ export class HostRoom {
       const boss = this.get(this.bossPlayerId);
       if (!boss?.connected || !boss.inLobby) return false;
     }
+    // ホスト（p0）は準備完了を押さない。対戦開始を押すことがそのままホストの準備完了になる。
     return this.phase === 'LOBBY' && this.players.length >= MIN_PLAYERS && this.players.length <= this.seatLimit &&
-      this.players.every(p => p.connected && p.inLobby && (this.autoStart || p.ready));
+      this.players.every(p => p.connected && p.inLobby && (this.autoStart || p.ready || p.playerId === 'p0'));
   }
 
   prepare() {
