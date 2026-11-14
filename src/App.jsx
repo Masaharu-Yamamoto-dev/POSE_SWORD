@@ -302,6 +302,12 @@ export default function PoseSwordWeb() {
     if (mySwordRef.current?.id === targetId) setMySwordData(prev => ({ ...prev, ...newProps }));
   };
 
+  // ロビーの必殺技アイコンから、装備中の剣の柄を替える
+  const changeEquippedHilt = hiltType => {
+    const id = mySwordRef.current?.id;
+    if (id) updateSword(id, { hiltType });
+  };
+
   // ワンポイントの焼き込みは、丸を動かし終えてから少し待って作り直す。
   // 剣ごとに番号を振り、作っている間に丸がまた動いたら（番号が変わったら）古い結果は捨てる
   const onepointJobRef = useRef({});
@@ -474,11 +480,18 @@ export default function PoseSwordWeb() {
 
   const startCaptureCountdown = () => setCaptureCountdown(5);
 
+  // 錬成の取り消し用。錬成のたびに番号を進め、途中で取り消したら（番号が変わったら）届いた結果は捨てる
+  const craftJobRef = useRef(0);
+  const craftAbortRef = useRef(null);
+
   const executeCaptureAndCraft = () => {
     setIsFlash(true);
     setTimeout(() => setIsFlash(false), 500);
+    const job = ++craftJobRef.current;
+    const isCurrent = () => craftJobRef.current === job;
 
     setTimeout(() => {
+      if (!isCurrent()) return;
       setStep("CRAFTING_API");
       setCraftLeaving(false);
       // 錬成中の演出は、錬成が早く終わっても最低これだけ見せる
@@ -500,9 +513,12 @@ export default function PoseSwordWeb() {
       const pythonApiUrl = `${import.meta.env.VITE_API_URL ?? '/api'}/cutout`;
 
       // 🌟 asyncを追加
-      fetch(pythonApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: base64DataOnly, userName: userName }) })
+      const controller = new AbortController();
+      craftAbortRef.current = controller;
+      fetch(pythonApiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: base64DataOnly, userName: userName }), signal: controller.signal })
         .then(res => { if (!res.ok) throw new Error(`HTTPエラー`); return res.json(); })
         .then(async (data) => {
+          if (!isCurrent()) return;
           // 🌟 シルエット・ワンポイントの画像もここで作る（相手にはこちらだけを送る）
           const newImageSrc = "data:image/png;base64," + data.imageData;
 
@@ -510,8 +526,10 @@ export default function PoseSwordWeb() {
             // 撮り直し：見え方はそのまま、ワンポイントの丸は写真が変わるので真ん中に戻す
             const targetOld = swordList.find(s => s.id === craftingTargetId);
             const privacy = { mode: privacyOf(targetOld).mode, spot: { ...DEFAULT_SPOT } };
-            cancelOnepoint(craftingTargetId);
             const images = await derivedImages(newImageSrc, privacy);
+            // 画像を作っている間に取り消されたら、剣は変えない
+            if (!isCurrent()) return;
+            cancelOnepoint(craftingTargetId);
             const updatedProps = { hp: data.params.hp, attack: data.params.attack, weight: data.params.weight, imageStr: data.imageData, imageSrc: newImageSrc, privacy, ...images };
             updateSword(craftingTargetId, updatedProps);
             if (targetOld) setMySwordData({ ...targetOld, ...updatedProps });
@@ -520,6 +538,7 @@ export default function PoseSwordWeb() {
             // 新しい剣：最後にプライバシーを選んだときの見え方で始める
             const privacy = newPrivacy(lastPrivacyMode);
             const images = await derivedImages(newImageSrc, privacy);
+            if (!isCurrent()) return;
             const newSword = { id: Date.now().toString(), baseName: userName, name: data.swordName || "無銘の剣", hp: data.params.hp, attack: data.params.attack, weight: data.params.weight, imageStr: data.imageData, imageSrc: newImageSrc, privacy, ...images, hiltType: "0" };
             setSwordList(prev => {
               let updatedList = [...prev];
@@ -532,16 +551,30 @@ export default function PoseSwordWeb() {
           // 錬成中の画面を最低2秒見せてから、その場でフェードアウトさせ、消えきったら錬成完了の画面へ
           const wait = Math.max(0, CRAFT_MIN_MS - (performance.now() - craftStartedAt));
           setTimeout(() => {
+            if (!isCurrent()) return;
             setCraftLeaving(true);
             setTimeout(() => {
+              if (!isCurrent()) return;
               setCompleteIntro(true);
               setStep("CRAFT_COMPLETE");
               setCraftLeaving(false);
             }, CRAFT_FADE_MS);
           }, wait);
         })
-        .catch((error) => { console.error(error); alert("AIサーバーとの通信に失敗しました。"); setStep("CRAFT_POSE"); });
+        .catch((error) => {
+          if (!isCurrent()) return; // 取り消して通信を打ち切ったときは、失敗として扱わない
+          console.error(error); alert("AIサーバーとの通信に失敗しました。"); setStep("CRAFT_POSE");
+        });
     }, 50);
+  };
+
+  // 錬成を取り消して、ポーズ撮影へ戻る。サーバーでの処理は止められないので、届いた結果を捨てる
+  const cancelCrafting = () => {
+    if (craftLeaving) return; // 錬成が終わって消え始めたあとは取り消さない（剣はもう作られている）
+    craftJobRef.current++;
+    craftAbortRef.current?.abort();
+    setTransitionDir("back");
+    setStep("CRAFT_POSE");
   };
 
   // カウントダウンを打ち切って撮影する。数え終わった時と「今すぐ撮影！」の両方から呼ぶ
@@ -590,14 +623,14 @@ export default function PoseSwordWeb() {
       case "CRAFT_POSE":
         return <CraftPoseScreen direction={transitionDir} recapture={craftingTargetId !== null} camera={camera} videoRef={videoRef} canvasRef={canvasRef} captureCountdown={captureCountdown} startCaptureCountdown={startCaptureCountdown} forceCapture={captureNow} handleBack={handleBackFromPose} />;
       case "CRAFTING_API":
-        return <CraftingApiScreen capturedImage={capturedImage} aspect={camera.aspect} leaving={craftLeaving} />;
+        return <CraftingApiScreen capturedImage={capturedImage} aspect={camera.aspect} leaving={craftLeaving} onCancel={cancelCrafting} />;
       case "CRAFT_COMPLETE":
         return <CraftCompleteScreen sword={swordList.find(s => s.id === mySwordData?.id) ?? mySwordData} updateSword={updateSword} updatePrivacy={updatePrivacy} setStep={(s) => { setTransitionDir("forward"); setStep(s); }} startNewCrafting={() => startNewCrafting("CRAFT_COMPLETE")} startRecapture={id => startRecapture(id, "CRAFT_COMPLETE")} toggleSwordFlip={toggleSwordFlip} craftReturnStep={craftReturnStep} swordListLength={swordList.length} intro={completeIntro} />;
       case "SWORD_LIST":
         return <SwordListScreen direction={transitionDir} swordList={swordList} mySwordData={mySwordData} equipSword={equipSword} deleteSword={deleteSword} startNewCrafting={startNewCrafting} startRecapture={startRecapture} updateSword={updateSword} updatePrivacy={updatePrivacy} reorderSwords={reorderSwords} cancelList={cancelList} toggleSwordFlip={toggleSwordFlip} returnStep={craftReturnStep} />;
       // 対戦ロビーと対戦結果は、対戦画面と同じく16:9固定で見せる
       case "LOBBY":
-        return <Stage16x9><LobbyScreen view={shownView} roomId={frozen?.roomId ?? room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} imageOf={sword => publicImageOf(sword, isRandomMatchActive)} equipSword={equipSword} reorderSwords={reorderSwords} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onSoloMode={room.setSoloMode} onBossPlayer={room.setBossPlayer} onNpcBoss={room.setNpcBoss} onSpin={() => room.spinSword()} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} error={frozen ? '' : room.error} /></Stage16x9>;
+        return <Stage16x9><LobbyScreen view={shownView} roomId={frozen?.roomId ?? room.roomId} isCopied={isCopied} handleCopyId={handleCopyId} swordList={swordList} mySwordData={mySwordData} imageOf={sword => publicImageOf(sword, isRandomMatchActive)} equipSword={equipSword} reorderSwords={reorderSwords} onReady={room.setReady} onGameMode={room.setGameMode} onLivesMode={room.setLivesMode} onSoloMode={room.setSoloMode} onBossPlayer={room.setBossPlayer} onNpcBoss={room.setNpcBoss} onSpin={() => room.spinSword()} onStart={room.start} onLeave={handleLeave} goToCrafting={goToCrafting} onHilt={changeEquippedHilt} error={frozen ? '' : room.error} /></Stage16x9>;
       case "RESULT":
         return <Stage16x9><ResultScreen view={shownView} onReturnToLobby={room.returnToLobby} onLeave={handleLeave} onFindNewOpponents={view?.room?.autoStart ? findNewOpponents : null} /></Stage16x9>;
       default: return null;

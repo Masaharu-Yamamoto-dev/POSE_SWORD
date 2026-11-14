@@ -17,7 +17,7 @@
   overflow-x: clip;
 }
 
-/* ---------- 見出しの帯（錬成と同じ：左に退室、真ん中に題、右に人数） ---------- */
+/* ---------- 見出しの帯：左に退室、真ん中に題と人数、右にロビーID ---------- */
 .lobby-header {
   --bar-top: 18px;
   --bar-side: 24px;
@@ -52,9 +52,16 @@
   white-space: nowrap;
 }
 
+/* 題は帯の真ん中に置いたまま、人数をそのすぐ右に添える */
+.lobby-header__title { position: relative; }
+
 /* 人数（武器庫の「所持 1 / 3」と同じ形） */
 .lobby-header__count {
-  justify-self: end;
+  position: absolute;
+  left: calc(100% + 18px);
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
   font-size: 16px;
   letter-spacing: 0.1em;
   color: var(--usuzumi);
@@ -607,6 +614,27 @@ button.lobby-sword__body { cursor: pointer; }
   align-items: center;
 }
 
+/* 自分の柄の必殺技アイコン。見た目はほかの人のアイコンと同じで、ダブルクリック（2回タップ）で次の柄へ */
+.lobby-skill-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  touch-action: manipulation; /* 2回タップで画面が拡大されないように */
+}
+.lobby-skill-btn:disabled { cursor: default; }
+.lobby-skill-btn:focus-visible { outline: 2px solid var(--shu); outline-offset: 2px; }
+.lobby-skill-btn img { animation: lobby-skill-pop 0.28s cubic-bezier(0.2, 1.6, 0.4, 1) both; }
+
+@keyframes lobby-skill-pop {
+  from { transform: scale(0.7); }
+  to { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lobby-skill-btn img { animation: none; }
+}
+
 /* 空席 */
 .lobby-col--empty {
   display: grid;
@@ -623,7 +651,7 @@ button.lobby-sword__body { cursor: pointer; }
   writing-mode: vertical-rl;
 }
 
-/* ---------- 下の帯：左にルール、中央に対戦開始、右にロビーID ---------- */
+/* ---------- 下の帯：左に武器庫へ、中央に対戦開始、右にルール ---------- */
 .lobby-bar {
   --bar-side: 24px;
   position: relative;
@@ -645,7 +673,8 @@ button.lobby-sword__body { cursor: pointer; }
   box-shadow: 0 -10px 18px -12px rgba(60, 45, 30, 0.4);
 }
 
-.lobby-bar small {
+.lobby-bar small,
+.lobby-id small {
   display: block;
   font-size: 14px;
   letter-spacing: 0.1em;
@@ -653,6 +682,8 @@ button.lobby-sword__body { cursor: pointer; }
 }
 
 .lobby-rule {
+  grid-column: 3; /* 武器庫へは帯の並びから外して置くので、列を決めておく（決めないと左へ1つずつずれる） */
+  justify-self: end;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -660,10 +691,26 @@ button.lobby-sword__body { cursor: pointer; }
   text-align: left;
 }
 
+/* 武器庫へは、上の自分の列（いつも左端）の真ん中にそろえる。列の並び（.lobby-cols）と同じ計算で、左端の列の中心を出す。
+   2人の部屋は列が広く中心が真ん中寄りになり、対戦開始のボタンに重なるので、その手前で止める */
+.lobby-armory {
+  --cols-w: min(100%, calc(var(--seats) * 312px));
+  --col-center: calc((100% - var(--cols-w)) / 2 + (var(--cols-w) - (var(--seats) - 1) * 24px) / (2 * var(--seats)));
+  position: absolute;
+  left: min(var(--col-center), calc(50% - 260px));
+  top: 42px; /* 対戦開始のボタンの高さの真ん中 */
+  transform: translate(-50%, -50%);
+}
+/* 乗せたときに走る墨を、ボタンの幅より一回り大きく */
+.lobby-armory .ink-btn--fit .ink-btn__stroke { width: 160%; }
+/* 武器庫でできることの添え書き。ボタンの中で一回り小さく */
+.lobby-armory__sub { font-size: 14px; letter-spacing: 0.02em; }
+
 .lobby-rule__now { min-width: 9.5em; }
 .lobby-rule__now b { font-size: 18px; font-weight: normal; white-space: nowrap; }
 
 .lobby-mid {
+  grid-column: 2;
   min-width: 240px;
   text-align: center;
 }
@@ -671,6 +718,22 @@ button.lobby-sword__body { cursor: pointer; }
 .lobby-mid .ink-btn__label { font-size: 26px; padding: 14px 10px; }
 /* 文字が長い（「1 vs 3 で対戦開始」）と、筆跡の濃い部分からはみ出して白抜きが読めなくなるので、墨を一回り大きくする */
 .lobby-mid .ink-btn__stroke { width: 680px; height: 272px; }
+/* 準備取消は、乗せたときに走る墨も薄墨にする。準備完了（濃い墨で点灯）と、乗せたときの見た目で区別できるように */
+.lobby-mid .ink-btn--usuzumi { --ink-stroke: var(--usuzumi); }
+
+/* 対戦準備中の三つの点。錬成中（CraftingScreens.css の craft-wait-text）と同じく順に灯す */
+.lobby-wait i { font-style: normal; animation: lobby-dots 1.2s steps(1) infinite; }
+.lobby-wait i:nth-child(2) { animation-delay: 0.2s; }
+.lobby-wait i:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes lobby-dots {
+  0%, 30% { opacity: 0.15; }
+  31%, 100% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lobby-wait i { animation: none; }
+}
 
 .lobby-mid__ghost { visibility: hidden; }
 
@@ -690,7 +753,8 @@ button.lobby-sword__body { cursor: pointer; }
   text-align: left;
 }
 
-.lobby-id b { font-size: 26px; font-weight: normal; letter-spacing: 3px; line-height: 1.1; }
+.lobby-header .lobby-id { gap: 12px; }
+.lobby-id b { font-size: 24px; font-weight: normal; letter-spacing: 3px; line-height: 1.1; }
 .lobby-id b.is-random { font-size: 18px; letter-spacing: 0.06em; color: var(--shu); }
 
 .lobby-copy {

@@ -189,6 +189,16 @@ public static bool matchEnded = false;
     private bool giantSpinHitActive;
     // 1つの物理ステップで触れた相手をここに貯め、次のFixedUpdateで近い順に当てる（2人目以降の減衰の順番を決めるため）
     private readonly List<(SwordBattle target, Collider2D part)> pendingGiantSpinHits = new List<(SwordBattle target, Collider2D part)>();
+    // ▼【修正】巨大回転斬で変えた当たり判定（トリガー化）と重力の元の値。以前はルーチン内の変数にしか持っておらず、
+    // 撃破や持ち替えのStopAllCoroutinesで技が途中で止まると戻らず、「当たり判定なし＋重力あり」で床をすり抜けて
+    // 落ち続けていた。フィールドに持ち、EndGiantSpinPhysics で必ず戻す
+    private Collider2D[] giantSpinTriggerColliders;
+    private bool[] giantSpinOriginalTriggerStates;
+    private bool giantSpinHoldsBody;
+    private float giantSpinOriginalGravityScale;
+    // 技の間に留めておく位置と、技を始めた時の向き（終わりに戻す）
+    private Vector2 giantSpinHoldPosition;
+    private float giantSpinStartRotation;
     // ▼【調査用】必殺技ボタンがでっぱなしになる不具合調査用の、一度きりログ発火フラグ
     private bool loggedUpdateStall = false;
     private bool loggedButtonGuardStall = false;
@@ -300,6 +310,7 @@ public static bool matchEnded = false;
     {
         MultiplayerOwner = owner; PlayerId = playerId;
         InitializeComponents(); StopAllCoroutines();
+        EndGiantSpinPhysics();
         enabled = true; isDead = false; isDashing = false; isDashShooting = false;
         currentDashType = 0; currentSp = 0; spinDashPhase = 0; giantSpinPhase = 0; cloneRushPhase = 0; cloneRushShotsLeft = 0;
         ApplyPlayerColor();
@@ -554,6 +565,17 @@ public static bool matchEnded = false;
         StartCoroutine(VanishRoutine(renderers));
     }
 
+    // ▼【新規追加】場外で退場した剣は、やられ演出もカメラの追従もせずに消す（画面の外で起きたことなので飾らない）。
+    // 落ち続けないよう、物理を持つホストではその場に止める。見た目は次の剣が出る時に ReviveFromDefeat が戻す
+    void HideFallenSword()
+    {
+        foreach (var r in GetComponentsInChildren<SpriteRenderer>()) r.enabled = false;
+        if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
+        {
+            rb.linearVelocity = Vector2.zero; rb.angularVelocity = 0f; rb.gravityScale = 0f;
+        }
+    }
+
     IEnumerator VanishRoutine(SpriteRenderer[] renderers)
     {
         yield return new WaitForSeconds(DefeatEffects.Current.KillMarkDuration);
@@ -608,6 +630,8 @@ public static bool matchEnded = false;
         currentDashType = 0; currentSp = 0; spinDashPhase = 0; giantSpinPhase = 0; cloneRushPhase = 0; cloneRushShotsLeft = 0;
         StopUltimateAura();
         StopAllCoroutines();
+        // 巨大回転斬の途中で壊れた剣の当たり判定（柄はそのまま次の剣でも使う）をトリガーのまま残さない
+        EndGiantSpinPhysics();
         controller.enabled = true;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = true;
         // 撃破演出で変えた見た目（色・非表示・描画順）を、刀身と柄の両方とも元に戻す。にじみ用の写しは消す
@@ -649,6 +673,7 @@ public static bool matchEnded = false;
         SetHiltGlow(false);
         giantSpinHitActive = false;
         pendingGiantSpinHits.Clear();
+        EndGiantSpinPhysics();
         StopUltimateAura();
         // ▼【修正】撃破に値する一撃(damage>=20等)は直前のPlayClientDamageEffectでHitStopRoutineを
         // 開始しており、Time.timeScaleを0.05にした直後にここのStopAllCoroutines()が
@@ -662,11 +687,17 @@ public static bool matchEnded = false;
         // 撃てる見た目で固まるので、操作を外す前に一度だけ「撃てない」状態にしておく
         // （残機制では次の剣が出るまで数秒あるので特に目立つ。次の剣が出ればUpdate()がまた更新する）
         UpdateSpecialAttackButton();
+        // 場外（ステージの下へ落ちた）で退場したかは、当たり判定を消す前に剣の位置で見る（ゲストも同期された位置で同じ判断になる）
+        bool fellOut = MultiplayerOwner.IsBelowStage(this);
         controller.enabled = false; controller.isLocalControlled = false;
         foreach (var collider in GetComponentsInChildren<Collider2D>(true)) collider.enabled = false;
         // ▼【変更】灰色にする代わりに撃破演出の見た目にし、少しして消す（刀身だけでなく柄も）
-        BeginDefeatVisual();
-        if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
+        if (fellOut) HideFallenSword();
+        else
+        {
+            BeginDefeatVisual();
+            if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
+        }
         // ▼【修正】ローカルのDefeatRoutineと同じく、その場で静止させず天高く吹き飛ばして回転させる
         // (以前はrb.simulated=falseで即座に静止させていたため、脱落の派手さがマルチプレイだけ失われていた)。
         // またローカルは脱落後も剣を消さず、倒れたままの姿を残して他の生存者の試合を続けるため、
@@ -914,6 +945,13 @@ public static bool matchEnded = false;
     {
         // 巨大回転斬：前の物理ステップで触れた相手に、近い順で当てる
         FlushGiantSpinHits();
+        // 巨大回転斬の間は当たり判定がトリガーで床にもぶつからないので、引き寄せや吹き飛ばしで動かされると
+        // 床の中へ入ってしまう。毎ステップ技を始めた位置へ戻す（向きは技の回転に任せる）
+        if (giantSpinHoldsBody && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
+        {
+            rb.position = giantSpinHoldPosition;
+            rb.linearVelocity = Vector2.zero;
+        }
         // 大回転斬：当たった時に弾かれる向きを決めるため、突進中の速さと回転を覚えておく
         // （当たった衝突の中では、速さがもう衝突で変わっているため）
         if (spinDashPhase == (int)SpinDashStage.Dash && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
@@ -1152,6 +1190,8 @@ public static bool matchEnded = false;
         // 突進の途中で剣が片付けられても、味方との当たり判定を切ったままにしない
         RestoreTeammateCollisions();
         SetHiltGlow(false);
+        // 巨大回転斬の途中で剣が片付けられても、当たり判定と重力を変えたままにしない
+        EndGiantSpinPhysics();
     }
 
     // ▼【新規追加】残機モード：HPパネル内の「あと何本あるか」アイコン列を、渡された残りの剣の
@@ -1618,6 +1658,7 @@ public static bool matchEnded = false;
             ReportElimination();
             // 時間の奪い合いを防ぐため、進行中のヒットストップなどを全て強制キャンセル
             StopAllCoroutines();
+            EndGiantSpinPhysics();
             
             // 決着時は確定で派手なクリティカル音を鳴らす
             if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
@@ -1782,6 +1823,7 @@ public static bool matchEnded = false;
         {
             ReportElimination();
             StopAllCoroutines();
+            EndGiantSpinPhysics();
             if (defeatSound != null) audioSource.PlayOneShot(defeatSound);
             StartCoroutine(DefeatRoutine());
             Debug.Log("🏆 クライアント側でも決着を検知！DefeatRoutineを開始します。");
@@ -1951,6 +1993,7 @@ public static bool matchEnded = false;
         isDashShooting = false;
         currentDashType = 0;
         giantSpinPhase = 0;
+        EndGiantSpinPhysics();
         if (spriteRenderer != null) spriteRenderer.color = Color.white;
     }
 
@@ -2080,11 +2123,14 @@ public static bool matchEnded = false;
         if (UltimateCancelled) { CancelUltimate(); yield break; }
 
         bool controlsPhysics = rb != null && rb.bodyType == RigidbodyType2D.Dynamic;
-        float originalGravityScale = 0f;
         if (controlsPhysics)
         {
-            // 技の間は床に落ちていかないよう、重力も一時的に切ってその場に留める
-            originalGravityScale = rb.gravityScale;
+            // 技の間は床に落ちていかないよう、重力も一時的に切ってその場に留める。
+            // 位置は FixedUpdate が毎ステップこの場所へ戻す（掌握斬の引き寄せなどで動かされないように）
+            giantSpinOriginalGravityScale = rb.gravityScale;
+            giantSpinHoldPosition = rb.position;
+            giantSpinStartRotation = rb.rotation;
+            giantSpinHoldsBody = true;
             rb.gravityScale = 0f;
             rb.linearVelocity = Vector2.zero;
             rb.angularVelocity = 0f;
@@ -2096,12 +2142,12 @@ public static bool matchEnded = false;
 
         // 壁にも相手の剣にも物理的に引っかからないよう、大きくなる前から当たり判定をトリガー化する。
         // ダメージはOnTriggerEnter2D/Stay2D側で、一回転の間だけ判定する
-        Collider2D[] myColliders = GetComponentsInChildren<Collider2D>();
-        bool[] originalTriggerStates = new bool[myColliders.Length];
-        for (int i = 0; i < myColliders.Length; i++)
+        giantSpinTriggerColliders = GetComponentsInChildren<Collider2D>();
+        giantSpinOriginalTriggerStates = new bool[giantSpinTriggerColliders.Length];
+        for (int i = 0; i < giantSpinTriggerColliders.Length; i++)
         {
-            originalTriggerStates[i] = myColliders[i].isTrigger;
-            myColliders[i].isTrigger = true;
+            giantSpinOriginalTriggerStates[i] = giantSpinTriggerColliders[i].isTrigger;
+            giantSpinTriggerColliders[i].isTrigger = true;
         }
 
         // 2. 3段階で巨大化する（各段の最後で少し行き過ぎてから戻る）。届く範囲の円などは UpdateGiantSpinLook が出す
@@ -2155,21 +2201,30 @@ public static bool matchEnded = false;
         yield return StartCoroutine(WaitSkillTime(giantSpinLingerTime));
         giantSpinPhase = (int)GiantSpinStage.Shrink;
         Vector3 bigScale = transform.localScale;
+        // 振りかぶりの分（と回転の誤差）だけ、技を始めた時から向きがずれている。縮みながら元の向きへ戻す
+        float shrinkFromRotation = controlsPhysics ? rb.rotation : 0f;
         float shrinkElapsed = 0f;
         while (shrinkElapsed < giantSpinShrinkTime)
         {
             yield return null;
             if (!SkillClockStopped) shrinkElapsed += Time.deltaTime;
             float k = Mathf.Clamp01(shrinkElapsed / giantSpinShrinkTime);
-            transform.localScale = Vector3.Lerp(bigScale, originalScale, k * k * (3f - 2f * k));
+            float eased = k * k * (3f - 2f * k);
+            transform.localScale = Vector3.Lerp(bigScale, originalScale, eased);
+            if (controlsPhysics) rb.rotation = Mathf.LerpAngle(shrinkFromRotation, giantSpinStartRotation, eased);
         }
         transform.localScale = originalScale;
 
-        for (int i = 0; i < myColliders.Length; i++)
+        // 技を始めた位置・向きに戻してから当たり判定を戻す。床にめり込んでいたら外へ出す
+        if (controlsPhysics)
         {
-            if (myColliders[i] != null) myColliders[i].isTrigger = originalTriggerStates[i];
+            rb.position = giantSpinHoldPosition;
+            rb.rotation = giantSpinStartRotation;
+            rb.linearVelocity = Vector2.zero;
+            rb.angularVelocity = 0f;
         }
-        if (controlsPhysics) rb.gravityScale = originalGravityScale;
+        EndGiantSpinPhysics();
+        if (controlsPhysics) PushOutOfStage();
 
         // 6. ふらつき：操作を受け付けない（無敵ではない）。外した時は長い。見た目は技番号から UpdateGiantSpinLook が出す
         giantSpinPhase = 0;
@@ -2180,6 +2235,57 @@ public static bool matchEnded = false;
         yield return new WaitForSeconds(hitSomeone ? giantSpinStaggerOnHit : giantSpinStaggerOnMiss);
         if (currentDashType == StaggerDashType) currentDashType = 0;
         if (spriteRenderer != null && IsAlive) spriteRenderer.color = Color.white;
+    }
+
+    // ▼【修正】巨大回転斬で変えた当たり判定と重力を元に戻す。技の終わりだけでなく、撃破・持ち替え・試合の準備・
+    // 剣が片付けられる時（OnDisable）にも呼ぶ。何度呼んでもよい（戻すものが無ければ何もしない）
+    void EndGiantSpinPhysics()
+    {
+        if (giantSpinTriggerColliders != null)
+        {
+            for (int i = 0; i < giantSpinTriggerColliders.Length; i++)
+            {
+                if (giantSpinTriggerColliders[i] != null) giantSpinTriggerColliders[i].isTrigger = giantSpinOriginalTriggerStates[i];
+            }
+            giantSpinTriggerColliders = null;
+            giantSpinOriginalTriggerStates = null;
+        }
+        if (giantSpinHoldsBody)
+        {
+            giantSpinHoldsBody = false;
+            if (rb != null) rb.gravityScale = giantSpinOriginalGravityScale;
+        }
+    }
+
+    // ▼【新規追加】当たり判定を戻した時にステージ（Rigidbodyを持たない床・壁）へ重なっていたら、重なりが無くなるまで押し出す。
+    // 重なったまま当たり判定を戻すと、押し返される向きによっては床の下へ抜けてしまうため。
+    // 相手の剣との重なりは物理に任せる
+    void PushOutOfStage()
+    {
+        // 縮めた大きさ・戻した位置を当たり判定に反映してから調べる
+        Physics2D.SyncTransforms();
+        var filter = new ContactFilter2D { useTriggers = false };
+        var overlaps = new List<Collider2D>();
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            Vector2 push = Vector2.zero;
+            foreach (var own in GetComponentsInChildren<Collider2D>())
+            {
+                if (own.isTrigger || own.Overlap(filter, overlaps) == 0) continue;
+                foreach (var other in overlaps)
+                {
+                    if (other.attachedRigidbody != null && other.attachedRigidbody.bodyType != RigidbodyType2D.Static) continue;
+                    ColliderDistance2D d = own.Distance(other);
+                    if (!d.isValid || !d.isOverlapped) continue;
+                    Vector2 resolve = d.pointB - d.pointA;
+                    if (resolve.sqrMagnitude > push.sqrMagnitude) push = resolve;
+                }
+            }
+            if (push == Vector2.zero) return;
+            // ちょうど接する位置だと次のステップでまた重なることがあるので、少しだけ余分に離す
+            rb.position += push + push.normalized * .02f;
+            Physics2D.SyncTransforms();
+        }
     }
 
     // ▼【修正】剣を大きくする時は、x・yだけを拡大して奥行き(z)は元のままにする。
