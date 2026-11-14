@@ -152,8 +152,12 @@ test('a loading disconnect aborts the start; a playing disconnect is a forfeit',
 
 test('changing weapons clears readiness and rejects invalid stats', () => {
   const room = fullRoom();
-  room.updateSword('p0', { ...sword, name: '新しい剣' });
+  room.updateSword('p1', { ...sword, name: '新しい剣' });
   assert.equal(room.canStart(), false);
+  // ホストは準備完了を押さない（対戦開始が準備完了を兼ねる）ので、持ち替えても開始できるまま
+  room.setReady('p1', true);
+  room.updateSword('p0', { ...sword, name: '新しい剣' });
+  assert.equal(room.canStart(), true);
   // 送られてくる値は柄補正込みの最終値なので、上限は剣本体の最大値そのものではなく
   // 柄が乗せうる最大の補正込みの値(MAX_HP等)。それより上だけを不正として弾く。
   for (const hp of [NaN, Infinity, -1, 0, MAX_HP + 1]) {

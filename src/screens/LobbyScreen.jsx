@@ -306,7 +306,9 @@ export default function LobbyScreen({
   const npcBoss = Boolean(room.npcBoss);
   const canPickBoss = soloMode && isHost && !auto && !npcBoss;
   const playerCount = room.players.length;
-  const readyCount = room.players.filter(p => p.ready).length;
+  // ホストは準備完了を押さず、対戦開始を押すことで準備完了とみなす（HostRoom.canStart）ので、いつでも数に入れる
+  const isReadyPlayer = p => p.ready || p.playerId === 'p0';
+  const readyCount = room.players.filter(isReadyPlayer).length;
   const emptySlots = Array.from({ length: seatLimit }, (_, slot) => slot)
     .filter(slot => !room.players.some(p => p.slotIndex === slot));
   const seats = seatOrder(room.players, me.playerId).map(player => ({ slot: player.slotIndex, player }))
@@ -506,7 +508,7 @@ export default function LobbyScreen({
     const stats = isBoss ? bossStats(swordStats) : swordStats;
     const isPresent = player.connected && player.inLobby;
     // NPC は準備完了を自分で出せない代わりに、いつでも準備完了として名簿に入っている（HostRoom.makeNpc）
-    const isReady = player.npc || (!auto && player.ready && isPresent);
+    const isReady = player.npc || (!auto && isReadyPlayer(player) && isPresent);
     const waitLabel = !player.connected ? "切断" : !player.inLobby ? "結果\n確認中" : "準備\n中";
     // 名札は幅が限られるので、自分の列は「あなた」だけにする（自分がホストかどうかは対戦開始ボタンの有無で分かる）。
     const role = isMe ? "あなた" : player.npc ? "NPC" : player.playerId === 'p0' ? "ホスト" : "";
@@ -551,11 +553,6 @@ export default function LobbyScreen({
                 {isReady
                   ? <span key="done" className="lobby-seal lobby-seal--done">{"準備\n完了"}</span>
                   : <span key="wait" className="lobby-seal lobby-seal--wait">{waitLabel}</span>}
-                {isMe && (
-                  <button type="button" className="brush-link" onClick={() => onReady(!me.ready)}>
-                    {me.ready ? "準備取消" : "準備完了"}
-                  </button>
-                )}
               </>
             )}
           </div>
@@ -634,10 +631,17 @@ export default function LobbyScreen({
             </div>
 
             <div className="lobby-mid">
-              {/* 対戦開始はホストだけ。ほかの人にも同じ大きさの見えないボタンを置き、帯の高さ（＝列の高さ）をホストとそろえる */}
+              {/* 中央は「今やること」のボタン。ホストは対戦開始、ほかの人は準備完了（押した後は控えめな準備取消）。
+                  ランダムマッチは操作がないので、同じ大きさの見えないボタンで帯の高さ（＝列の高さ）をそろえる。
+                  準備完了は対戦開始と同じく墨を出して脈打たせる（墨は黒）。押した後の準備取消は薄く墨を敷くだけにとどめる */}
               {isHost && !auto ? (
                 <InkButton variant="shu" lit={view.canStart} onClick={onStart} disabled={!view.canStart}>
-                  {soloMode ? "1 vs 3 で対戦開始" : `${playerCount}人で対戦開始`}
+                  {/* 人数が足りないあいだに「1人で」と出すと、1人で始められるように読めてしまう */}
+                  {soloMode ? "1 vs 3 で対戦開始" : playerCount >= MIN_PLAYERS ? `${playerCount}人で対戦開始` : "対戦開始"}
+                </InkButton>
+              ) : !auto ? (
+                <InkButton variant={me.ready ? "usuzumi" : "sumi"} lit={!me.ready} rest={me.ready} onClick={() => onReady(!me.ready)}>
+                  {me.ready ? "準備取消" : "準備完了"}
                 </InkButton>
               ) : (
                 <div className="lobby-mid__ghost" aria-hidden="true">

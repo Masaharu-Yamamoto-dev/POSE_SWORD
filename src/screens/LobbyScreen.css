@@ -435,8 +435,8 @@ button.lobby-sword__body { cursor: pointer; }
   font-variant-numeric: tabular-nums;
 }
 
-/* 準備の場所：全員同じ位置（右の、ステータスのすぐ上）に印を出す。自分の列だけ、印の下に「準備完了／準備取消」が付く。
-   印はボタンのすぐ上まで下げて、印とボタンがひとまとまりに見えるようにする（場所全体の大きさは変えない） */
+/* 準備の場所：全員同じ位置（右の、ステータスのすぐ上）に印を出す。準備完了の操作は下の帯の中央にあるので、
+   ここは印だけ。印は場所の下端に寄せて、ステータスに近づける（場所全体の大きさは変えない） */
 .lobby-side {
   position: absolute;
   right: -4px;
@@ -446,15 +446,8 @@ button.lobby-sword__body { cursor: pointer; }
   height: 94px;
   display: grid;
   justify-items: center;
-  align-content: start;
-  padding-top: 18px;
-}
-
-.lobby-side .brush-link {
-  position: absolute;
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
+  align-content: end;
+  padding-bottom: 6px;
 }
 
 .lobby-side__note {
