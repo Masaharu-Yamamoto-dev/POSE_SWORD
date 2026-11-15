@@ -212,6 +212,20 @@ test('leaving results releases the rematch barrier for the remaining players', (
   assert.equal(room.reserve('replacement'), true);
 });
 
+test('players back in the lobby can change weapons while others are still on the result screen', () => {
+  const room = fullRoom(2);
+  const match = room.prepare();
+  for (const p of match.players) room.markLoaded(p.playerId, match.matchId);
+  room.beginPlaying(match.matchId);
+  room.finish(match.matchId);
+  room.returnToLobby('p0');
+  assert.equal(room.snapshot().phase, 'RESULT');
+  // まだ結果画面にいる人は変えられない
+  assert.throws(() => room.updateSword('p1', { ...sword, name: '新しい剣' }));
+  room.updateSword('p0', { ...sword, imageStr: 'ZmxpcA==' });
+  assert.equal(room.snapshot().players[0].swordData.imageStr, 'ZmxpcA==');
+});
+
 test('configuration changes keep ready states and are locked during loading', () => {
   const room = fullRoom();
   for (const p of room.snapshot().players) room.setReady(p.playerId, true);

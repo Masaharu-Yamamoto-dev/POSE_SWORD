@@ -10,8 +10,9 @@ public class MatchRulesTests
         Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, false, true, false, true));
         Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, false, false, true));
         Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, true, true, true));
-        Assert.IsNull(BattlePolicies.PrimaryAction(true, 19, true, true, false, true));
-        Assert.AreEqual("KomaDash", BattlePolicies.PrimaryAction(true, 20, true, true, false, true));
+        // 独楽モードの突進はSPではなく回転の速さで決まる
+        Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, true, false, true, false, false));
+        Assert.AreEqual("KomaDash", BattlePolicies.PrimaryAction(true, 0, true, true, false, true, false, true));
         // 通常入力(クリック/タップ)では、SPが必殺技分たまっていても剣モードは常にジャンプのみ
         Assert.AreEqual("JumpRight", BattlePolicies.PrimaryAction(false, 100, true, true, false, true));
         Assert.AreEqual("JumpLeft", BattlePolicies.PrimaryAction(false, 99, true, true, false, false));
@@ -23,8 +24,8 @@ public class MatchRulesTests
         Assert.IsNull(BattlePolicies.UltimateAction(true, 100, false, true, false));
         Assert.IsNull(BattlePolicies.UltimateAction(true, 100, true, false, false));
         Assert.IsNull(BattlePolicies.UltimateAction(true, 100, true, true, true));
-        Assert.IsNull(BattlePolicies.UltimateAction(true, 69, true, true, false));
-        Assert.AreEqual("Tornado", BattlePolicies.UltimateAction(true, 70, true, true, false));
+        Assert.IsNull(BattlePolicies.UltimateAction(true, 99, true, true, false));
+        Assert.AreEqual("Tornado", BattlePolicies.UltimateAction(true, 100, true, true, false));
         Assert.IsNull(BattlePolicies.UltimateAction(false, 99, true, true, false));
         Assert.AreEqual("SwordDash", BattlePolicies.UltimateAction(false, 100, true, true, false));
     }
@@ -205,6 +206,71 @@ public class MatchRulesTests
         Assert.AreEqual("b", match.WinnerId);
         Assert.AreEqual(0, match.Get("a").LivesRemaining);
         Assert.AreEqual("DISCONNECTED", match.Get("a").EliminationReason);
+    }
+
+    // ===== 場外（ステージの下へ落ちた） =====
+
+    [Test]
+    public void FallOutWithoutLivesEliminatesWithoutKillOrDamage()
+    {
+        var match = new MatchRules(new[] { "a", "b" }, new[] { 100, 100 });
+        match.ResolveStep(1, new Hit[0], null, new[] { "a" });
+        Assert.IsTrue(match.Ended);
+        Assert.AreEqual("b", match.WinnerId);
+        Assert.AreEqual(0, match.Get("a").Hp);
+        Assert.AreEqual("FALL", match.Get("a").EliminationReason);
+        Assert.AreEqual(2, match.Get("a").Rank);
+        Assert.AreEqual(1, match.Get("a").EliminationTick);
+        Assert.AreEqual(0, match.Players.Sum(p => p.Kills));
+        Assert.AreEqual(0, match.Players.Sum(p => p.DamageDealt));
+        Assert.AreEqual(0, match.Get("a").DamageTaken);
+    }
+
+    [Test]
+    public void FallOutWithLivesSwapsToNextSword()
+    {
+        var match = WithRespawnDelay(2, new[] { 100, 80 }, new[] { 100 });
+        match.ResolveStep(1, new Hit[0], null, new[] { "p0" });
+        var p0 = match.Get("p0");
+        Assert.IsFalse(match.Ended);
+        Assert.IsTrue(p0.Alive);
+        Assert.IsFalse(p0.OnField);
+        Assert.IsTrue(p0.Respawning);
+        Assert.AreEqual(1, p0.LivesRemaining);
+        Assert.IsNull(p0.EliminationReason);
+        Assert.AreEqual(0, match.Get("p1").Kills);
+
+        match.ResolveStep(2, new Hit[0]);
+        match.ResolveStep(3, new Hit[0]);
+        Assert.IsTrue(p0.OnField);
+        Assert.AreEqual(80, p0.Hp);
+        Assert.AreEqual(1, p0.RespawnSeq);
+    }
+
+    [Test]
+    public void LethalHitInTheSameStepWinsOverFallOut()
+    {
+        var match = new MatchRules(new[] { "a", "b", "c" }, new[] { 100, 100, 100 });
+        match.ResolveStep(1, new[] { new Hit("b", "a", 100) }, null, new[] { "a" });
+        Assert.AreEqual("KO", match.Get("a").EliminationReason);
+        Assert.AreEqual(1, match.Get("b").Kills);
+        Assert.IsFalse(match.Ended);
+    }
+
+    [Test]
+    public void FallOutIgnoresPlayersNotOnFieldAndUnknownIds()
+    {
+        var match = WithRespawnDelay(5, new[] { 100, 80 }, new[] { 100 }, new[] { 100 });
+        match.ResolveStep(1, new[] { new Hit("p1", "p0", 100) });
+        // 次の剣を待っている間（場に剣が無い）に場外が届いても、残機を余分に減らさない
+        match.ResolveStep(2, new Hit[0], null, new[] { "p0", null, "zz" });
+        Assert.AreEqual(1, match.Get("p0").LivesRemaining);
+        Assert.IsTrue(match.Get("p0").Respawning);
+        // 場外は落ちた本人だけに効く
+        match.ResolveStep(3, new Hit[0], null, new[] { "p2" });
+        Assert.AreEqual("FALL", match.Get("p2").EliminationReason);
+        Assert.AreEqual(100, match.Get("p1").Hp);
+        Assert.IsFalse(match.Ended);
     }
 
     [Test]
@@ -422,7 +488,7 @@ public class MatchRulesTests
     public void SuppressedPlayersCannotActAtAll()
     {
         Assert.IsNull(BattlePolicies.PrimaryAction(false, 100, true, true, false, true, true));
-        Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, true, false, true, true));
+        Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, true, false, true, true, true));
         Assert.IsNull(BattlePolicies.UltimateAction(false, 100, true, true, false, true));
         Assert.IsNull(BattlePolicies.UltimateAction(true, 100, true, true, false, true));
         // 制圧されていなければ従来どおり通る
@@ -439,8 +505,9 @@ public class MatchRulesTests
         // 閾値を上げた場合はその値で判定する
         Assert.IsNull(BattlePolicies.UltimateAction(false, 199, true, true, false, false, 200f));
         Assert.AreEqual("SwordDash", BattlePolicies.UltimateAction(false, 200, true, true, false, false, 200f));
-        // 独楽モードは閾値70のまま影響を受けない
-        Assert.AreEqual("Tornado", BattlePolicies.UltimateAction(true, 70, true, true, false, false, 200f));
+        // 独楽モードの竜巻も同じラインで判定する
+        Assert.IsNull(BattlePolicies.UltimateAction(true, 99, true, true, false, false, 100f));
+        Assert.AreEqual("Tornado", BattlePolicies.UltimateAction(true, 100, true, true, false, false, 100f));
         Assert.IsNull(BattlePolicies.UltimateAction(false, 100, true, true, false, false, float.NaN));
     }
 

@@ -184,7 +184,7 @@ public class TutorialManager : MonoBehaviour
     // 🌀 独楽モードのロジック
     void HandleKomaModeTutorial()
     {
-        if (playerBattle.currentSp >= 70f)
+        if (playerBattle.currentSp >= playerBattle.UltimateThreshold)
         {
             if (!isShowingUltimate)
             {
@@ -232,7 +232,7 @@ public class TutorialManager : MonoBehaviour
     {
         if (isShowingUltimate) return; 
         scrollSpeed = 150f;
-        SetNormalTickerTripleText("クリック/タップでSPを消費して牽制できます");
+        SetNormalTickerTripleText("クリック/タップで突進して牽制できます　回転が速い時だけ出せます");
     }
 
     // ▼【新規拡張】通常チュートリアル用のトリプル初期位置セット（右端外側から綺麗に3連連結）

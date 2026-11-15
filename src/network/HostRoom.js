@@ -291,10 +291,13 @@ export class HostRoom {
     if (this.bossPlayerId && !this.get(this.bossPlayerId)) this.bossPlayerId = this.soloMode ? 'p0' : null;
   }
 
+  // 対戦後、ほかの人がまだ結果画面にいる間（phase は RESULT のまま）でも、先にロビーへ戻った人は剣を変えられる（setReady と同じ）。
+  // 以前はここで断っていたが、画面側は送った剣を「送り済み」と覚えるので、断られた変更（左右反転など）がずっと相手に届かなかった
   updateSword(playerId, sword) {
-    if (this.phase !== 'LOBBY' || !this.get(playerId)) throw new Error('武器を変更できません。');
-    this.get(playerId).swordData = validateSword(sword);
-    this.get(playerId).ready = false;
+    const player = this.get(playerId);
+    if (!player || !(this.phase === 'LOBBY' || (this.phase === 'RESULT' && player.inLobby))) throw new Error('武器を変更できません。');
+    player.swordData = validateSword(sword);
+    player.ready = false;
     this.revision++;
   }
 

@@ -131,6 +131,19 @@ namespace PoseSword.Multiplayer
             RespawnTick = -1;
             EliminationReason = "DISCONNECTED";
         }
+
+        // 場外（ステージの下へ落ちた）：撃破と同じく今の剣を失う。残機があれば次の剣を待ち、無ければ脱落。
+        // 誰かに倒されたわけではないので、撃破数もダメージも誰にも付けない
+        internal void FallOut(int respawnTick)
+        {
+            Hp = 0;
+            if (LivesRemaining > 1) BreakSword(respawnTick);
+            else
+            {
+                LivesRemaining = 0;
+                EliminationReason = "FALL";
+            }
+        }
     }
 
     // Owns only authoritative health, attribution and ranking. Unity supplies one
@@ -198,7 +211,8 @@ namespace PoseSword.Multiplayer
 
         public PlayerScore Get(string id) { return byId[id]; }
 
-        public void ResolveStep(int tick, IEnumerable<Hit> hits, IEnumerable<string> forfeits = null)
+        // fallOuts：このステップで場外になった（ステージの下へ落ちた）プレイヤー。場に剣が出ている人だけが対象
+        public void ResolveStep(int tick, IEnumerable<Hit> hits, IEnumerable<string> forfeits = null, IEnumerable<string> fallOuts = null)
         {
             lastStepDamage.Clear();
             lastStepHealing.Clear();
@@ -281,6 +295,15 @@ namespace PoseSword.Multiplayer
                 if (healed <= 0) continue;
                 player.Hp += healed;
                 lastStepHealing.Add(new HealRecord(player.PlayerId, healed));
+            }
+
+            // 場外：同じステップの攻撃で既に剣が壊れていれば、そちら（倒した人の撃破）を優先する
+            var fallen = new HashSet<string>((fallOuts ?? Enumerable.Empty<string>())
+                .Where(id => id != null && onField.Contains(id) && !disconnected.Contains(id)));
+            foreach (var id in fallen)
+            {
+                var player = Get(id);
+                if (player.OnField) player.FallOut(tick + respawnDelayTicks);
             }
 
             // 切断は残機の有無に関わらず即座に脱落させる

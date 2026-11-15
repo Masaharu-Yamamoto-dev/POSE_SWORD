@@ -79,6 +79,9 @@ using UnityEngine;
     // ▼【新規追加】オレ達アタックの段階（CloneRushChargeStage）と、残りの発射数。ゲストはこれを見て溜めと残りの数の演出を出す
     public int clonePhase;
     public int cloneShots;
+    // ▼【新規追加】独楽モード：突進できる回転の速さに対する今の回転の割合（1以上で突進できる）。
+    // ゲストの独楽は物理が動いていないので、ホストの値を受け取って独楽のまわりの輪に使う
+    public float komaSpin;
 }
 // ▼【新規追加】分身突進（hiltType:"2"）・リーフシールド（hiltType:"3"）など、
 // 本体以外に複数体表示する"付随体"1体分の見た目同期用データ
