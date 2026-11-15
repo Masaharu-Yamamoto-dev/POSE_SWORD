@@ -1542,11 +1542,10 @@ public static bool matchEnded = false;
                     powerMultiplier = Mathf.Clamp(powerMultiplier, 1.0f, 1.5f); 
                     damage = Mathf.RoundToInt(damage * powerMultiplier);
 
-                    // ▼【修正】ダッシュ時のバグ（/5で減っていた）を修正しつつ、強すぎない1.2倍ボーナスに
-                    // 突進（技番号1）は自分のHPが減っているほど少し強くなる。竜巻は持続時間に合わせた倍率
-                    if (isDashing)
+                    // 竜巻は持続時間に合わせた倍率を、クリティカルと掛け合わせる
+                    if (isDashing && currentDashType != 1)
                     {
-                        damage = Mathf.RoundToInt(damage * (currentDashType == 1 ? KomaDashDamageMultiplier : komaTornadoDamageMultiplier));
+                        damage = Mathf.RoundToInt(damage * komaTornadoDamageMultiplier);
                     }
 
                     // オレ達シールドが出ている相手には、クリティカル（下の①〜③）が出ない
@@ -1554,31 +1553,33 @@ public static bool matchEnded = false;
                     if (target.HasActiveLeafShield) { amIStronger = false; isSharp = false; }
 
                     // ▼【修正】クリティカルの倍率もマイルドに抑え、剣モードに近い削り合いにする
+                    float critRate = 1f;
                     if (amIStronger && komaPower > critThreshold && isSharp)
                     {
                         // ①【絶・クリティカル】（約1.8倍）
-                        damage = Mathf.RoundToInt(damage * 1.8f);
+                        critRate = 1.8f;
                         isCrit = true;
                         Debug.Log($"💥 独楽【絶・クリティカル】! 破壊力と鋭利さが合わさった！");
                     }
                     else if (amIStronger && komaPower > critThreshold)
                     {
                         // ②【超破壊】（約1.3倍）
-                        damage = Mathf.RoundToInt(damage * 1.3f);
+                        critRate = 1.3f;
                         isCrit = true;
                         Debug.Log($"💥 独楽【超破壊】! (自エネ: {myEnergy:F0} > 敵エネ: {targetEnergy:F0})");
                     }
                     else if (isSharp)
                     {
                         // ③【鋭利（カウンター）】（約1.3倍）
-                        damage = Mathf.RoundToInt(damage * 1.3f);
+                        critRate = 1.3f;
                         isCrit = true;
                         Debug.Log($"💥 独楽【鋭利】! 一矢報いるカウンター直撃！");
                     }
-                    else
-                    {
-                        // ④ どれも満たさない場合は通常ダメージ
-                    }
+                    // 突進（技番号1）の倍率（HPが減っているほど少し強くなる）は、クリティカルと掛け合わせず足し合わせる。
+                    // 例：突進1.7倍＋絶・クリティカル1.8倍 → 1＋0.7＋0.8＝2.5倍（掛け合わせると3.06倍）
+                    float dashRate = IsKomaDashing ? KomaDashDamageMultiplier : 1f;
+                    float totalRate = critRate + dashRate - 1f;
+                    if (totalRate != 1f) damage = Mathf.RoundToInt(damage * totalRate);
                 }
                 else
                 {
