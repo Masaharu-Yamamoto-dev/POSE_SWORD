@@ -1103,9 +1103,10 @@ public static bool matchEnded = false;
             if (Input.GetKeyDown(KeyCode.A)) TryAction(false);
             if (Input.GetKeyDown(KeyCode.D)) TryAction(true);
 
-            // ▼【新規追加】PC操作時のみ：スペースキーでも必殺技専用ボタンと同じ発動ができるようにする
+            // ▼【新規追加】PC操作時のみ：スペースキー・Sキーでも必殺技専用ボタンと同じ発動ができるようにする
+            // （Sキーは移動のA・Dと並んでいて、手を動かさずに押せる）
             // ▼ 1vs3ではSPが満タンになると、このキーで出るものが掌握へ切り替わる（TryUltimate内で振り分ける）
-            if (Input.GetKeyDown(KeyCode.Space)) TryUltimate();
+            if (Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.S)) TryUltimate();
         }
     }
 

@@ -5111,7 +5111,7 @@ MonoBehaviour:
   autoStartOnPlay: 1
   debugRosterJsonFile: {fileID: 0}
   playerCount: 2
-  gameMode: 1
+  gameMode: 0
   localHiltTypeOverride: 0
   ownedSwordCount: 1
   livesMode: 1
