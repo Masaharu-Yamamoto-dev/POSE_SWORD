@@ -34,11 +34,10 @@ public class SwordBattle : MonoBehaviour
     // ▼【新規追加】オレ達アタック・オレ達シールドの分身を染める色。分身は剣の絵に色を掛け合わせて染めるので、
     // プレイヤーの色そのままだと暗くなりすぎる。白に寄せて明るくする（cloneTintLighten：0でプレイヤーの色そのまま、1で白）
     public Color CloneTint => Color.Lerp(PlayerMainColor, Color.white, cloneTintLighten);
-    // 必殺技が撃てるようになるSPのライン（独楽モードは竜巻の70、剣モードは満タン）
-    // 通常必殺技の発動ライン。既定の100は maxSp の既定値と同じなので、従来の挙動は変わらない。
+    // 通常必殺技の発動ライン（独楽モードの竜巻も同じ）。既定の100は maxSp の既定値と同じなので、従来の挙動は変わらない。
     // 1vs3のボスだけ maxSp が200になるが、通常必殺技は100のままにしたいので参照先を分けてある。
     public float ultimateSp = 100f;
-    public float UltimateThreshold => SwordController.isKomaMode ? 70f : ultimateSp;
+    public float UltimateThreshold => ultimateSp;
 
     [Header("UI設定")]
     public Slider hpBar;        // 手前の緑ゲージ
@@ -103,6 +102,31 @@ public static bool matchEnded = false;
     public float maxSp = 100f;         // SPの最大値
     public float passiveSpFill = 7f;   // 1秒間に自動で溜まる量
     public float damageSpMultiplier = 0.5f; // 受けたダメージの何倍をSPに変換するか
+    // 独楽モードだけSPの溜まり方に掛ける倍率。竜巻のラインを70→100に上げた分、溜まる速さも100/70倍にして
+    // 「SP100まで溜まる時間」を以前の「SP70まで溜まる時間」と同じにしている
+    public float komaSpGainScale = 100f / 70f;
+    float SpGainScale => SwordController.isKomaMode ? komaSpGainScale : 1f;
+    // 独楽モードの突進の勢い。以前はSPに比例していた（SP×1.5）ので、SP35ほどで突進した時と同じ強さにしてある
+    public float komaDashImpulse = 52f;
+    // 独楽モードの突進が当たった時のダメージ倍率。HPが減るほど少しずつ上がる（HP満タンで komaDashDamageFullHp、HPが0に近いほど komaDashDamageLowHp）
+    public float komaDashDamageFullHp = 1.3f;
+    public float komaDashDamageLowHp = 1.7f;
+    float HpRate => Mathf.Clamp01((float)hp / Mathf.Max(1, maxHp));
+    float KomaDashDamageMultiplier => Mathf.Lerp(komaDashDamageLowHp, komaDashDamageFullHp, HpRate);
+    // 独楽モードの突進の効果時間。HPが減るほど伸びる（HP満タンで komaDashTimeFullHp、HPが0に近いほど komaDashTimeLowHp）
+    public float komaDashTimeFullHp = 0.2f;
+    public float komaDashTimeLowHp = 0.3f;
+    // 突進中に受けるダメージの割合。以前は突進中は無敵だった（竜巻は今も無敵）
+    [Range(0f, 1f)] public float komaDashDamageTakenRate = 0.5f;
+    public bool IsKomaDashing => isDashing && currentDashType == 1;
+    // 無敵になる突進・必殺技の最中か。独楽モードの突進だけは無敵ではなく、受けるダメージが減る
+    public bool DashInvulnerable => isDashing && !IsKomaDashing;
+    // 竜巻の長さと、当たった時のダメージ倍率。以前は0.8秒・2倍だった。長くした分だけ当たる回数が増えるので、
+    // 1回あたりの倍率を長さに反比例させて（2倍×0.8秒÷1.2秒）、竜巻1回で与えるダメージの合計が増えないようにしている
+    public float komaTornadoDuration = 1.2f;
+    public float komaTornadoDamageMultiplier = 2f * 0.8f / 1.2f;
+    public float swordCritBonus = 1f; // 剣モードの通常攻撃が尖った所で当たった時の上乗せ（+100%）。柄の上乗せとは足し算
+    public float swordWeakPointBonus = 1f; // 剣モードの通常攻撃が相手の柄に当たった時の上乗せ（+100%）。クリティカルの上乗せとは足し算
     public float spinDashDamageMultiplier = 3.5f; // 大回転斬（hiltType:"0"）が相手の剣に当たった時の、通常の衝突ダメージへの倍率（以前は4）
     public float spinDashCritMultiplier = 1f; // 大回転斬が尖った所で当たった時の倍率（通常攻撃は3倍）
     public float spinDashWeakPointMultiplier = 1f; // 大回転斬が相手の柄に当たった時の倍率
@@ -118,6 +142,7 @@ public static bool matchEnded = false;
     public float spinGrazeAngle = 30f;
     public float giantSpinScale = 5f; // 巨大化一回転（hiltType:"1"）の拡大率（以前は6）
     public float giantSpinDamageMultiplier = 3f; // 巨大化一回転が命中した時のダメージ倍率（attackへの倍率）
+    public float giantSpinWeakPointMultiplier = 1.4f; // 巨大化一回転が相手の柄に当たった時の倍率（以前は2で固定）
     public float giantSpinRotationSpeed = 1080f; // 巨大化一回転の回転速度（度/秒）。小さくするとゆっくり回るようになる（一回転にかかる時間もこれに応じて伸びる）
     // ▼【新規追加】巨大回転斬の流れ（カットインの後）：柄が光る → 3段階で巨大化 → 振りかぶり → 一回転（攻撃判定はここだけ）
     // → 余韻 → 縮む → ふらつき。秒数はゲーム内の時間で、撃破で止められている間は進まない（ふらつきを除く）
@@ -205,7 +230,8 @@ public static bool matchEnded = false;
     private bool wasLocalControlledForButton = false;
 
     // ▼【変更】オレ達シールドが展開されている間の本体の守り。以前は1枚でも残っていれば本体が完全無敵だったが、
-    // 受けるダメージを減らす（leafShieldDamageTakenRate）だけにし、柄も弱点にならないようにした
+    // 受けるダメージを減らす（leafShieldDamageTakenRate）だけにし、柄も弱点にならないようにした。
+    // 尖った所で当てられてもクリティカルにならない（剣モード・独楽モードとも）
     readonly List<LeafShieldOrb> activeShieldOrbs = new List<LeafShieldOrb>();
     public bool HasActiveLeafShield => activeShieldOrbs.Count > 0;
     public void RegisterShieldOrb(LeafShieldOrb orb) { if (orb != null && !activeShieldOrbs.Contains(orb)) activeShieldOrbs.Add(orb); }
@@ -329,7 +355,8 @@ public static bool matchEnded = false;
     {
         if (MultiplayerOwner == null || !MultiplayerOwner.IsHost) return;
         string action = PoseSword.Multiplayer.BattlePolicies.PrimaryAction(SwordController.isKomaMode, currentSp,
-            MultiplayerOwner.IsPlaying, IsAlive, InputBlockedBySkill, right, MultiplayerOwner.IsSuppressed(PlayerId) || MultiplayerOwner.IsRooted(PlayerId) || IsStaggered);
+            MultiplayerOwner.IsPlaying, IsAlive, InputBlockedBySkill, right, MultiplayerOwner.IsSuppressed(PlayerId) || MultiplayerOwner.IsRooted(PlayerId) || IsStaggered,
+            controller != null && controller.KomaDashReady);
         switch (action)
         {
             case "KomaDash": StartCoroutine(DashRoutine()); break;
@@ -660,7 +687,7 @@ public static bool matchEnded = false;
         {
             PlayShieldGuard();
             PlayClientDamageEffect(damage, wasCrit);
-            if (MultiplayerOwner.IsHost) currentSp = Mathf.Min(maxSp, currentSp + 100f * damage / maxHp * damageSpMultiplier);
+            if (MultiplayerOwner.IsHost) currentSp = Mathf.Min(maxSp, currentSp + 100f * damage / maxHp * damageSpMultiplier * SpGainScale);
         }
         // ▼【新規追加】ライフスティールでHPが増えた時は、回復した量を出す（ホストもゲストも同じHPの同期から判断する）。
         // 残機制の持ち替えは、新しい剣を作る時に先にHPが入れ直されるので、ここでは増えた扱いにならない
@@ -710,9 +737,10 @@ public static bool matchEnded = false;
     // ▼【修正】dashType 4(巨大化一回転)・5(分身突進)・6(リーフシールド発動)の色分けと、
     // 巨大化のスケールをクライアント側にも反映する
     public void ApplyMultiplayerVisuals(float sp, bool dashing, int dashType, float scale, int spinPhase = 0, int giantPhase = 0,
-        int clonePhase = 0, int cloneShots = 0)
+        int clonePhase = 0, int cloneShots = 0, float komaSpin = 0f)
     {
         if (!IsAlive) return;
+        komaSpinCharge = komaSpin;
         spinDashPhase = spinPhase;
         giantSpinPhase = giantPhase;
         cloneRushPhase = clonePhase;
@@ -745,6 +773,7 @@ public static bool matchEnded = false;
         UpdateCloneRushChargeLook();
         UpdateShieldAura();
         UpdateSpinDashLook();
+        UpdateKomaDashLook();
     }
 
     // ▼【新規追加】オレ達シールドの、守っている間のふちどりと、殴られた時の盾の光（SkillEffects.LeafShield）。
@@ -854,6 +883,7 @@ public static bool matchEnded = false;
         if (giantSpinLook != null) { giantSpinLook.Dispose(); giantSpinLook = null; }
         if (cloneRushChargeLook != null) { cloneRushChargeLook.Dispose(); cloneRushChargeLook = null; }
         if (shieldAura != null) { shieldAura.Dispose(); shieldAura = null; }
+        if (komaDashLook != null) { komaDashLook.Dispose(); komaDashLook = null; }
     }
 
     public static Color ColorForDashType(int dashType)
@@ -1030,7 +1060,7 @@ public static bool matchEnded = false;
         if (!isRoundStarted || isDead || matchEnded) return;
         UpdateLeafShieldRadius();
 
-        if (MultiplayerOwner == null || MultiplayerOwner.IsHost) currentSp += passiveSpFill * Time.deltaTime;
+        if (MultiplayerOwner == null || MultiplayerOwner.IsHost) currentSp += passiveSpFill * SpGainScale * Time.deltaTime;
         currentSp = Mathf.Clamp(currentSp, 0f, maxSp);
 
         if (spGaugeBar != null)
@@ -1192,6 +1222,8 @@ public static bool matchEnded = false;
         SetHiltGlow(false);
         // 巨大回転斬の途中で剣が片付けられても、当たり判定と重力を変えたままにしない
         EndGiantSpinPhysics();
+        // 倒されるとLateUpdateが止まるので、独楽のまわりの輪がその場に残らないよう片付ける（次に動き出せば作り直す）
+        if (komaDashLook != null) { komaDashLook.Dispose(); komaDashLook = null; }
     }
 
     // ▼【新規追加】残機モード：HPパネル内の「あと何本あるか」アイコン列を、渡された残りの剣の
@@ -1510,12 +1542,15 @@ public static bool matchEnded = false;
                     damage = Mathf.RoundToInt(damage * powerMultiplier);
 
                     // ▼【修正】ダッシュ時のバグ（/5で減っていた）を修正しつつ、強すぎない1.2倍ボーナスに
+                    // 突進（技番号1）は自分のHPが減っているほど少し強くなる。竜巻は持続時間に合わせた倍率
                     if (isDashing)
                     {
-                        damage = Mathf.RoundToInt(damage * 2f);
+                        damage = Mathf.RoundToInt(damage * (currentDashType == 1 ? KomaDashDamageMultiplier : komaTornadoDamageMultiplier));
                     }
 
+                    // オレ達シールドが出ている相手には、クリティカル（下の①〜③）が出ない
                     bool isSharp = (myCollider is PolygonCollider2D myPoly && IsPointy(hitPoint, myPoly));
+                    if (target.HasActiveLeafShield) { amIStronger = false; isSharp = false; }
 
                     // ▼【修正】クリティカルの倍率もマイルドに抑え、剣モードに近い削り合いにする
                     if (amIStronger && komaPower > critThreshold && isSharp)
@@ -1553,17 +1588,21 @@ public static bool matchEnded = false;
                         damage = Mathf.RoundToInt(damage * dashDamageBonus);
                         dashDamageBonus = 1.0f; // 使ったらリセットする
                     }
-                    if (myCollider is PolygonCollider2D myPoly && IsPointy(hitPoint, myPoly))
-                    {
-                        damage = spinDashHit ? Mathf.RoundToInt(damage * spinDashCritMultiplier) : damage * 3;
-                        isCrit = true;
-                    }
+                    // オレ達シールドが出ている相手には、尖った所で当ててもクリティカルにならない
+                    isCrit = !target.HasActiveLeafShield && myCollider is PolygonCollider2D myPoly && IsPointy(hitPoint, myPoly);
+                    // 相手の柄（弱点）判定。オレ達シールドが出ている相手は、柄が弱点にならない
+                    isWeakPoint = targetCollider.CompareTag("Handle") && !target.HasActiveLeafShield;
 
-                // 相手の柄（弱点）判定。オレ達シールドが出ている相手は、柄が弱点にならない
-                    if (targetCollider.CompareTag("Handle") && !target.HasActiveLeafShield)
+                    if (spinDashHit)
                     {
-                        damage = spinDashHit ? Mathf.RoundToInt(damage * spinDashWeakPointMultiplier) : damage * 2;
-                        isWeakPoint = true;
+                        if (isCrit) damage = Mathf.RoundToInt(damage * spinDashCritMultiplier);
+                        if (isWeakPoint) damage = Mathf.RoundToInt(damage * spinDashWeakPointMultiplier);
+                    }
+                    else
+                    {
+                        // 通常攻撃はクリティカル・柄の上乗せを掛け算ではなく足し算にする（両方当たっても1+1+1=3倍まで）
+                        float bonus = (isCrit ? swordCritBonus : 0f) + (isWeakPoint ? swordWeakPointBonus : 0f);
+                        damage = Mathf.RoundToInt(damage * (1f + bonus));
                     }
                 }
                     // ▼変更：TakeDamageの結果（倒したかどうか）を受け取る
@@ -1617,7 +1656,7 @@ public static bool matchEnded = false;
     {
         if (MultiplayerOwner != null) return false; // HP is committed once per physics step by MatchRules.
         if (isDead) return false; // 変更
-        if (isDashing)
+        if (DashInvulnerable)
         {
             Debug.Log("🛡️ 突進中につき無敵！攻撃を弾いた！");
             // ※もし「キンッ！」という弾き音（パリィ音）があればここで鳴らすと最高です
@@ -1636,7 +1675,7 @@ public static bool matchEnded = false;
         if (shielded) PlayShieldGuard();
 
         float damagePercentage = ((float)damage / maxHp) * 100f; 
-        currentSp = Mathf.Clamp(currentSp + (damagePercentage * damageSpMultiplier), 0f, maxSp);
+        currentSp = Mathf.Clamp(currentSp + (damagePercentage * damageSpMultiplier * SpGainScale), 0f, maxSp);
 
         hp -= damage;
         if (hp < 0) hp = 0;
@@ -1843,7 +1882,7 @@ public static bool matchEnded = false;
 
         if (SwordController.isKomaMode)
         {
-            if (currentSp >= 20f)
+            if (controller != null && controller.KomaDashReady)
             {
                 StartCoroutine(DashRoutine());
                 actionName = "KomaDash";
@@ -1910,7 +1949,6 @@ public static bool matchEnded = false;
         }
         else if (actionName == "KomaDash")
         {
-            currentSp = 0f;
             StartCoroutine(DashRoutine());
         }
         else if (actionName == "SwordDash")
@@ -1928,26 +1966,24 @@ public static bool matchEnded = false;
         }
     }
 
-    // ▼【修正】独楽モード：牽制の小ダッシュ（SP20〜69）
     // ▼【修正】独楽モード：牽制の小ダッシュ
+    // SPは使わず、代わりに回転を落とす（落ちる割合は SwordController.komaDashSpinKeep）。
+    // 以前は溜まっていたSPを全部使い、突進の強さもそのSPに比例していたため、SPを溜めたくて突進しなくなっていた
     IEnumerator DashRoutine()
     {
         isDashing = true;
         currentDashType = 1;
         if (spriteRenderer != null) spriteRenderer.color = new Color(1f, 0.5f, 0.5f);
-        
-        float consumedSp = currentSp;
-        currentSp = 0f; 
 
         // ▼【修正】rb.bodyType == RigidbodyType2D.Dynamic を追加（Hostのみ動く）
         if (controller != null && controller.enemyTarget != null && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
         {
             Vector2 dirToEnemy = (controller.enemyTarget.position - transform.position).normalized;
-            rb.AddForce(dirToEnemy * (consumedSp * 1.5f), ForceMode2D.Impulse);
-            rb.AddTorque(-consumedSp * 50f, ForceMode2D.Impulse); 
+            rb.AddForce(dirToEnemy * komaDashImpulse, ForceMode2D.Impulse);
+            rb.angularVelocity *= controller.komaDashSpinKeep;
         }
 
-        yield return new WaitForSeconds(0.2f);
+        yield return new WaitForSeconds(Mathf.Lerp(komaDashTimeLowHp, komaDashTimeFullHp, HpRate));
 
         isDashing = false;
         currentDashType = 0;
@@ -2070,7 +2106,7 @@ public static bool matchEnded = false;
         yield return StartCoroutine(PlayUltimateCutinAndWait("竜巻猛突!!", new Color(1f, 0.8f, 0.2f)));
         if (UltimateCancelled) { CancelUltimate(); yield break; }
 
-        float duration = 0.8f;
+        float duration = komaTornadoDuration;
         float timer = 0f;
 
         while (timer < duration)
@@ -2579,9 +2615,12 @@ public static bool matchEnded = false;
     public float KnockbackScale => HasActiveLeafShield ? leafShieldKnockbackRate : 1f;
 
     // 受けるダメージ：シールドが出ていれば leafShieldDamageTakenRate を掛ける（1未満にはしない）
+    // 独楽モードの突進中なら komaDashDamageTakenRate も掛ける
     public int ShieldedDamage(int damage)
     {
-        return HasActiveLeafShield ? Mathf.Max(1, Mathf.RoundToInt(damage * leafShieldDamageTakenRate)) : damage;
+        if (HasActiveLeafShield) damage = Mathf.Max(1, Mathf.RoundToInt(damage * leafShieldDamageTakenRate));
+        if (IsKomaDashing) damage = Mathf.Max(1, Mathf.RoundToInt(damage * komaDashDamageTakenRate));
+        return damage;
     }
 
     // 本体が実際にダメージを受けた時（ローカルはTakeDamage、オンラインはMatchRulesの確定後にMultiplayerManagerから）。
@@ -2783,7 +2822,7 @@ public static bool matchEnded = false;
             float rate = PoseSword.Multiplayer.BattlePolicies.GiantSpinHitRate(giantSpinHitTargets.Count, giantSpinSecondHitRate, giantSpinLaterHitRate);
             bool isWeakPoint = part != null && part.CompareTag("Handle") && !target.HasActiveLeafShield;
             int damage = Mathf.RoundToInt(attack * giantSpinDamageMultiplier * rate);
-            if (isWeakPoint) damage *= 2;
+            if (isWeakPoint) damage = Mathf.RoundToInt(damage * giantSpinWeakPointMultiplier);
             damage = Mathf.Max(damage, 1);
 
             Vector2 hitPoint = part != null ? part.ClosestPoint(transform.position) : (Vector2)target.transform.position;
@@ -2973,6 +3012,28 @@ public static bool matchEnded = false;
         bool wasSettling = spinDashPhase >= (int)SpinDashStage.SlowMiss;
         spinDashPhase = 0;
         if (wasSettling && !isDead && rb != null && rb.bodyType == RigidbodyType2D.Dynamic && controller != null) controller.ApplyPhysicsMode();
+    }
+
+    // ▼【新規追加】独楽モードの突進の演出。突進できるかを独楽のまわりの輪で見せ、突進した時は残像と墨しぶきを出す。
+    // 回転の割合はホスト（とローカル）だけが物理から求め、ゲストは同期で受け取る。突進の始まりは技番号（1）の変わり目で見るので、
+    // ホストもゲストも同じ流れで描く
+    [HideInInspector] public float komaSpinCharge;
+    IKomaDashLook komaDashLook;
+    int komaDashLookType;
+    void UpdateKomaDashLook()
+    {
+        if (!SwordController.isKomaMode)
+        {
+            if (komaDashLook != null) { komaDashLook.Dispose(); komaDashLook = null; }
+            return;
+        }
+        if (controller != null && rb != null && rb.bodyType == RigidbodyType2D.Dynamic) komaSpinCharge = controller.KomaSpinCharge;
+        if (komaDashLook == null) komaDashLook = SkillEffects.KomaDash.Create(this);
+        if (currentDashType == 1 && komaDashLookType != 1) komaDashLook.PlayDash();
+        komaDashLookType = currentDashType;
+        // 竜巻などの必殺技の最中は輪を隠す（突進そのものは出せないので）
+        bool show = IsAlive && gameObject.activeInHierarchy && currentDashType <= 1;
+        komaDashLook.Tick(komaSpinCharge, show, controller != null && controller.isLocalControlled, Time.deltaTime);
     }
 
     // ▼【新規追加】大回転斬の演出。段階（spinDashPhase）の変わり目を見て見た目を切り替える。

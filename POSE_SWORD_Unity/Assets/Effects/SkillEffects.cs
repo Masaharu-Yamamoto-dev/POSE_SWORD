@@ -14,6 +14,8 @@ public static class SkillEffects
     public static ICloneRushEffect CloneRush => cloneRush ?? (cloneRush = new InkCloneRushEffect());
     static ILeafShieldEffect leafShield;
     public static ILeafShieldEffect LeafShield => leafShield ?? (leafShield = new InkLeafShieldEffect());
+    static IKomaDashEffect komaDash;
+    public static IKomaDashEffect KomaDash => komaDash ?? (komaDash = new InkKomaDashEffect());
 
     static Sprite starSprite;
     // 五角の星（大きさ1ワールド単位、白）。色は SpriteRenderer.color で付ける
@@ -1715,7 +1717,8 @@ public class FadingCopy : MonoBehaviour
     public static void Play(SpriteRenderer source, float duration, float rise) { Play(source, duration, rise, source.transform.position); }
 
     // moveTo：薄れながら最初の数分の1の時間でそこまで動く（当たった時に刃先を刺す）
-    public static void Play(SpriteRenderer source, float duration, float rise, Vector3 moveTo)
+    // alpha：元の色の濃さに掛ける割合（独楽の突進の残像は薄く出す）
+    public static void Play(SpriteRenderer source, float duration, float rise, Vector3 moveTo, float alpha = 1f)
     {
         var obj = new GameObject("CloneRushFade");
         obj.transform.SetPositionAndRotation(source.transform.position, source.transform.rotation);
@@ -1727,6 +1730,7 @@ public class FadingCopy : MonoBehaviour
         copy.look.sortingLayerID = source.sortingLayerID;
         copy.look.sortingOrder = source.sortingOrder;
         copy.color = source.color;
+        copy.color.a *= alpha;
         copy.from = obj.transform.position;
         copy.to = moveTo;
         copy.duration = Mathf.Max(.01f, duration);
@@ -2116,5 +2120,226 @@ public class ShieldGuardArc : MonoBehaviour
     void OnDestroy()
     {
         foreach (var line in new[] { outer, inner }) if (line != null && line.material != null) Destroy(line.material);
+    }
+}
+
+// ======================================================================
+// 独楽モードの突進
+// ======================================================================
+
+public interface IKomaDashEffect
+{
+    // 独楽1つぶんの見た目を作る。作った物は IKomaDashLook.Dispose で片付ける
+    IKomaDashLook Create(SwordBattle sword);
+}
+
+public interface IKomaDashLook
+{
+    // 毎フレーム（LateUpdate）。charge は「突進できる回転の速さ」に対する今の回転の割合で、1なら突進できる。
+    // show が false の間（倒されている・必殺技の最中など）は隠す。mine は自分が操作している独楽か
+    void Tick(float charge, bool show, bool mine, float deltaTime);
+    // 突進を始めた時（技番号が突進に変わった時。ホストもゲストも同じ同期から呼ぶ）
+    void PlayDash();
+    void Dispose();
+}
+
+public class InkKomaDashEffect : IKomaDashEffect
+{
+    public IKomaDashLook Create(SwordBattle sword) => new InkKomaDashLook(sword);
+}
+
+// 標準：独楽のまわりの細い輪が、回転が戻るのに合わせて上から時計回りに伸び、突進できる速さに届くと
+// プレイヤーの色で一周つながる。突進すると回転が落ちて輪が欠け、進んだ道すじに薄い残像と、後ろへ小さな墨しぶきを残す。
+// 自分の独楽ははっきり、他の人の独楽は細く薄く描く（4人対戦で画面がにぎやかになりすぎないように）
+public class InkKomaDashLook : IKomaDashLook
+{
+    const int Points = 64;
+    const float Gap = .25f;                     // 刀身の届く範囲から輪までの隙間
+    const float Width = .07f, OtherWidthRate = .6f;
+    const float TrackAlpha = .14f, ChargeAlpha = .55f, ReadyAlpha = .95f, OtherAlphaRate = .45f;
+    const float ReadyWidthRate = 1.4f;          // つながった時は少し太くする
+    const float ChargeShade = .6f;              // 溜まっている途中の線は、プレイヤーの色を灰色へ寄せて控えめにする
+    const float FadeSpeed = 8f, ChargeFollowSpeed = 18f, CenterSettleSpeed = 6f;
+    // 届いた瞬間に一度だけ外へ広がる細い輪（自分の独楽だけ）
+    const float ReadyPulseGrow = .6f, ReadyPulseTime = .3f;
+    // 突進：始まってからこの時間だけ、道すじに残像を置く
+    const float DashLookTime = .3f, AfterimageSpacing = .9f, AfterimageTime = .22f, AfterimageAlpha = .35f;
+    // 墨しぶき：動き出した向きが分かるくらい進んでから、後ろへ一度だけ出す
+    const float SplashStartDistance = .3f, SplashScale = .5f, SplashShade = .85f;
+
+    readonly SwordBattle sword;
+    readonly List<Object> created = new List<Object>();
+    readonly LineRenderer track, arc;
+    float alpha, shownCharge;
+    bool wasReady;
+    Vector3 localCenter;
+    bool hasLocalCenter;
+    float dashTime = -1f;
+    Vector3 dashFrom, lastGhostAt;
+    bool splashed;
+
+    public InkKomaDashLook(SwordBattle sword)
+    {
+        this.sword = sword;
+        track = NewLine("KomaDashTrack", BaseOrder - 2);
+        track.loop = true;
+        track.positionCount = Points;
+        arc = NewLine("KomaDashArc", BaseOrder - 1);
+    }
+
+    int BaseOrder => sword.BodyRenderer != null ? sword.BodyRenderer.sortingOrder : 0;
+    int SortingLayer => sword.BodyRenderer != null ? sword.BodyRenderer.sortingLayerID : 0;
+    Color PlayerColor => sword.PlayerMainColor;
+
+    LineRenderer NewLine(string objectName, int order)
+    {
+        var obj = new GameObject(objectName);
+        created.Add(obj);
+        var line = obj.AddComponent<LineRenderer>();
+        line.useWorldSpace = true;
+        line.material = SkillEffects.NewLineMaterial();
+        if (line.material != null) created.Add(line.material);
+        line.sortingLayerID = SortingLayer;
+        line.sortingOrder = order;
+        line.numCapVertices = 2;
+        line.enabled = false;
+        return line;
+    }
+
+    public void Tick(float charge, bool show, bool mine, float dt)
+    {
+        alpha = Mathf.MoveTowards(alpha, show ? 1f : 0f, FadeSpeed * dt);
+        // ゲストには回転の割合が同期の届いた時だけ飛び飛びに来るので、なめらかに追いかける
+        shownCharge = Mathf.Lerp(shownCharge, Mathf.Clamp01(charge), 1f - Mathf.Exp(-ChargeFollowSpeed * dt));
+        bool ready = charge >= 1f;
+        Vector3 centre = Centre();
+        float radius = Radius() + Gap;
+
+        bool visible = alpha > 0f;
+        track.enabled = visible && !ready;
+        arc.enabled = visible;
+        if (visible)
+        {
+            float rate = mine ? 1f : OtherAlphaRate;
+            float width = Width * (mine ? 1f : OtherWidthRate) * CameraZoom();
+            if (!ready)
+            {
+                SetCircle(track, centre, radius);
+                track.widthMultiplier = width;
+                track.startColor = track.endColor = new Color(1f, 1f, 1f, TrackAlpha * rate * alpha);
+                Color c = Color.Lerp(PlayerColor, Color.gray, ChargeShade);
+                c.a = ChargeAlpha * rate * alpha;
+                SetArc(arc, centre, radius, shownCharge);
+                arc.widthMultiplier = width;
+                arc.startColor = arc.endColor = c;
+            }
+            else
+            {
+                arc.loop = true;
+                SetCircle(arc, centre, radius);
+                arc.widthMultiplier = width * ReadyWidthRate;
+                Color c = PlayerColor;
+                c.a = ReadyAlpha * rate * alpha;
+                arc.startColor = arc.endColor = c;
+            }
+        }
+        if (ready && !wasReady && show && mine)
+        {
+            Color c = PlayerColor;
+            c.a = .6f;
+            ExpandingRing.Play(centre, radius, radius + ReadyPulseGrow, Width * CameraZoom(), 0f, ReadyPulseTime, c, SortingLayer, BaseOrder - 1);
+        }
+        wasReady = ready;
+
+        if (dashTime >= 0f) TickDash(centre, dt);
+    }
+
+    public void PlayDash()
+    {
+        dashTime = 0f;
+        dashFrom = lastGhostAt = Centre();
+        splashed = false;
+    }
+
+    void TickDash(Vector3 centre, float dt)
+    {
+        dashTime += dt;
+        Vector2 moved = centre - dashFrom;
+        if (!splashed && moved.magnitude >= SplashStartDistance)
+        {
+            splashed = true;
+            SpinDashSplash.Play(centre, -moved.normalized, PlayerColor * SplashShade, SortingLayer, BaseOrder - 1, SplashScale);
+        }
+        if (sword.BodyRenderer != null && (centre - lastGhostAt).magnitude >= AfterimageSpacing)
+        {
+            lastGhostAt = centre;
+            FadingCopy.Play(sword.BodyRenderer, AfterimageTime, 0f, sword.BodyRenderer.transform.position, AfterimageAlpha);
+        }
+        if (dashTime >= DashLookTime) dashTime = -1f;
+    }
+
+    // 独楽の回転の中心。ゲストの currentCenterPosition は同期が届いた時だけ飛び飛びに変わるので、
+    // 自分の剣の目印（OwnSwordMarker）と同じく、剣から見た中心の位置をゆっくり追いかけて持つ
+    Vector3 Centre()
+    {
+        Transform t = sword.transform;
+        Vector3 measured = t.InverseTransformPoint(sword.currentCenterPosition);
+        if (!hasLocalCenter) { localCenter = measured; hasLocalCenter = true; }
+        else localCenter = Vector3.Lerp(localCenter, measured, 1f - Mathf.Exp(-CenterSettleSpeed * Time.unscaledDeltaTime));
+        return t.TransformPoint(localCenter);
+    }
+
+    // 中心から刀身の絵のいちばん遠い角までの距離。回っても輪が刀身に重ならない
+    float Radius()
+    {
+        var body = sword.BodyRenderer;
+        if (body == null || body.sprite == null) return 1f;
+        Transform root = sword.transform;
+        Bounds b = body.sprite.bounds;
+        float max = 0f;
+        for (int i = 0; i < 4; i++)
+        {
+            Vector3 corner = new Vector3(i % 2 == 0 ? b.min.x : b.max.x, i < 2 ? b.min.y : b.max.y, 0f);
+            Vector2 d = (Vector2)(root.InverseTransformPoint(body.transform.TransformPoint(corner)) - localCenter);
+            max = Mathf.Max(max, d.sqrMagnitude);
+        }
+        return Mathf.Sqrt(max) * Mathf.Abs(root.lossyScale.x);
+    }
+
+    // カメラが引いても線の太さが画面上で変わらないようにする（縦の大きさ10を基準）
+    static float CameraZoom()
+    {
+        var cam = Camera.main;
+        return cam != null && cam.orthographic ? cam.orthographicSize / 10f : 1f;
+    }
+
+    static void SetCircle(LineRenderer line, Vector3 centre, float radius)
+    {
+        line.positionCount = Points;
+        for (int i = 0; i < Points; i++)
+        {
+            float a = i * Mathf.PI * 2f / Points;
+            line.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
+        }
+    }
+
+    // 真上から時計回りに amount（0〜1）だけの弧
+    static void SetArc(LineRenderer line, Vector3 centre, float radius, float amount)
+    {
+        line.loop = false;
+        int count = Mathf.Max(2, Mathf.CeilToInt(Points * amount) + 1);
+        line.positionCount = count;
+        for (int i = 0; i < count; i++)
+        {
+            float a = Mathf.PI / 2f - amount * Mathf.PI * 2f * i / (count - 1);
+            line.SetPosition(i, centre + new Vector3(Mathf.Cos(a), Mathf.Sin(a), 0f) * radius);
+        }
+    }
+
+    public void Dispose()
+    {
+        foreach (var obj in created)
+            if (obj != null) Object.Destroy(obj);
+        created.Clear();
     }
 }

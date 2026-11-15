@@ -2489,16 +2489,28 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
-  spinDashDamageMultiplier: 6
+  komaSpGainScale: 1.4285715
+  komaDashImpulse: 52
+  komaDashDamageFullHp: 1.3
+  komaDashDamageLowHp: 1.7
+  komaDashTimeFullHp: 0.2
+  komaDashTimeLowHp: 0.3
+  komaDashDamageTakenRate: 0.5
+  komaTornadoDuration: 1.2
+  komaTornadoDamageMultiplier: 1.3333333
+  swordCritBonus: 1
+  swordWeakPointBonus: 1
+  spinDashDamageMultiplier: 3.5
   spinDashCritMultiplier: 1.5
-  spinDashWeakPointMultiplier: 2
+  spinDashWeakPointMultiplier: 1
   spinMissSlowTime: 0.45
   spinHitRecoilTime: 0.25
   spinHitRecoilDistance: 2
   spinDescendTime: 0.5
   spinGrazeAngle: 30
   giantSpinScale: 5
-  giantSpinDamageMultiplier: 8
+  giantSpinDamageMultiplier: 3
+  giantSpinWeakPointMultiplier: 1.4
   giantSpinRotationSpeed: 540
   giantSpinHiltGlowTime: 0.2
   giantSpinGrowTime: 0.3
@@ -2506,13 +2518,13 @@ MonoBehaviour:
   giantSpinWindupAngle: 30
   giantSpinLingerTime: 0.2
   giantSpinShrinkTime: 0.3
-  giantSpinSecondHitRate: 0.7
-  giantSpinLaterHitRate: 0.5
+  giantSpinSecondHitRate: 0.9
+  giantSpinLaterHitRate: 0.8
   giantSpinStaggerOnHit: 0.3
   giantSpinStaggerOnMiss: 1
   cloneCount: 3
   cloneDashSpeed: 43
-  cloneDamageMultiplier: 2.5
+  cloneDamageMultiplier: 1.4
   cloneLifeTime: 3
   cloneLaunchInterval: 0.35
   cloneChargeTime: 0.45
@@ -2551,6 +2563,7 @@ MonoBehaviour:
   currentCenterPosition: {x: 0, y: 0, z: 0}
   cloneRushPhase: 0
   cloneRushShotsLeft: 0
+  komaSpinCharge: 0
 --- !u!4 &287059452
 Transform:
   m_ObjectHideFlags: 0
@@ -2622,6 +2635,8 @@ MonoBehaviour:
   komaSpinTorque: 1000
   komaHomingForce: 500
   maxKomaSpinSpeed: 2000
+  komaDashSpinRatio: 0.7
+  komaDashSpinKeep: 0.4
   testKomaMode: 0
 --- !u!82 &287059455
 AudioSource:
@@ -4033,6 +4048,8 @@ MonoBehaviour:
   komaSpinTorque: 1000
   komaHomingForce: 500
   maxKomaSpinSpeed: 2000
+  komaDashSpinRatio: 0.7
+  komaDashSpinKeep: 0.4
   testKomaMode: 0
 --- !u!114 &503523103
 MonoBehaviour:
@@ -4078,16 +4095,28 @@ MonoBehaviour:
   maxSp: 100
   passiveSpFill: 1
   damageSpMultiplier: 1.5
-  spinDashDamageMultiplier: 6
+  komaSpGainScale: 1.4285715
+  komaDashImpulse: 52
+  komaDashDamageFullHp: 1.3
+  komaDashDamageLowHp: 1.7
+  komaDashTimeFullHp: 0.2
+  komaDashTimeLowHp: 0.3
+  komaDashDamageTakenRate: 0.5
+  komaTornadoDuration: 1.2
+  komaTornadoDamageMultiplier: 1.3333333
+  swordCritBonus: 1
+  swordWeakPointBonus: 1
+  spinDashDamageMultiplier: 3.5
   spinDashCritMultiplier: 1.5
-  spinDashWeakPointMultiplier: 2
+  spinDashWeakPointMultiplier: 1
   spinMissSlowTime: 0.45
   spinHitRecoilTime: 0.25
   spinHitRecoilDistance: 2
   spinDescendTime: 0.5
   spinGrazeAngle: 30
   giantSpinScale: 5
-  giantSpinDamageMultiplier: 8
+  giantSpinDamageMultiplier: 3
+  giantSpinWeakPointMultiplier: 1.4
   giantSpinRotationSpeed: 540
   giantSpinHiltGlowTime: 0.2
   giantSpinGrowTime: 0.3
@@ -4095,13 +4124,13 @@ MonoBehaviour:
   giantSpinWindupAngle: 30
   giantSpinLingerTime: 0.2
   giantSpinShrinkTime: 0.3
-  giantSpinSecondHitRate: 0.7
-  giantSpinLaterHitRate: 0.5
+  giantSpinSecondHitRate: 0.9
+  giantSpinLaterHitRate: 0.8
   giantSpinStaggerOnHit: 0.3
   giantSpinStaggerOnMiss: 1
   cloneCount: 3
   cloneDashSpeed: 43
-  cloneDamageMultiplier: 2.5
+  cloneDamageMultiplier: 1.4
   cloneLifeTime: 3
   cloneLaunchInterval: 0.35
   cloneChargeTime: 0.45
@@ -4140,6 +4169,7 @@ MonoBehaviour:
   currentCenterPosition: {x: 0, y: 0, z: 0}
   cloneRushPhase: 0
   cloneRushShotsLeft: 0
+  komaSpinCharge: 0
 --- !u!82 &503523104
 AudioSource:
   m_ObjectHideFlags: 0
@@ -5081,7 +5111,7 @@ MonoBehaviour:
   autoStartOnPlay: 1
   debugRosterJsonFile: {fileID: 0}
   playerCount: 2
-  gameMode: 0
+  gameMode: 1
   localHiltTypeOverride: 0
   ownedSwordCount: 1
   livesMode: 1
@@ -8285,6 +8315,7 @@ MonoBehaviour:
   handleSprite2: {fileID: 8342928982462980293, guid: c74787d7b2b434ec4bb09005238a9bb1, type: 3}
   handleSprite3: {fileID: -4734511698354856339, guid: 469b4ca3434fc41f2aa66b108dccfb5c, type: 3}
   targetBladeWidth: 1.5
+  maxBladeLength: 8
   generateOnStart: 0
 --- !u!1 &990760267
 GameObject:
@@ -8326,6 +8357,7 @@ MonoBehaviour:
   handleSprite2: {fileID: 8342928982462980293, guid: c74787d7b2b434ec4bb09005238a9bb1, type: 3}
   handleSprite3: {fileID: -4734511698354856339, guid: 469b4ca3434fc41f2aa66b108dccfb5c, type: 3}
   targetBladeWidth: 1.5
+  maxBladeLength: 8
   generateOnStart: 0
 --- !u!4 &990760269
 Transform:

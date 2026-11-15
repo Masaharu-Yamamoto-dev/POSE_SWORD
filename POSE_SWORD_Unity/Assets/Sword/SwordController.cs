@@ -43,6 +43,14 @@ public class SwordController : MonoBehaviour
     public float komaSpinTorque = -3000f; // 独楽の回転力
     public float komaHomingForce = 20f;   // 敵に向かっていく力
     public float maxKomaSpinSpeed = 1500f;
+    // ▼ 突進はSPではなく回転を使う。上限に対してこの割合以上で回っている時だけ突進でき、
+    // 突進すると回転が komaDashSpinKeep の割合まで落ちる。回転力で戻るまでの時間が次の突進までの間隔になる
+    [Range(0f, 1f)] public float komaDashSpinRatio = 0.7f;
+    [Range(0f, 1f)] public float komaDashSpinKeep = 0.4f;
+    // 突進できる回転の速さに対する、今の回転の割合（1以上で突進できる）。輪の見た目にも使う
+    public float KomaSpinCharge => swordRigidbody == null || maxKomaSpinSpeed * komaDashSpinRatio <= 0f ? 0f :
+        Mathf.Abs(swordRigidbody.angularVelocity) / (maxKomaSpinSpeed * komaDashSpinRatio);
+    public bool KomaDashReady => KomaSpinCharge >= 1f;
 
     [Header("【テスト用】チェックを入れると独楽モードで開始")]
     public bool testKomaMode = false;

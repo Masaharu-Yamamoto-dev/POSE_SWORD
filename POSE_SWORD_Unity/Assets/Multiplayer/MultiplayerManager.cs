@@ -33,6 +33,8 @@ public class MultiplayerManager : MonoBehaviour
     private readonly Dictionary<string, int> sequences = new Dictionary<string, int>();
     private readonly Dictionary<string, float> inputTimes = new Dictionary<string, float>();
     private readonly Dictionary<string, bool> invulnerable = new Dictionary<string, bool>();
+    // 物理を進める前に突進・必殺技の最中だったか。独楽モードでは、突進している側の攻撃は相手の無敵（竜巻）を破って通る
+    private readonly Dictionary<string, bool> dashingAtStep = new Dictionary<string, bool>();
     private readonly Dictionary<string, MultiplayerPlayerState> syncTargets = new Dictionary<string, MultiplayerPlayerState>();
     private readonly List<Hit> hits = new List<Hit>();
     private readonly HashSet<string> forfeits = new HashSet<string>();
@@ -1581,7 +1583,12 @@ public class MultiplayerManager : MonoBehaviour
         // ▼【新規追加】残機モードのリスポーン直後無敵(IsRespawnInvincible)もここに加える。
         // これが無いと見た目は点滅していても、Host権威のダメージ判定では素通しになってしまう
         // ▼【変更】オレ達シールドは無敵ではなく、受けるダメージを減らす（QueueHit）
-        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing || p.Value.IsRespawnInvincible;
+        // ▼【変更】独楽モードの突進は無敵ではなく、受けるダメージが減る（ShieldedDamage）
+        foreach (var p in swords)
+        {
+            invulnerable[p.Key] = p.Value.DashInvulnerable || p.Value.IsRespawnInvincible;
+            dashingAtStep[p.Key] = p.Value.isDashing;
+        }
         UpdateKillerFreezes();
         Physics2D.Simulate(Time.fixedDeltaTime);
         if (!IsPlaying) return;
@@ -1641,7 +1648,8 @@ public class MultiplayerManager : MonoBehaviour
         damage = target.ShieldedDamage(damage);
         // Two dashes clashing in koma mode break each other's guard.
         bool blocked = invulnerable.ContainsKey(target.PlayerId) && invulnerable[target.PlayerId];
-        bool clash = SwordController.isKomaMode && invulnerable.ContainsKey(attacker.PlayerId) && invulnerable[attacker.PlayerId];
+        // 突進は無敵ではなくなったので、無敵かどうかではなく突進しているかで見る
+        bool clash = SwordController.isKomaMode && dashingAtStep.TryGetValue(attacker.PlayerId, out var attackerDashing) && attackerDashing;
         if (!blocked || clash)
         {
             // MatchRules は範囲外の回復率を拒否するので、物理ステップの途中で例外にならないよう0〜1に収めて渡す
@@ -2048,7 +2056,7 @@ public class MultiplayerManager : MonoBehaviour
                 return new MultiplayerPlayerState { playerId = p.playerId, x = pos.x, y = pos.y,
                     rotation = sword.transform.eulerAngles.z, centerX = center.x, centerY = center.y,
                     hp = sword.hp, sp = sword.currentSp, isDashing = sword.isDashing, dashType = sword.currentDashType, spinPhase = sword.spinDashPhase, giantPhase = sword.giantSpinPhase,
-                    clonePhase = sword.cloneRushPhase, cloneShots = sword.cloneRushShotsLeft,
+                    clonePhase = sword.cloneRushPhase, cloneShots = sword.cloneRushShotsLeft, komaSpin = sword.komaSpinCharge,
                     // ▼ 巨大化一回転(hiltType:"1")の拡大がクライアント側にも見えるよう、剣本体のスケールも同期する
                     scale = sword.transform.localScale.x,
                     targetPlayerId = targets[p.playerId],
@@ -2098,7 +2106,7 @@ public class MultiplayerManager : MonoBehaviour
             }
             sword.ApplyMultiplayerHealth(data.hp, wasCrit);
             if (clashed) sword.PlayClashEffect();
-            sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale, data.spinPhase, data.giantPhase, data.clonePhase, data.cloneShots);
+            sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale, data.spinPhase, data.giantPhase, data.clonePhase, data.cloneShots, data.komaSpin);
             // 残り秒数を「解ける時刻」に直して持つ。こうするとHostと同じ IsSuppressed() が使える。
             if (data.suppressedRemaining > 0f) suppressUntil[data.playerId] = Time.unscaledTime + data.suppressedRemaining;
             else suppressUntil.Remove(data.playerId);
@@ -2333,7 +2341,7 @@ public class MultiplayerManager : MonoBehaviour
         if (arena != null) { arena.SetActive(false); Destroy(arena); }
         if (ownsSimulation) { Physics2D.simulationMode = previousSimulationMode; ownsSimulation = false; }
         swords.Clear(); bodies.Clear(); targets.Clear(); sequences.Clear(); inputTimes.Clear();
-        hits.Clear(); forfeits.Clear(); invulnerable.Clear(); syncTargets.Clear();
+        hits.Clear(); forfeits.Clear(); invulnerable.Clear(); dashingAtStep.Clear(); syncTargets.Clear();
         fallOuts.Clear(); belowStageSteps.Clear(); hasStageBottom = false;
         cloneSyncTargets.Clear();
         activeClones.Clear();

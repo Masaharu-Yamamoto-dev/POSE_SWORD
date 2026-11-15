@@ -8,10 +8,10 @@ export default function BattleArena({ bridge, view, onLoadFailed }) {
     // 古いビルドを残しておけば、問題があれば戻せる。
     // ※ main と 1vs3 をマージした直後は、このビルドにマージ後のコードが入っていない。
     //    Unity で再ビルドして、新しいバージョンのパスへ向け直すこと。
-    loaderUrl: '/POSE_SWORD_Unity/Builds/ver3.22/Build/ver3.22.loader.js',
-    dataUrl: '/POSE_SWORD_Unity/Builds/ver3.22/Build/ver3.22.data',
-    frameworkUrl: '/POSE_SWORD_Unity/Builds/ver3.22/Build/ver3.22.framework.js',
-    codeUrl: '/POSE_SWORD_Unity/Builds/ver3.22/Build/ver3.22.wasm',
+    loaderUrl: '/POSE_SWORD_Unity/Builds/ver3.23/Build/ver3.23.loader.js',
+    dataUrl: '/POSE_SWORD_Unity/Builds/ver3.23/Build/ver3.23.data',
+    frameworkUrl: '/POSE_SWORD_Unity/Builds/ver3.23/Build/ver3.23.framework.js',
+    codeUrl: '/POSE_SWORD_Unity/Builds/ver3.23/Build/ver3.23.wasm',
   });
   
   const room = view?.room;

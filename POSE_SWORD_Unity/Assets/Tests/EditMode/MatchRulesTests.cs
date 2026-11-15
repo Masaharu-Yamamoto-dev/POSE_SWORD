@@ -10,8 +10,9 @@ public class MatchRulesTests
         Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, false, true, false, true));
         Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, false, false, true));
         Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, true, true, true));
-        Assert.IsNull(BattlePolicies.PrimaryAction(true, 19, true, true, false, true));
-        Assert.AreEqual("KomaDash", BattlePolicies.PrimaryAction(true, 20, true, true, false, true));
+        // 独楽モードの突進はSPではなく回転の速さで決まる
+        Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, true, false, true, false, false));
+        Assert.AreEqual("KomaDash", BattlePolicies.PrimaryAction(true, 0, true, true, false, true, false, true));
         // 通常入力(クリック/タップ)では、SPが必殺技分たまっていても剣モードは常にジャンプのみ
         Assert.AreEqual("JumpRight", BattlePolicies.PrimaryAction(false, 100, true, true, false, true));
         Assert.AreEqual("JumpLeft", BattlePolicies.PrimaryAction(false, 99, true, true, false, false));
@@ -23,8 +24,8 @@ public class MatchRulesTests
         Assert.IsNull(BattlePolicies.UltimateAction(true, 100, false, true, false));
         Assert.IsNull(BattlePolicies.UltimateAction(true, 100, true, false, false));
         Assert.IsNull(BattlePolicies.UltimateAction(true, 100, true, true, true));
-        Assert.IsNull(BattlePolicies.UltimateAction(true, 69, true, true, false));
-        Assert.AreEqual("Tornado", BattlePolicies.UltimateAction(true, 70, true, true, false));
+        Assert.IsNull(BattlePolicies.UltimateAction(true, 99, true, true, false));
+        Assert.AreEqual("Tornado", BattlePolicies.UltimateAction(true, 100, true, true, false));
         Assert.IsNull(BattlePolicies.UltimateAction(false, 99, true, true, false));
         Assert.AreEqual("SwordDash", BattlePolicies.UltimateAction(false, 100, true, true, false));
     }
@@ -487,7 +488,7 @@ public class MatchRulesTests
     public void SuppressedPlayersCannotActAtAll()
     {
         Assert.IsNull(BattlePolicies.PrimaryAction(false, 100, true, true, false, true, true));
-        Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, true, false, true, true));
+        Assert.IsNull(BattlePolicies.PrimaryAction(true, 100, true, true, false, true, true, true));
         Assert.IsNull(BattlePolicies.UltimateAction(false, 100, true, true, false, true));
         Assert.IsNull(BattlePolicies.UltimateAction(true, 100, true, true, false, true));
         // 制圧されていなければ従来どおり通る
@@ -504,8 +505,9 @@ public class MatchRulesTests
         // 閾値を上げた場合はその値で判定する
         Assert.IsNull(BattlePolicies.UltimateAction(false, 199, true, true, false, false, 200f));
         Assert.AreEqual("SwordDash", BattlePolicies.UltimateAction(false, 200, true, true, false, false, 200f));
-        // 独楽モードは閾値70のまま影響を受けない
-        Assert.AreEqual("Tornado", BattlePolicies.UltimateAction(true, 70, true, true, false, false, 200f));
+        // 独楽モードの竜巻も同じラインで判定する
+        Assert.IsNull(BattlePolicies.UltimateAction(true, 99, true, true, false, false, 100f));
+        Assert.AreEqual("Tornado", BattlePolicies.UltimateAction(true, 100, true, true, false, false, 100f));
         Assert.IsNull(BattlePolicies.UltimateAction(false, 100, true, true, false, false, float.NaN));
     }
 
