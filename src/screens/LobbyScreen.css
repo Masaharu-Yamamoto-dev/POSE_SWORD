@@ -838,7 +838,9 @@ button.lobby-sword__body { cursor: pointer; }
 .lobby-sheet__choices { display: flex; flex-wrap: wrap; gap: 8px; }
 .lobby-sheet__choices .fuda-btn { min-width: 5.2em; text-align: center; }
 .lobby-sheet__note { min-height: 1.7em; font-size: 15px; color: var(--usuzumi); }
-.lobby-sheet__close { margin-top: 6px; }
+.lobby-sheet__close { display: block; margin: 6px 0 0 auto; }
+/* 1vs3 のときだけ出るボスの行。ほかのルールでも同じ場所を空けておき、ルールを変えても画面の大きさが変わらないようにする */
+.lobby-sheet__group.is-hidden { visibility: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
   .lobby-col.is-ready::after,

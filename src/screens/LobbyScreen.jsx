@@ -227,22 +227,21 @@ const RuleSheet = ({ gameMode, special, canEdit, onGameMode, onSpecial, npcBoss,
             ))}
           </div>
         </div>
-        {special === 'solo' && (
-          <div className="lobby-sheet__group">
-            <b>ボス</b>
-            <div className="lobby-sheet__choices">
-              {[[false, "プレイヤー"], [true, "NPC"]].map(([value, label]) => (
-                // NPC は空いている席を1つ使うので、満席のあいだは NPC に切り替えられない（人間に戻すのはいつでもできる）
-                <button key={label} type="button" disabled={!canEdit || (value && seatsFull && !npcBoss)}
-                  title={value && seatsFull && !npcBoss ? "満席のためNPCを入れられません" : undefined}
-                  className={`fuda-btn ${npcBoss === value ? 'fuda-btn--on' : 'fuda-btn--off'}`}
-                  onClick={() => { if (npcBoss !== value) onNpcBoss(value); }}>
-                  {label}
-                </button>
-              ))}
-            </div>
+        {/* ボスの行は 1vs3 のときだけ見せる。ほかのルールでも場所を空けておき、ルールを変えても画面の大きさが変わらないようにする */}
+        <div className={`lobby-sheet__group ${special === 'solo' ? '' : 'is-hidden'}`} aria-hidden={special !== 'solo'}>
+          <b>ボス</b>
+          <div className="lobby-sheet__choices">
+            {[[false, "プレイヤー"], [true, "NPC"]].map(([value, label]) => (
+              // NPC は空いている席を1つ使うので、満席のあいだは NPC に切り替えられない（人間に戻すのはいつでもできる）
+              <button key={label} type="button" disabled={special !== 'solo' || !canEdit || (value && seatsFull && !npcBoss)}
+                title={value && seatsFull && !npcBoss ? "満席のためNPCを入れられません" : undefined}
+                className={`fuda-btn ${npcBoss === value ? 'fuda-btn--on' : 'fuda-btn--off'}`}
+                onClick={() => { if (npcBoss !== value) onNpcBoss(value); }}>
+                {label}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
         <p className="lobby-sheet__note">{canEdit ? "" : "ルールを変えられるのはホストだけです"}</p>
       </div>
 

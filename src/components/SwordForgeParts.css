@@ -941,11 +941,13 @@
   gap: 12px;
   min-height: 36px;
   padding: 0 16px;
-  transition: opacity 0.2s;
+  transition: opacity 0.2s, visibility 0.2s;
 }
 
+/* ワンポイント以外のときはつまみを見せない。場所は空けたままにして、札を選び直してもレイアウトが動かないようにする */
 .privacy__size.is-off {
-  opacity: 0.35;
+  opacity: 0;
+  visibility: hidden;
 }
 
 /* 丸の大きさのつまみ。通り道は薄い筆跡、つまみまでは墨の筆跡。つまみは、両端の黒丸や剣の黒丸と紛れないよう、
