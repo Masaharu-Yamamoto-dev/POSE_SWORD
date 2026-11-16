@@ -33,9 +33,21 @@ public class MultiplayerManager : MonoBehaviour
     private readonly Dictionary<string, int> sequences = new Dictionary<string, int>();
     private readonly Dictionary<string, float> inputTimes = new Dictionary<string, float>();
     private readonly Dictionary<string, bool> invulnerable = new Dictionary<string, bool>();
+    // 物理を進める前に突進・必殺技の最中だったか。独楽モードでは、突進している側の攻撃は相手の無敵（竜巻）を破って通る
+    private readonly Dictionary<string, bool> dashingAtStep = new Dictionary<string, bool>();
     private readonly Dictionary<string, MultiplayerPlayerState> syncTargets = new Dictionary<string, MultiplayerPlayerState>();
     private readonly List<Hit> hits = new List<Hit>();
     private readonly HashSet<string> forfeits = new HashSet<string>();
+    // ▼【新規追加】場外（即死ゾーン）。床をすり抜けて落ち続けた剣を退場させ、試合を続けられるようにする。
+    // 線は「表示中のステージの床・壁（当たり判定）の一番下」から FallOutMargin だけ下に引く。
+    // 剣の一番上までがこの線より下に FallOutConfirmSteps ステップ続けていた時だけ場外にするので、
+    // ステージの中で普通に動いている剣が場外になることは無い
+    const float FallOutMargin = 10f;
+    const int FallOutConfirmSteps = 10;
+    private bool hasStageBottom;
+    private float stageBottomY;
+    private readonly HashSet<string> fallOuts = new HashSet<string>();
+    private readonly Dictionary<string, int> belowStageSteps = new Dictionary<string, int>();
     private GameObject arena;
     // ▼【新規追加】分身突進・リーフシールドなど、本体以外の"付随体"をSYNCでクライアントへ配信するための登録簿（Host側で使用）
     private readonly Dictionary<string, (GameObject obj, string ownerId, Color color, int spriteIndex)> activeClones = new Dictionary<string, (GameObject, string, Color, int)>();
@@ -355,6 +367,7 @@ public class MultiplayerManager : MonoBehaviour
             if (network.swordStage != null) network.swordStage.SetActive(!SwordController.isKomaMode && !use3PSwordStage);
             if (network.swordStage3P != null) network.swordStage3P.SetActive(use3PSwordStage);
             if (network.komaStage != null) network.komaStage.SetActive(SwordController.isKomaMode);
+            MeasureStageBottom(network.swordStage, network.swordStage3P, network.komaStage);
             foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
                 if (canvas != hudCanvas) canvas.enabled = false;
             // ▼【新規追加】autoTestOnStart(ローカルデモ)や前回の対戦でPL3Bar/PL4Barが表示状態のまま
@@ -408,12 +421,15 @@ public class MultiplayerManager : MonoBehaviour
             // 以前はhostGeneratorという別枠の値を使っており、Inspector設定次第でローカルとサイズがズレていた
             float bladeWidth = scene.generators != null && scene.generators.Length > 0 && scene.generators[0] != null
                 ? scene.generators[0].targetBladeWidth : scene.hostGenerator.targetBladeWidth;
-            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], bladeWidth, spawnPositions[player.spawnIndex]);
+            float maxBladeLength = scene.generators != null && scene.generators.Length > 0 && scene.generators[0] != null
+                ? scene.generators[0].maxBladeLength : scene.hostGenerator.maxBladeLength;
+            foreach (var player in config.players) CreateSword(player, network.playerSwords[0], bladeWidth, maxBladeLength, spawnPositions[player.spawnIndex]);
             // 1vs3 は「1人 対 3人」の構図が伝わる専用HUDに差し替える。剣を作り終えてから配線する。
             if (soloModeActive) BuildSoloHud();
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
             ResetPlayback();
             hitEventSeq = 0; shownHitEventSeq = 0; pendingHitEvents.Clear(); hitDetailsThisStep.Clear(); killerFreezes.Clear();
+            fallOuts.Clear(); belowStageSteps.Clear();
             extraCameraTargets.Clear(); finalKoTargets.Clear(); finalKoNumbers.Clear(); finishCameraSize = -1f;
             StartCoroutine(CompleteInitialization());
         }
@@ -1263,7 +1279,7 @@ public class MultiplayerManager : MonoBehaviour
         return Mathf.Clamp(Mathf.RoundToInt(hp * config.soloBuff.hpMultiplier), 1, MatchRules.MaxHitPoints);
     }
 
-    void CreateSword(MultiplayerPlayerConfig player, GameObject template, float bladeWidth, Vector3 spawnPosition)
+    void CreateSword(MultiplayerPlayerConfig player, GameObject template, float bladeWidth, float maxBladeLength, Vector3 spawnPosition)
     {
         var obj = Instantiate(template, arena.transform);
         obj.name = "Sword_" + player.playerId;
@@ -1302,6 +1318,7 @@ public class MultiplayerManager : MonoBehaviour
         if (generator == null) generator = obj.AddComponent<SwordGenerator>();
         generator.generateOnStart = false;
         generator.targetBladeWidth = bladeWidth;
+        generator.maxBladeLength = maxBladeLength;
         generator.targetSpriteRenderer = blade.GetComponent<SpriteRenderer>();
         generator.bladeCollider = blade.GetComponent<PolygonCollider2D>();
         generator.swordRigidbody = rb;
@@ -1370,7 +1387,8 @@ public class MultiplayerManager : MonoBehaviour
         var slot = lives[lifeIndex];
         // ゲストが通信の都合でHP0の同期を受け取れず、壊れた剣をまだ倒していないまま持ち替えが届いた時だけ、
         // 壊れた剣の見た目を写した抜け殻をその場に残してやられ演出をさせる（本物はこの後すぐ出現位置へ移る）
-        if (!battle.IsDead) DefeatGhost.Spawn(battle, this);
+        // 場外へ落ちた剣は抜け殻を残さない（画面の外にあり、カメラを下へ引っ張ってしまうため）
+        if (!battle.IsDead && !IsBelowStage(battle)) DefeatGhost.Spawn(battle, this);
         battle.ReviveFromDefeat();
         if (spawnPositionByPlayer.TryGetValue(playerId, out var spawn))
         {
@@ -1587,12 +1605,18 @@ public class MultiplayerManager : MonoBehaviour
         // ▼【新規追加】残機モードのリスポーン直後無敵(IsRespawnInvincible)もここに加える。
         // これが無いと見た目は点滅していても、Host権威のダメージ判定では素通しになってしまう
         // ▼【変更】オレ達シールドは無敵ではなく、受けるダメージを減らす（QueueHit）
-        foreach (var p in swords) invulnerable[p.Key] = p.Value.isDashing || p.Value.IsRespawnInvincible;
+        // ▼【変更】独楽モードの突進は無敵ではなく、受けるダメージが減る（ShieldedDamage）
+        foreach (var p in swords)
+        {
+            invulnerable[p.Key] = p.Value.DashInvulnerable || p.Value.IsRespawnInvincible;
+            dashingAtStep[p.Key] = p.Value.isDashing;
+        }
         UpdateKillerFreezes();
         Physics2D.Simulate(Time.fixedDeltaTime);
         if (!IsPlaying) return;
-        rules.ResolveStep(++physicsTick, hits, forfeits);
-        hits.Clear(); forfeits.Clear();
+        DetectFallOuts();
+        rules.ResolveStep(++physicsTick, hits, forfeits, fallOuts);
+        hits.Clear(); forfeits.Clear(); fallOuts.Clear();
         RecordHitEvents();
         foreach (var score in rules.Players)
         {
@@ -1646,7 +1670,8 @@ public class MultiplayerManager : MonoBehaviour
         damage = target.ShieldedDamage(damage);
         // Two dashes clashing in koma mode break each other's guard.
         bool blocked = invulnerable.ContainsKey(target.PlayerId) && invulnerable[target.PlayerId];
-        bool clash = SwordController.isKomaMode && invulnerable.ContainsKey(attacker.PlayerId) && invulnerable[attacker.PlayerId];
+        // 突進は無敵ではなくなったので、無敵かどうかではなく突進しているかで見る
+        bool clash = SwordController.isKomaMode && dashingAtStep.TryGetValue(attacker.PlayerId, out var attackerDashing) && attackerDashing;
         if (!blocked || clash)
         {
             // MatchRules は範囲外の回復率を拒否するので、物理ステップの途中で例外にならないよう0〜1に収めて渡す
@@ -1709,6 +1734,72 @@ public class MultiplayerManager : MonoBehaviour
     public void SetCloneColor(string id, Color color)
     {
         if (id != null && activeClones.TryGetValue(id, out var entry)) activeClones[id] = (entry.obj, entry.ownerId, color, entry.spriteIndex);
+    }
+
+    // ▼【新規追加】表示中のステージの当たり判定（Rigidbodyを持たない床・壁）の一番下を測る。
+    // ステージごとに床の高さが大きく違うので、決め打ちの値にはしない。測れなければ場外の判定はしない
+    void MeasureStageBottom(params GameObject[] stages)
+    {
+        hasStageBottom = false;
+        Physics2D.SyncTransforms();
+        foreach (var stage in stages)
+        {
+            if (stage == null || !stage.activeInHierarchy) continue;
+            foreach (var col in stage.GetComponentsInChildren<Collider2D>())
+            {
+                if (!col.enabled || col.isTrigger) continue;
+                if (col.attachedRigidbody != null && col.attachedRigidbody.bodyType != RigidbodyType2D.Static) continue;
+                float bottom = col.bounds.min.y;
+                if (!hasStageBottom || bottom < stageBottomY) stageBottomY = bottom;
+                hasStageBottom = true;
+            }
+        }
+        if (!hasStageBottom) Debug.LogWarning("場外の線を引けません：表示中のステージに床の当たり判定が見つかりませんでした");
+    }
+
+    // 剣の一番上の高さ。当たり判定があればその上端、無ければ見た目の上端を使う
+    static float SwordTop(SwordBattle sword)
+    {
+        bool found = false;
+        float top = 0f;
+        foreach (var col in sword.GetComponentsInChildren<Collider2D>())
+        {
+            if (!col.enabled) continue;
+            top = found ? Mathf.Max(top, col.bounds.max.y) : col.bounds.max.y;
+            found = true;
+        }
+        if (found) return top;
+        foreach (var r in sword.GetComponentsInChildren<SpriteRenderer>())
+        {
+            if (!r.enabled) continue;
+            top = found ? Mathf.Max(top, r.bounds.max.y) : r.bounds.max.y;
+            found = true;
+        }
+        return found ? top : sword.transform.position.y;
+    }
+
+    // 剣がまるごとステージの一番下より下にあるか（margin を足すとさらにその分だけ下）。
+    // 床の一番下より下は、ステージの中で普通に動いている剣が来られる場所ではない
+    public bool IsBelowStage(SwordBattle sword, float margin = 0f)
+    {
+        return hasStageBottom && sword != null && SwordTop(sword) < stageBottomY - margin;
+    }
+
+    // 物理を進めた後に呼ぶ（Host専用）。場外の線より下に続けていた剣を、このステップの場外として MatchRules に渡す
+    void DetectFallOuts()
+    {
+        if (!hasStageBottom) return;
+        foreach (var pair in swords)
+        {
+            var sword = pair.Value;
+            bool below = sword != null && sword.IsAlive && rules.Get(pair.Key).OnField && IsBelowStage(sword, FallOutMargin);
+            if (!below) { belowStageSteps.Remove(pair.Key); continue; }
+            int steps = (belowStageSteps.TryGetValue(pair.Key, out var counted) ? counted : 0) + 1;
+            if (steps < FallOutConfirmSteps) { belowStageSteps[pair.Key] = steps; continue; }
+            belowStageSteps.Remove(pair.Key);
+            fallOuts.Add(pair.Key);
+            Debug.Log($"場外：{pair.Key} がステージの下へ落ちたので退場させます (y={sword.transform.position.y:F1}, 線={stageBottomY - FallOutMargin:F1})");
+        }
     }
 
     void FreezeKiller(string playerId)
@@ -1987,7 +2078,7 @@ public class MultiplayerManager : MonoBehaviour
                 return new MultiplayerPlayerState { playerId = p.playerId, x = pos.x, y = pos.y,
                     rotation = sword.transform.eulerAngles.z, centerX = center.x, centerY = center.y,
                     hp = sword.hp, sp = sword.currentSp, isDashing = sword.isDashing, dashType = sword.currentDashType, spinPhase = sword.spinDashPhase, giantPhase = sword.giantSpinPhase,
-                    clonePhase = sword.cloneRushPhase, cloneShots = sword.cloneRushShotsLeft,
+                    clonePhase = sword.cloneRushPhase, cloneShots = sword.cloneRushShotsLeft, komaSpin = sword.komaSpinCharge,
                     // ▼ 巨大化一回転(hiltType:"1")の拡大がクライアント側にも見えるよう、剣本体のスケールも同期する
                     scale = sword.transform.localScale.x,
                     targetPlayerId = targets[p.playerId],
@@ -2056,7 +2147,7 @@ public class MultiplayerManager : MonoBehaviour
             }
             sword.ApplyMultiplayerHealth(data.hp, wasCrit);
             if (clashed) sword.PlayClashEffect();
-            sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale, data.spinPhase, data.giantPhase, data.clonePhase, data.cloneShots);
+            sword.ApplyMultiplayerVisuals(data.sp, data.isDashing, data.dashType, data.scale, data.spinPhase, data.giantPhase, data.clonePhase, data.cloneShots, data.komaSpin);
             // 残り秒数を「解ける時刻」に直して持つ。こうするとHostと同じ IsSuppressed() が使える。
             if (data.suppressedRemaining > 0f) suppressUntil[data.playerId] = Time.unscaledTime + data.suppressedRemaining;
             else suppressUntil.Remove(data.playerId);
@@ -2292,8 +2383,9 @@ public class MultiplayerManager : MonoBehaviour
         {
             hasLockedCameraPosition = false;
             // ▼【変更】生きている剣に加えて、撃破されてまだ消え切っていない剣と抜け殻も画角に含める
+            // ステージの下へ抜けて落ちている剣は追わない（場外は映さない）
             // ▼【変更】カメラは表示用の位置の重心(displayCenters)を追う。まだ無ければ判定用の重心で代用する
-            var points = swords.Values.Where(s => s.IsAlive)
+            var points = swords.Values.Where(s => s.IsAlive && !IsBelowStage(s))
                 .Select(s => displayCenters.TryGetValue(s.PlayerId, out var center) ? center : s.currentCenterPosition).ToList();
             extraCameraTargets.RemoveAll(target => target == null);
             foreach (var target in extraCameraTargets) points.Add(target.position);
@@ -2403,7 +2495,8 @@ public class MultiplayerManager : MonoBehaviour
         if (arena != null) { arena.SetActive(false); Destroy(arena); }
         if (ownsSimulation) { Physics2D.simulationMode = previousSimulationMode; ownsSimulation = false; }
         swords.Clear(); bodies.Clear(); targets.Clear(); sequences.Clear(); inputTimes.Clear();
-        hits.Clear(); forfeits.Clear(); invulnerable.Clear(); syncTargets.Clear();
+        hits.Clear(); forfeits.Clear(); invulnerable.Clear(); dashingAtStep.Clear(); syncTargets.Clear();
+        fallOuts.Clear(); belowStageSteps.Clear(); hasStageBottom = false;
         ResetPlayback();
         cloneSyncTargets.Clear();
         activeClones.Clear();

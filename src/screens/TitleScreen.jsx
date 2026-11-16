@@ -8,6 +8,11 @@ import { usePortrait } from '../components/swordForge.js';
 import './TitleScreen.css';
 
 const ID_LENGTH = 6;
+// 打った文字をロビーIDにする。全角の数字は半角に直し、数字以外は捨てる
+const toLobbyId = text => text
+  .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(/[^0-9]/g, '')
+  .slice(0, ID_LENGTH);
 const SWORD_MAX = 3;
 // メニューの中身を切り替えるクロスフェードの長さ（TitleScreen.css の .title-swap__layer と同じ）
 const SWAP_MS = 280;
@@ -108,6 +113,9 @@ export default function TitleScreen({
     triedIdRef.current = targetId;
     connectToHost();
   }, [titleMode, targetId, connecting, connectToHost]);
+  // 日本語入力で全角数字を打っている間（変換を確定する前）の文字。確定前に書き換えると入力が崩れるので、
+  // この間は打ったままの文字を入れておき、確定したときに半角に直してIDへ入れる
+  const [composingId, setComposingId] = useState(null);
 
   // メニューの中身の切り替え（クロスフェード）。切り替わったら、前の中身を SWAP_MS のあいだ重ねて残す
   const panelKey = matchmaking ? 'MATCHING' : titleMode;
@@ -201,17 +209,24 @@ export default function TitleScreen({
             pattern="[0-9]*"
             autoComplete="off"
             maxLength={ID_LENGTH}
-            value={targetId}
-            aria-label="ロビーID（6桁の半角数字）"
-            onChange={e => setTargetId(e.target.value.replace(/[^0-9]/g, '').slice(0, ID_LENGTH))}
-            onKeyDown={e => { if (e.key === 'Enter' && targetId.length === ID_LENGTH) connectToHost(); }}
+            value={composingId ?? targetId}
+            aria-label="ロビーID（6桁の数字）"
+            onCompositionStart={() => setComposingId(targetId)}
+            onCompositionEnd={e => { setComposingId(null); setTargetId(toLobbyId(e.currentTarget.value)); }}
+            onChange={e => { if (composingId !== null) setComposingId(e.target.value); else setTargetId(toLobbyId(e.target.value)); }}
+            // 変換を確定する Enter では入室しない
+            onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && targetId.length === ID_LENGTH) connectToHost(); }}
           />
-          {Array.from({ length: ID_LENGTH }, (_, i) => (
-            <span key={i} aria-hidden="true"
-              className={`title-digits__box ${i === Math.min(targetId.length, ID_LENGTH - 1) ? 'is-cur' : ''} ${i < targetId.length ? 'is-filled' : ''}`}>
-              {targetId[i] ?? ''}
-            </span>
-          ))}
+          {/* 枠には、変換を確定する前の数字も半角にして出す */}
+          {Array.from({ length: ID_LENGTH }, (_, i) => {
+            const shown = composingId === null ? targetId : toLobbyId(composingId);
+            return (
+              <span key={i} aria-hidden="true"
+                className={`title-digits__box ${i === Math.min(shown.length, ID_LENGTH - 1) ? 'is-cur' : ''} ${i < shown.length ? 'is-filled' : ''}`}>
+                {shown[i] ?? ''}
+              </span>
+            );
+          })}
         </label>
         <div className="title-panel__back">
           <InkButton variant="usuzumi" onClick={handleCancelJoin} disabled={connecting}>戻る</InkButton>

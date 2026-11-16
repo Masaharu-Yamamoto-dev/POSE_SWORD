@@ -30,6 +30,11 @@ const getBaseStats = (sword) => ({
 // ほかの人の剣の本数（空きのスロットを除く）。古い送り方で一覧がないときは、装備中の1本だけ
 const swordCountOf = swordData => swordData?.swords ? swordData.swords.filter(slot => slot && !slot.isEmpty).length : 1;
 const hiltOf = sword => HILT_DATABASE[sword?.hiltType || "0"] || HILT_DATABASE["0"];
+// 柄の並び順（武器庫の柄の選び方と同じ）。自分の必殺技アイコンをダブルクリックすると、この順に次の柄へ替わる
+const HILT_IDS = Object.keys(HILT_DATABASE);
+const nextHiltOf = sword => HILT_IDS[(HILT_IDS.indexOf(sword?.hiltType || "0") + 1) % HILT_IDS.length];
+// 2回押したとみなす間隔。dblclick はスマホで出ないことがあるので、押した間隔を自分で測る
+const DOUBLE_TAP_MS = 350;
 const bladeOf = sword => sword?.imageSrc || swordImageSource(sword);
 
 // ルールの名前と説明。説明は以前のロビー画面の文言をそのまま使っている。
@@ -40,7 +45,7 @@ const SPECIAL_NAME = { none: "特殊ルールなし", lives: "残機制", solo: 
 
 // 対戦で使う必殺技。剣モードは柄の必殺技、独楽は全員が竜巻猛突。1vs3 のボスは柄の必殺技に掌握斬が加わる
 const TOP_SKILL = { skillName: "竜巻猛突", skillIcon: "/skill-icons/tornado.png" };
-const BOSS_SKILL = { skillName: "掌握斬", skillIcon: "/skill-icons/grasp.png" };
+const BOSS_SKILL = { skillName: "オレ掌握斬", skillIcon: "/skill-icons/grasp.png" };
 const skillsOf = (sword, gameMode, isBoss) =>
   gameMode === "1" ? [TOP_SKILL] : isBoss ? [hiltOf(sword), BOSS_SKILL] : [hiltOf(sword)];
 const SPECIAL_DESC = {
@@ -165,6 +170,25 @@ const SwordFigure = ({ sword, blade, spinCount, onSpin, hiltOff }) => {
 };
 
 // ==========================================
+// 自分の柄の必殺技アイコン（ダブルクリックで次の柄へ）
+// ==========================================
+// 替えると柄の画像とアイコンがすぐ替わる。アイコンは柄ごとに作り直して、替わったことが分かるよう小さく弾ませる
+const HiltSkillButton = ({ skill, hiltType, disabled, disabledTitle, onNext }) => {
+  const lastTapRef = useRef(-Infinity);
+  const onClick = e => {
+    if (e.timeStamp - lastTapRef.current < DOUBLE_TAP_MS) { lastTapRef.current = -Infinity; onNext(); }
+    else lastTapRef.current = e.timeStamp;
+  };
+  return (
+    <button type="button" className="skill__icon lobby-skill-btn" onClick={onClick} disabled={disabled}
+      title={disabled ? disabledTitle : `${skill.skillName}（ダブルクリックで柄を替える）`}
+      aria-label={`必殺技：${skill.skillName}。ダブルクリックで次の柄に替える`}>
+      <img key={hiltType} src={skill.skillIcon} alt="" draggable={false} />
+    </button>
+  );
+};
+
+// ==========================================
 // ルール設定（ホスト以外は説明を読むだけ）
 // ==========================================
 const RuleSheet = ({ gameMode, special, canEdit, onGameMode, onSpecial, npcBoss, onNpcBoss, seatsFull, onClose }) => (
@@ -203,22 +227,21 @@ const RuleSheet = ({ gameMode, special, canEdit, onGameMode, onSpecial, npcBoss,
             ))}
           </div>
         </div>
-        {special === 'solo' && (
-          <div className="lobby-sheet__group">
-            <b>ボス</b>
-            <div className="lobby-sheet__choices">
-              {[[false, "プレイヤー"], [true, "NPC"]].map(([value, label]) => (
-                // NPC は空いている席を1つ使うので、満席のあいだは NPC に切り替えられない（人間に戻すのはいつでもできる）
-                <button key={label} type="button" disabled={!canEdit || (value && seatsFull && !npcBoss)}
-                  title={value && seatsFull && !npcBoss ? "満席のためNPCを入れられません" : undefined}
-                  className={`fuda-btn ${npcBoss === value ? 'fuda-btn--on' : 'fuda-btn--off'}`}
-                  onClick={() => { if (npcBoss !== value) onNpcBoss(value); }}>
-                  {label}
-                </button>
-              ))}
-            </div>
+        {/* ボスの行は 1vs3 のときだけ見せる。ほかのルールでも場所を空けておき、ルールを変えても画面の大きさが変わらないようにする */}
+        <div className={`lobby-sheet__group ${special === 'solo' ? '' : 'is-hidden'}`} aria-hidden={special !== 'solo'}>
+          <b>ボス</b>
+          <div className="lobby-sheet__choices">
+            {[[false, "プレイヤー"], [true, "NPC"]].map(([value, label]) => (
+              // NPC は空いている席を1つ使うので、満席のあいだは NPC に切り替えられない（人間に戻すのはいつでもできる）
+              <button key={label} type="button" disabled={special !== 'solo' || !canEdit || (value && seatsFull && !npcBoss)}
+                title={value && seatsFull && !npcBoss ? "満席のためNPCを入れられません" : undefined}
+                className={`fuda-btn ${npcBoss === value ? 'fuda-btn--on' : 'fuda-btn--off'}`}
+                onClick={() => { if (npcBoss !== value) onNpcBoss(value); }}>
+                {label}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
         <p className="lobby-sheet__note">{canEdit ? "" : "ルールを変えられるのはホストだけです"}</p>
       </div>
 
@@ -246,7 +269,7 @@ export default function LobbyScreen({
   swordList, mySwordData, equipSword, reorderSwords,
   // 自分の剣の画像の選び方。プライバシーを設定した剣は、相手に見えているのと同じ加工済みの画像を出す
   imageOf = bladeOf,
-  onReady, onGameMode, onLivesMode, onSoloMode, onBossPlayer, onNpcBoss, onSpin, onStart, onLeave, goToCrafting, error
+  onReady, onGameMode, onLivesMode, onSoloMode, onBossPlayer, onNpcBoss, onSpin, onStart, onLeave, goToCrafting, onHilt, error
 }) {
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
@@ -306,7 +329,9 @@ export default function LobbyScreen({
   const npcBoss = Boolean(room.npcBoss);
   const canPickBoss = soloMode && isHost && !auto && !npcBoss;
   const playerCount = room.players.length;
-  const readyCount = room.players.filter(p => p.ready).length;
+  // ホストは準備完了を押さず、対戦開始を押すことで準備完了とみなす（HostRoom.canStart）ので、いつでも数に入れる
+  const isReadyPlayer = p => p.ready || p.playerId === 'p0';
+  const readyCount = room.players.filter(isReadyPlayer).length;
   const emptySlots = Array.from({ length: seatLimit }, (_, slot) => slot)
     .filter(slot => !room.players.some(p => p.slotIndex === slot));
   const seats = seatOrder(room.players, me.playerId).map(player => ({ slot: player.slotIndex, player }))
@@ -325,6 +350,7 @@ export default function LobbyScreen({
   const canChangeSword = !me.ready && !auto;
   // ホストが抜けるとロビーそのものがなくなるので、ホストのボタンは「ロビー解散」にする（ランダムマッチは誰がホストか見せないので退室のまま）
   const disbands = isHost && !auto;
+  const alone = room.players.every(p => p.playerId === me.playerId || p.npc);
 
   const autoStatus =
     room.startsInMs == null ? `対戦相手を待っています（あと${Math.max(0, MIN_PLAYERS - playerCount)}人で開始）`
@@ -506,7 +532,7 @@ export default function LobbyScreen({
     const stats = isBoss ? bossStats(swordStats) : swordStats;
     const isPresent = player.connected && player.inLobby;
     // NPC は準備完了を自分で出せない代わりに、いつでも準備完了として名簿に入っている（HostRoom.makeNpc）
-    const isReady = player.npc || (!auto && player.ready && isPresent);
+    const isReady = player.npc || (!auto && isReadyPlayer(player) && isPresent);
     const waitLabel = !player.connected ? "切断" : !player.inLobby ? "結果\n確認中" : "準備\n中";
     // 名札は幅が限られるので、自分の列は「あなた」だけにする（自分がホストかどうかは対戦開始ボタンの有無で分かる）。
     const role = isMe ? "あなた" : player.npc ? "NPC" : player.playerId === 'p0' ? "ホスト" : "";
@@ -551,11 +577,6 @@ export default function LobbyScreen({
                 {isReady
                   ? <span key="done" className="lobby-seal lobby-seal--done">{"準備\n完了"}</span>
                   : <span key="wait" className="lobby-seal lobby-seal--wait">{waitLabel}</span>}
-                {isMe && (
-                  <button type="button" className="brush-link" onClick={() => onReady(!me.ready)}>
-                    {me.ready ? "準備取消" : "準備完了"}
-                  </button>
-                )}
               </>
             )}
           </div>
@@ -563,7 +584,21 @@ export default function LobbyScreen({
 
         <div className="lobby-row">
           {isMe ? (
-            <div className="lobby-slots">{renderMySlots()}</div>
+            // 自分の下段：左に手持ちの剣、右に必殺技のアイコン（柄の技はダブルクリックで次の柄へ。独楽は全員共通の技なので替えない）
+            <>
+              <div className="lobby-slots">{renderMySlots()}</div>
+              <span className="lobby-skills">
+                {skillsOf(sword, gameMode, isBoss).map((skill, i) => i === 0 && !isTopMode ? (
+                  <HiltSkillButton key="hilt" skill={skill} hiltType={sword.hiltType || "0"}
+                    disabled={!canChangeSword} disabledTitle={me.ready ? "準備完了のあいだは柄を替えられません" : skill.skillName}
+                    onNext={() => onHilt(nextHiltOf(sword))} />
+                ) : (
+                  <span key={skill.skillName} className="skill__icon" title={skill.skillName}>
+                    <img src={skill.skillIcon} alt={`必殺技：${skill.skillName}`} draggable={false} />
+                  </span>
+                ))}
+              </span>
+            </>
           ) : (
             <>
               <span className="lobby-count">
@@ -578,21 +613,34 @@ export default function LobbyScreen({
               </span>
             </>
           )}
-          {isMe && !auto && (
-            <button
-              type="button"
-              className="fuda-btn"
-              onClick={() => handleGoToCrafting("LOBBY")}
-              disabled={me.ready}
-              title={me.ready ? "準備完了のあいだは武器を変えられません" : undefined}
-            >
-              武器庫へ
-            </button>
-          )}
         </div>
       </div>
     );
   };
+
+  // ロビーID（ランダムマッチは対戦形式）。見出しの帯の右に出す
+  const lobbyId = (
+    <div className="lobby-id">
+      {auto ? (
+        <div><small>対戦形式</small><b className="is-random">ランダムマッチ</b></div>
+      ) : (
+        <>
+          <div><small>ロビーID</small><b>{roomId || "----"}</b></div>
+          <button
+            type="button"
+            className={`fuda-btn lobby-copy ${isCopied ? 'fuda-btn--on' : ''}`}
+            onClick={handleCopyId}
+            aria-label={isCopied ? "コピーしました" : "ロビーIDをコピー"}
+          >
+            {isCopied
+              ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8.5l4 4 8-9" /></svg>
+              : <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="9" height="9" /><path d="M10.5 2.5h-9v9" /></svg>}
+            コピー
+          </button>
+        </>
+      )}
+    </div>
+  );
 
   return (
     // この画面は16:9の舞台（Stage16x9）の中に出る。上に錬成・武器庫と同じ見出しの帯、その下の残りの中央にロビーを置く
@@ -601,14 +649,19 @@ export default function LobbyScreen({
         <button
           type="button"
           className="brush-link"
-          onClick={() => setIsLeaveOpen(true)}
+          // ロビーに自分しかいない（NPCを除く）ときの解散は、困る人がいないので確かめずにすぐ抜ける
+          onClick={() => { if (disbands && alone) onLeave(); else setIsLeaveOpen(true); }}
           disabled={locked}
           title={locked ? `準備完了のあいだは${disbands ? "解散" : "退室"}できません` : undefined}
         >
           {disbands ? "ロビー解散" : "退室する"}
         </button>
-        <h1>対戦ロビー</h1>
-        <span className="lobby-header__count">人数{'\u3000'}<span>{playerCount}</span> / {seatLimit}</span>
+        {/* 人数は題のすぐ右に添える（題は帯の真ん中のまま） */}
+        <div className="lobby-header__title">
+          <h1>対戦ロビー</h1>
+          <span className="lobby-header__count">人数{'\u3000'}<span>{playerCount}</span> / {seatLimit}</span>
+        </div>
+        {lobbyId}
       </header>
 
       <div className="lobby-main">
@@ -623,21 +676,37 @@ export default function LobbyScreen({
             <p className="lobby-error" style={styles.errorMessage}>{error}</p>
           )}
 
-          {/* フッター：左にルール、中央に対戦開始、右にロビーID */}
-          <div className="lobby-bar">
-            <div className="lobby-rule">
-              <div className="lobby-rule__now">
-                <small>ルール</small>
-                <b>{MODE_SHORT[gameMode]}{special !== 'none' && `・${SPECIAL_NAME[special]}`}</b>
-              </div>
-              <button type="button" className="fuda-btn" onClick={() => setIsRuleOpen(true)}>ルール設定</button>
+          {/* フッター：左に武器庫へ、中央に対戦開始、右にルール */}
+          <div className="lobby-bar" style={{ '--seats': seatLimit }}>
+            {/* 左：武器庫へ。タイトルの「武器庫を開く」と同じ墨のボタン
+                （準備完了のあいだは押せない。ランダムマッチは持ち替えができないので出さない） */}
+            <div className="lobby-armory">
+              {!auto && (
+                <InkButton
+                  fit
+                  onClick={() => handleGoToCrafting("LOBBY")}
+                  disabled={me.ready}
+                  title={me.ready ? "準備完了のあいだは武器を変えられません" : undefined}
+                >
+                  武器庫へ<span className="lobby-armory__sub">（剣の追加など）</span>
+                </InkButton>
+              )}
             </div>
 
             <div className="lobby-mid">
-              {/* 対戦開始はホストだけ。ほかの人にも同じ大きさの見えないボタンを置き、帯の高さ（＝列の高さ）をホストとそろえる */}
+              {/* 中央は「今やること」のボタン。ホストは対戦開始、ほかの人は準備完了（押した後は控えめな準備取消）。
+                  ランダムマッチは操作がないので、同じ大きさの見えないボタンで帯の高さ（＝列の高さ）をそろえる。
+                  準備完了は対戦開始と同じく墨を出して脈打たせる（墨は黒）。押した後の準備取消は薄く墨を敷くだけにとどめる */}
               {isHost && !auto ? (
                 <InkButton variant="shu" lit={view.canStart} onClick={onStart} disabled={!view.canStart}>
-                  {soloMode ? "1 vs 3 で対戦開始" : `${playerCount}人で対戦開始`}
+                  {/* 人数が足りないあいだに「1人で」と出すと、1人で始められるように読めてしまう。
+                      全員の準備はそろったが剣の受け渡しを待っている間は、押せない理由が分かるよう対戦準備中と出す（点は錬成中と同じく順に灯す） */}
+                  {room.swordsLoading ? <span className="lobby-wait">対戦準備中<i>.</i><i>.</i><i>.</i></span>
+                    : soloMode ? "1 vs 3 で対戦開始" : playerCount >= MIN_PLAYERS ? `${playerCount}人で対戦開始` : "対戦開始"}
+                </InkButton>
+              ) : !auto ? (
+                <InkButton variant={me.ready ? "usuzumi" : "sumi"} lit={!me.ready} rest={me.ready} onClick={() => onReady(!me.ready)}>
+                  {me.ready ? "準備取消" : "準備完了"}
                 </InkButton>
               ) : (
                 <div className="lobby-mid__ghost" aria-hidden="true">
@@ -647,25 +716,12 @@ export default function LobbyScreen({
               <p className="lobby-mid__status">{status}</p>
             </div>
 
-            <div className="lobby-id">
-              {auto ? (
-                <div><small>対戦形式</small><b className="is-random">ランダムマッチ</b></div>
-              ) : (
-                <>
-                  <div><small>ロビーID</small><b>{roomId || "----"}</b></div>
-                  <button
-                    type="button"
-                    className={`fuda-btn lobby-copy ${isCopied ? 'fuda-btn--on' : ''}`}
-                    onClick={handleCopyId}
-                    aria-label={isCopied ? "コピーしました" : "ロビーIDをコピー"}
-                  >
-                    {isCopied
-                      ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 8.5l4 4 8-9" /></svg>
-                      : <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="9" height="9" /><path d="M10.5 2.5h-9v9" /></svg>}
-                    コピー
-                  </button>
-                </>
-              )}
+            <div className="lobby-rule">
+              <div className="lobby-rule__now">
+                <small>ルール</small>
+                <b>{MODE_SHORT[gameMode]}{special !== 'none' && `・${SPECIAL_NAME[special]}`}</b>
+              </div>
+              <button type="button" className="fuda-btn" onClick={() => setIsRuleOpen(true)}>ルール設定</button>
             </div>
           </div>
         </div>

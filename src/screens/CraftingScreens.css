@@ -419,6 +419,10 @@
 .craft-wait-note { margin: 6px 0 0; font-size: 12px; letter-spacing: 0.04em; color: var(--kasure); }
 .craft--port .craft-wait-note { font-size: 11px; }
 
+/* 錬成のキャンセル。断り書きの下に、少し空けて置く */
+.craft-cancel { margin-top: 18px; width: 100%; max-width: 240px; }
+.craft--port .craft-cancel { margin-top: 10px; }
+
 /* 三つの点を順に灯す */
 .craft-wait-text i { font-style: normal; animation: craft-dots 1.2s steps(1) infinite; }
 .craft-wait-text i:nth-child(2) { animation-delay: 0.2s; }

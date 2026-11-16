@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import InkButton from '../components/InkButton.jsx';
 import { EnsoInk } from '../components/SwordForgeParts.jsx';
 import ForgeHammer3D from '../components/ForgeHammer3D.jsx';
@@ -177,7 +177,15 @@ export function CraftPoseScreen({ direction = "forward", recapture = false, came
 // 3. 錬成中画面
 // ==========================================
 // leaving：錬成が終わったら、動かさずにその場でフェードアウトする（消えきったら錬成完了の画面へ移る）
-export function CraftingApiScreen({ capturedImage, aspect, leaving = false }) {
+// 錬成を始めてから、キャンセルを押せるようになるまでの時間
+const CRAFT_CANCEL_DELAY_MS = 5000;
+
+export function CraftingApiScreen({ capturedImage, aspect, leaving = false, onCancel }) {
+  const [canCancel, setCanCancel] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setCanCancel(true), CRAFT_CANCEL_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, []);
   return (
     <CraftFrame title="錬成中" animClass={leaving ? 'craft-fade-out' : ''}>
       <div className="craft-split">
@@ -192,6 +200,10 @@ export function CraftingApiScreen({ capturedImage, aspect, leaving = false }) {
           <ForgeHammer3D imageSrc={capturedImage} aspect={aspect} />
           <p className="craft-wait-text">剣を錬成中<i>.</i><i>.</i><i>.</i></p>
           <p className="craft-wait-note">※剣の錬成には時間がかかる場合があります</p>
+          {/* 始めてすぐは押せない（押し間違いで撮り直しにならないよう）。5秒たつと押せる */}
+          <div className="craft-cancel">
+            <InkButton variant="usuzumi" onClick={onCancel} disabled={!canCancel || leaving}>キャンセル</InkButton>
+          </div>
         </div>
       </div>
     </CraftFrame>

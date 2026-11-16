@@ -1,7 +1,9 @@
 .stage169 { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 /* 舞台そのもの。transform が掛かるので、中の position: fixed はウィンドウではなく舞台が基準になる。
-   文字の大きさはウィンドウ幅で変えない（狭いウィンドウでは舞台ごと縮むため） */
+   文字の大きさはウィンドウ幅で変えない（狭いウィンドウでは舞台ごと縮むため）。
+   舞台の外（上下・左右の余白）には何も出さない。大きな墨のボタンなどがはみ出しても、舞台の縁で切る */
 .stage169__canvas {
+  overflow: clip;
   --stage-vw: 12.8px;
   --stage-vh: 7.2px;
   position: relative;

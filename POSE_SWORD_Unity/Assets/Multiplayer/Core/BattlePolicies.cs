@@ -28,24 +28,25 @@ namespace PoseSword.Multiplayer
         }
 
         // ▼ 通常クリック/タップ用：SPが必殺技分たまっていてもここでは発動しない（ジャンプ・小ダッシュのみ）
+        // 独楽モードの突進はSPを使わず、一定以上の速さで回っている時（komaSpinReady）だけ出せる
         public static string PrimaryAction(bool koma, float sp, bool started, bool alive, bool dashing, bool right,
-            bool stunned = false)
+            bool stunned = false, bool komaSpinReady = false)
         {
             if (CannotAct(sp, started, alive, dashing, stunned)) return null;
-            if (koma) return sp >= 20 ? "KomaDash" : null;
+            if (koma) return komaSpinReady ? "KomaDash" : null;
             return right ? "JumpRight" : "JumpLeft";
         }
 
         // ▼ 必殺技専用ボタン/スペースキー用：SPが必殺技分たまっている時だけ発動する
-        // ultimateSp は剣モードの発動ラインで、既定の100は従来の固定値と同じ。ボスはSP最大が200になるが
+        // ultimateSp は発動ラインで、既定の100は従来の固定値と同じ（独楽モードの竜巻も同じライン）。ボスはSP最大が200になるが
         // 通常必殺技のラインは100のままなので、UIと同じ値をここへ渡して判定をひとつに揃える。
         public static string UltimateAction(bool koma, float sp, bool started, bool alive, bool dashing,
             bool stunned = false, float ultimateSp = 100f)
         {
             if (CannotAct(sp, started, alive, dashing, stunned)) return null;
             if (float.IsNaN(ultimateSp) || float.IsInfinity(ultimateSp)) return null;
-            if (koma) return sp >= 70 ? "Tornado" : null;
-            return sp >= ultimateSp ? "SwordDash" : null;
+            if (sp < ultimateSp) return null;
+            return koma ? "Tornado" : "SwordDash";
         }
 
         // 巨大回転斬で何人目に当たったかに応じた威力の割合。1人目は等倍、2人目は secondRate、
