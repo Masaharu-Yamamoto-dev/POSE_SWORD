@@ -2,30 +2,49 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-// ▼【新規追加】SYNC(MultiplayerSync)を届いた順にため込み、「一番新しいSYNCより displayDelay 秒だけ過去」の時点を
-// 再生する時計。ホストもゲストも同じこれを通して画面を作るので、どちらの画面も同じだけ遅れて同じように滑らかになる。
+// ▼【新規追加】SYNC(MultiplayerSync)を届いた順にため込み、「displayDelay 秒前」の時点を再生する時計。
+// ホストもゲストも同じこれを通して画面を作るので、どちらの画面も同じだけ遅れて同じように滑らかになる。
 //
 // 以前のゲストは「届いた最新の位置へ毎フレーム寄せる」だけだったため、SYNCの届く間隔の乱れ(ジッター・再送待ち)が
 // そのまま剣の速さの乱れになって見えていた。ため込んだ分でその乱れを吸収し、前後2つのSYNCの間を補間して表示する。
 //
-// 時計(renderTime)はホストの Time.unscaledTime の目盛り(MultiplayerSync.time)で進める。ゲストは自分の時計と
-// ホストの時計の差を知らなくてよく、「最新のSYNCの時刻 - displayDelay」を目標に、実時間で進めつつゆるやかに寄せる。
-// ホストでは最新のSYNCが常に「今」なので、ちょうど displayDelay 秒前が表示される。
+// 時刻はホストの物理の時刻(MultiplayerSync.time)の目盛りで数える。自分の時計とホストの時計の差(届くまでの時間)を、
+// 直近の「一番早く届いたSYNC」から見積もり、「今 - その差 - displayDelay」を再生する。
+// 届くたびに目標が飛び飛びに動く方式(最新のSYNCの時刻 - displayDelay)だと、届く間隔の乱れで再生の速さが揺れるので、
+// 見積もった差が変わらない限り、再生の時計は実時間と同じ速さで一定に進む。
+// ホストでは届くまでの時間がほぼ0なので、ちょうど displayDelay 秒前が表示される。
 public class SyncPlayback
 {
-    // 一番新しいSYNCからどれだけ過去を表示するか(秒)。大きいほど通信の乱れに強く、小さいほど遅延が短い
+    // 一番早く届いたSYNCからどれだけ過去を表示するか(秒)。大きいほど通信の乱れに強く、小さいほど遅延が短い
     public float Delay = 0.1f;
-    // 目標の時刻へ寄せる速さ(1/秒)。大きいと通信の乱れがそのまま速さの乱れとして見え、小さいと遅延が目標からずれたまま長く残る
-    public float Nudge = 4f;
+    // 目標の時刻へ寄せる速さ(1/秒)。見積もった差が変わった時にだけ働く
+    public float Nudge = 2f;
     // 目標からこれ以上ずれていたら、寄せずに飛ぶ(長い途切れの後など)
-    public float SnapThreshold = 0.5f;
-    // ▼ 決着後：ため込んだ残りを最後まで通常の速さで再生し切る(目標を「最新」にする)。再生し切ったら Drained が立つ
+    public float SnapThreshold = 0.3f;
+    // 届くまでの時間の見積もりに使う期間(秒)。この間で一番早く届いたものを基準にする
+    public float OffsetWindow = 2f;
+    // ▼ 決着後：ため込んだ残りを最後まで通常の速さで再生し切る。再生し切ったら Drained が立つ
     public bool Draining;
+    // ▼【新規追加】ゲスト：ホストから届くまでの片道の時間(秒、往復の半分)。この分だけ再生を先へずらして、
+    // ホストの画面と同じ瞬間を映す。ただし、ため込みが「送る間隔 + 届き方の揺れ」を下回らない範囲までしかずらさない
+    // (下回ると届く前に追いついて止まり、カクつく)。ずらしきれない分だけ、ゲストはホストより遅れて見える
+    public float LatencyCompensation;
+    // 送る間隔の最大(物理の刻みに合わせて 20ms / 40ms が交互になる)
+    public float MaxSendGap = 0.04f;
+    public float AppliedCompensation { get; private set; }
 
     readonly List<MultiplayerSync> queue = new List<MultiplayerSync>();
+    // (届いた自分の時刻, 自分の時刻 - SYNCの時刻)
+    readonly List<(float local, float offset)> offsets = new List<(float, float)>();
     int applied;        // queue[0..applied) は適用済み。queue[applied-1] が今の起点
     float renderTime;
+    float minOffset, windowJitter;
     bool started;
+
+    // 調査用の数え上げ(MultiplayerManager がまとめてログに出す)
+    public int StatReceived, StatStalls;
+    public float StatStallSeconds, StatMaxGap, StatMaxJitter;
+    float lastArrival = -1f;
 
     public int Count => queue.Count;
     public MultiplayerSync Latest => queue.Count > 0 ? queue[queue.Count - 1] : null;
@@ -34,31 +53,53 @@ public class SyncPlayback
 
     public void Clear()
     {
-        queue.Clear(); applied = 0; renderTime = 0f; started = false; Draining = false;
+        queue.Clear(); offsets.Clear(); applied = 0; renderTime = 0f; minOffset = 0f; windowJitter = 0f; started = false; Draining = false;
+        AppliedCompensation = 0f;
+        lastArrival = -1f;
+        ResetStats();
     }
 
-    public void Enqueue(MultiplayerSync sync)
+    public void ResetStats()
+    {
+        StatReceived = 0; StatStalls = 0; StatStallSeconds = 0f; StatMaxGap = 0f; StatMaxJitter = 0f;
+    }
+
+    // localNow：届いた時の自分の Time.unscaledTime
+    public void Enqueue(MultiplayerSync sync, float localNow)
     {
         if (sync == null) return;
         // 時刻を持たない古いビルドのホストから届いた時だけ、送信間隔(30回/秒)で時刻を補う
         var last = Latest;
         if (sync.time <= 0f) sync.time = last != null ? last.time + 1f / 30f : 0f;
-        // 届く順序は保証されている(reliable)が、念のため時刻が戻ったものは起点の直後に差し込まず捨てる
         if (last != null && sync.time <= last.time) sync.time = last.time + 0.001f;
         queue.Add(sync);
+
+        StatReceived++;
+        if (lastArrival >= 0f) StatMaxGap = Mathf.Max(StatMaxGap, localNow - lastArrival);
+        lastArrival = localNow;
+
+        // 届くまでの時間の見積もり：期間内で一番小さい差(一番早く届いたもの)を使う
+        offsets.Add((localNow, localNow - sync.time));
+        offsets.RemoveAll(o => localNow - o.local > OffsetWindow);
+        float min = float.MaxValue, max = float.MinValue;
+        foreach (var o in offsets) { min = Mathf.Min(min, o.offset); max = Mathf.Max(max, o.offset); }
+        minOffset = min;
+        windowJitter = max - min;
+        StatMaxJitter = Mathf.Max(StatMaxJitter, windowJitter);
     }
 
-    // 時計を dt(実時間)だけ進め、再生時刻に達したSYNCを順に apply へ渡す。
+    // 時計を進め、再生時刻に達したSYNCを順に apply へ渡す。
     // 戻り値は位置補間用の前後2つ(from=起点、to=次。to が無ければ起点で止めて待つ)と、その間の割合 t
-    public void Advance(float dt, Action<MultiplayerSync> apply, out MultiplayerSync from, out MultiplayerSync to, out float t)
+    public void Advance(float localNow, float dt, Action<MultiplayerSync> apply, out MultiplayerSync from, out MultiplayerSync to, out float t)
     {
         from = null; to = null; t = 0f;
         if (queue.Count == 0) return;
         float latest = Latest.time;
-        float target = latest - Delay;
+        AppliedCompensation = Mathf.Clamp(LatencyCompensation, 0f, Mathf.Max(0f, Delay - MaxSendGap - windowJitter));
+        float target = localNow - minOffset + AppliedCompensation - Delay;
         if (!started)
         {
-            renderTime = target; started = true;
+            renderTime = Mathf.Min(target, latest); started = true;
         }
         else if (Draining)
         {
@@ -71,8 +112,12 @@ public class SyncPlayback
             float error = target - renderTime;
             if (Mathf.Abs(error) > SnapThreshold) renderTime = target;
             else renderTime += error * Mathf.Clamp01(Nudge * dt);
-            // 未来(まだ届いていない時刻)は見せない。届くまでその場で待つ
-            if (renderTime > latest) renderTime = latest;
+            // 未来(まだ届いていない時刻)は見せない。届くまでその場で待つ(=カクつき。数えておく)
+            if (renderTime > latest)
+            {
+                StatStalls++; StatStallSeconds += renderTime - latest;
+                renderTime = latest;
+            }
         }
         // 最初の1件はため込みを待たずに即座に出す(開始時に剣が無い画面を見せないため)
         if (applied == 0) { apply(queue[0]); applied = 1; }

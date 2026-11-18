@@ -73,6 +73,8 @@ export class RoomSession {
     this.assetVersion = 0;
     this.loadDeadline = Infinity;
     this.lastHeartbeat = -Infinity;
+    // ゲスト：ホストとの往復時間(ms)の直近の記録。最小を Unity に渡し、再生をホストの画面に合わせる
+    this.rtts = [];
     this.sequence = 0;
     // 電波が弱いと必殺技ボタンの1回送信がホストに届かず、SPは満タン表示のままボタンが
     // 反応しなくなって見える。ホスト側はseqで重複を弾くので、届くまで安全に再送できる。
@@ -259,7 +261,8 @@ export class RoomSession {
       case 'SYNC':
         if (m.matchId !== this.room?.matchId || !['COUNTDOWN', 'PLAYING'].includes(this.room.phase) ||
             !Number.isSafeInteger(m.tick) || m.tick <= (this.sync?.tick ?? -1)) return;
-        this.sync = this.payload(m); this.command('SyncMultiplayer', this.sync); break;
+        // 画面(React)は sync を使っていないので notify しない(30回/秒の再描画が Unity と同じスレッドを詰まらせる)
+        this.sync = this.payload(m); this.command('SyncMultiplayer', this.sync); return;
       case 'RESULT':
         if (m.matchId !== this.room?.matchId || !['PLAYING', 'RESULT'].includes(this.room.phase)) return;
         if (!this.result) {
@@ -273,6 +276,7 @@ export class RoomSession {
         this.command('StopMultiplayer', { matchId: m.matchId }); break;
       case 'SPIN': if (!this.markSpin(m.playerId)) return; break;
       case 'PING': this.send(link, 'PONG'); break;
+      case 'PONG': this.recordRtt(link); return;
       case 'CLOSED': this.error = HOST_CLOSED_MESSAGE; this.close(false); return;
       default: break;
     }
@@ -426,7 +430,8 @@ export class RoomSession {
       if (this.host.beginPlaying(data.matchId)) this.publish();
     } else if (this.isHost && type === 'SYNC' && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) {
       if (!Number.isSafeInteger(data.tick) || data.tick <= (this.sync?.tick ?? -1)) return;
-      this.sync = data; this.broadcast('SYNC', data); this.notify();
+      // 画面(React)は sync を使っていないので、ここでは notify しない。30回/秒の再描画が Unity と同じスレッドを詰まらせ、ホストの画面がカクつく原因になる
+      this.sync = data; this.broadcast('SYNC', data);
     } else if (this.isHost && type === 'RESULT' && this.host.finish(data.matchId)) {
       this.resultPlayers = structuredClone(this.room.players);
       this.result = data; this.publish(); this.broadcast('RESULT', data); this.notify();
@@ -499,6 +504,16 @@ export class RoomSession {
     }
   }
 
+  // ゲスト：PING を送ってから PONG が返るまでの時間を記録し、直近10回の最小を Unity に渡す。
+  // SYNC の後ろに並んで遅れた回に引っ張られないよう、最小を使う
+  recordRtt(link) {
+    if (link.pingAt == null) return;
+    const rtt = this.now() - link.pingAt; link.pingAt = null;
+    this.rtts = [...this.rtts.slice(-9), rtt];
+    if (this.room?.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase))
+      this.command('SetNetworkRtt', { matchId: this.room.matchId, rtt: Math.min(...this.rtts) });
+  }
+
   pump() {
     if (this.closed) return;
     const now = this.now();
@@ -522,7 +537,7 @@ export class RoomSession {
       if (this.isHost && this.result && link.playerId && link.resultAck !== this.result.matchId && now - link.lastResult >= 1000) {
         this.send(link, 'RESULT', this.result); link.lastResult = now;
       }
-      if (now - this.lastHeartbeat >= 1000) this.send(link, 'PING');
+      if (now - this.lastHeartbeat >= 1000) { if (!this.isHost) link.pingAt = now; this.send(link, 'PING'); }
     }
     if (now - this.lastHeartbeat >= 1000) this.lastHeartbeat = now;
     if (!this.isHost && this.pendingUltimate && this.room?.phase === 'PLAYING') {

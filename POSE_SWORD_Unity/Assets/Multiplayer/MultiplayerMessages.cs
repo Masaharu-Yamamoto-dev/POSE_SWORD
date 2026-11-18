@@ -138,6 +138,12 @@ using UnityEngine;
     public float judgmentX;
     public float judgmentY;
 }
+// ▼【新規追加】ゲストのReact(RoomSession)が測った、ホストとの往復時間(ms)。SetNetworkRtt で受け取る
+[Serializable] public class MultiplayerRtt
+{
+    public string matchId;
+    public float rtt;
+}
 [Serializable] public class MultiplayerScore
 {
     public string playerId;
