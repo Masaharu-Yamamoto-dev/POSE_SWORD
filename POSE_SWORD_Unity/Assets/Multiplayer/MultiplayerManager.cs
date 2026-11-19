@@ -5,6 +5,7 @@ using System.Linq;
 using PoseSword.Multiplayer;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 // Runs after the controllers' FixedUpdates. Manual simulation gives one explicit
@@ -101,12 +102,24 @@ public class MultiplayerManager : MonoBehaviour
     private int physicsTick, syncTick, receivedTick = -1;
     private float countdownEnd, nextSync, nextTargetUpdate;
     private float receivedCountdownRemaining;
-    // ▼【新規追加】表示の遅延。SYNCをため込んで「displayDelaySeconds 秒前」を前後のSYNCの間で補間しながら見せる(SyncPlayback)。
+    // ▼【新規追加】表示の遅延。SYNCをため込んで「表示の遅延 秒前」を前後のSYNCの間で補間しながら見せる(SyncPlayback)。
     // ホストも自分が作ったSYNCを同じ経路で見るので、ホストとゲストの画面は同じだけ遅れて同じ滑らかさになる。
     // 物理と判定は従来どおりホストで遅れなく進み、遅れるのは見た目だけ(DisplayPoseDriver が本当の位置と表示用の位置を付け替える)
-    [Header("表示の遅延（ホスト・ゲスト共通）")]
-    [Tooltip("一番新しい同期からどれだけ過去を表示するか(秒)。短いほど操作への反応が早く、長いほど通信の乱れに強い")]
-    public float displayDelaySeconds = 0.08f;
+    // ▼【変更】遅延は自動で決める。各ゲストが「表示が止まらないために必要な遅延」を測ってホストへ知らせ(1秒ごと)、
+    // ホストが全ゲストの最大を、下限と上限の間に収めて全員共通の遅延にする(SYNCに載せて配る)。
+    // 上げる時はすぐ上げ、下げる時は数秒続いてからゆっくり下げる
+    [Header("表示の遅延（ホスト・ゲスト共通、自動調整）")]
+    [Tooltip("表示の遅延の上限(秒)。ゲストの回線がこれ以上を必要としても、ここで止める(その場合、そのゲストの画面はときどき一瞬止まる)。試合開始時はこの値から始める")]
+    [FormerlySerializedAs("displayDelaySeconds")]
+    public float maxDisplayDelaySeconds = 0.08f;
+    [Tooltip("表示の遅延の下限(秒)。送る間隔(最大40ms)より短くはできない")]
+    public float minDisplayDelaySeconds = 0.05f;
+    // ホスト：各ゲストから届いた必要値と、届いた時刻(Time.unscaledTime)
+    private readonly Dictionary<string, (float delay, float at)> guestDelays = new Dictionary<string, (float, float)>();
+    private float delayLowerSince = -1f;
+    // ゲスト：次に必要値をホストへ知らせる時刻
+    private float nextDelayReport;
+    const float DelayReportInterval = 1f, DelayReportExpiry = 5f, DelayLowerWait = 3f, DelayLowerRate = 0.01f;
     private readonly SyncPlayback playback = new SyncPlayback();
     private readonly List<MultiplayerSync> dueSnapshots = new List<MultiplayerSync>();
     // ホスト：表示用の位置に置き換える前の本当の位置(物理・判定が使う)。次の FixedUpdate / Update の先頭で戻す
@@ -1547,6 +1560,12 @@ public class MultiplayerManager : MonoBehaviour
         // ただしカットインやヒットストップで Time.timeScale が下がると FixedUpdate がほとんど来なくなり(0.05倍なら0.4秒に1回)、
         // 技の番号やカウントダウンの同期まで止まってしまう。物理が止まっている間はここから送る(位置は止まったままなので時刻のずれは問題にならない)
         if (IsHost && IsSimulating && Time.unscaledTime - lastSyncLocal >= SyncInterval + 0.02f) EmitSync();
+        if (IsHost && IsSimulating) UpdateCommonDelay();
+        if (!IsHost && IsSimulating && Time.unscaledTime >= nextDelayReport && playback.Count > 0)
+        {
+            nextDelayReport = Time.unscaledTime + DelayReportInterval;
+            Emit("DELAY", new MultiplayerDelay { matchId = config.matchId, delay = Mathf.Clamp(playback.NeededDelay, 0f, 1f) });
+        }
         // ▼【変更】ゲストの位置の追従(毎フレーム最新の位置へ寄せる)はやめた。ホスト・ゲストとも PlaybackLateUpdate が
         // ため込んだSYNCの間を補間して表示する(SyncPlayback)
     }
@@ -1566,6 +1585,33 @@ public class MultiplayerManager : MonoBehaviour
 
     const float SyncInterval = 1f / 30f;
 
+    // ▼【新規追加】ホスト：全ゲストの必要値の最大を、下限と上限の間に収めて全員共通の遅延にする。
+    // 上げる時はすぐ(表示が止まるのを防ぐのが先)。下げる時は、下げてよい状態が DelayLowerWait 秒続いてから、1秒に10msずつ
+    // (遅延がふらふら変わらないように)。知らせが途絶えたゲスト(切断など)は DelayReportExpiry 秒で数えなくなる
+    void UpdateCommonDelay()
+    {
+        float now = Time.unscaledTime;
+        float min = Mathf.Max(0f, minDisplayDelaySeconds), max = Mathf.Max(min, maxDisplayDelaySeconds);
+        float target = min;
+        foreach (var entry in guestDelays.Values)
+            if (now - entry.at <= DelayReportExpiry) target = Mathf.Max(target, entry.delay);
+        target = Mathf.Clamp(target, min, max);
+        if (target >= playback.Delay) { playback.Delay = target; delayLowerSince = -1f; return; }
+        if (delayLowerSince < 0f) { delayLowerSince = now; return; }
+        if (now - delayLowerSince < DelayLowerWait) return;
+        playback.Delay = Mathf.Max(target, playback.Delay - DelayLowerRate * Time.unscaledDeltaTime);
+    }
+
+    // ▼【新規追加】ホスト：ゲストが測った必要値を受け取る(React の RoomSession が、送ってきた接続から playerId を付けて渡す)
+    [UnityEngine.Scripting.Preserve]
+    public void SetGuestDelay(string json)
+    {
+        var msg = JsonUtility.FromJson<MultiplayerDelay>(json);
+        if (config == null || !IsHost || msg == null || msg.matchId != config.matchId || msg.playerId == null ||
+            !swords.ContainsKey(msg.playerId) || float.IsNaN(msg.delay) || msg.delay < 0f) return;
+        guestDelays[msg.playerId] = (Mathf.Min(msg.delay, 1f), Time.unscaledTime);
+    }
+
     // ▼【新規追加】SYNCをゲストへ送ると同時に、ホスト自身の再生の時計(SyncPlayback)にも同じものをため込む
     void EmitSync()
     {
@@ -1578,7 +1624,8 @@ public class MultiplayerManager : MonoBehaviour
     void ResetPlayback()
     {
         playback.Clear();
-        playback.Delay = Mathf.Max(0f, displayDelaySeconds);
+        playback.Delay = Mathf.Max(0f, maxDisplayDelaySeconds);
+        guestDelays.Clear(); delayLowerSince = -1f; nextDelayReport = 0f;
         dueSnapshots.Clear(); truePoses.Clear(); displayPosesApplied = false; displayCenters.Clear();
         finishPresentationPending = false; playbackStopped = false; nextStatsLog = 0f;
         displayPhase = "IDLE"; receivedCountdownRemaining = 0f; lastSyncLocal = -100f;
@@ -2103,7 +2150,7 @@ public class MultiplayerManager : MonoBehaviour
         pendingHitEvents.Clear();
         var cloneEnds = pendingCloneEnds.ToArray();
         pendingCloneEnds.Clear();
-        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, time = Time.inFixedTimeStep ? Time.fixedUnscaledTime : Time.unscaledTime, phase = phase, hits = hitEvents, cloneEnds = cloneEnds,
+        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, time = Time.inFixedTimeStep ? Time.fixedUnscaledTime : Time.unscaledTime, delay = playback.Delay, phase = phase, hits = hitEvents, cloneEnds = cloneEnds,
             judgmentSeq = judgmentSeq, judgmentX = judgmentSyncCentre.x, judgmentY = judgmentSyncCentre.y,
             countdownRemaining = phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0,
             players = config.players.Select(p => {
@@ -2141,6 +2188,8 @@ public class MultiplayerManager : MonoBehaviour
             sync.players.Any(p => p == null || p.playerId == null || !swords.ContainsKey(p.playerId)) ||
             sync.players.Select(p => p.playerId).Distinct().Count() != config.players.Length) return;
         receivedTick = sync.tick;
+        // ホストが決めた全員共通の遅延を使う(古いホストは送ってこないので、その時は自分の設定のまま)
+        if (sync.delay > 0f) playback.Delay = Mathf.Min(sync.delay, 1f);
         // ▼【変更】届いた瞬間には反映せず、再生の時計(SyncPlayback)にため込む。反映は PlaybackLateUpdate が時刻順に行う
         playback.Enqueue(sync, Time.unscaledTime);
     }
@@ -2246,7 +2295,9 @@ public class MultiplayerManager : MonoBehaviour
             float fps = statFrames / Mathf.Max(0.001f, Time.unscaledTime - statsStartedAt);
             Debug.Log($"[SyncStats] {(IsHost ? "host" : "guest")} fps={fps:F0} 受信={playback.StatReceived} 最大間隔={playback.StatMaxGap * 1000f:F0}ms " +
                 $"揺れ={playback.StatMaxJitter * 1000f:F0}ms 待ち={playback.StatStalls}回/{playback.StatStallSeconds * 1000f:F0}ms " +
-                $"遅い描画={slowFrames}回(最大{maxFrameMs:F0}ms) 遅延設定={playback.Delay * 1000f:F0}ms" +
+                $"遅い描画={slowFrames}回(最大{maxFrameMs:F0}ms) 共通の遅延={playback.Delay * 1000f:F0}ms" +
+                (IsHost ? $" ゲストの必要値={string.Join(",", guestDelays.Select(g => $"{g.Key}:{g.Value.delay * 1000f:F0}ms"))}"
+                    : $" 自分の必要値={playback.NeededDelay * 1000f:F0}ms") +
                 (IsHost ? "" : $" 往復={playback.LatencyCompensation * 2000f:F0}ms 片道補正={playback.AppliedCompensation * 1000f:F0}ms"));
         }
         playback.ResetStats(); slowFrames = 0; maxFrameMs = 0f; statFrames = 0;

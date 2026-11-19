@@ -126,6 +126,8 @@ using UnityEngine;
     public int tick;
     // ▼【新規追加】このSYNCを作った時のホストの Time.unscaledTime。ゲストはこの目盛りで再生の時計(SyncPlayback)を進める
     public float time;
+    // ▼【新規追加】全員共通の表示の遅延(秒)。ホストがゲストの必要値の最大から決め、ゲストはこの値で表示する
+    public float delay;
     public string phase;
     public float countdownRemaining;
     public MultiplayerPlayerState[] players;
@@ -139,6 +141,13 @@ using UnityEngine;
     public float judgmentY;
 }
 // ▼【新規追加】ゲストのReact(RoomSession)が測った、ホストとの往復時間(ms)。SetNetworkRtt で受け取る
+// ▼【新規追加】ゲスト → ホスト：このゲストが表示を止めないために必要な遅延(秒)。ホストでは playerId が付いて届く(SetGuestDelay)
+[Serializable] public class MultiplayerDelay
+{
+    public string matchId;
+    public string playerId;
+    public float delay;
+}
 [Serializable] public class MultiplayerRtt
 {
     public string matchId;

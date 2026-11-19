@@ -32,6 +32,15 @@ public class SyncPlayback
     // 送る間隔の最大(物理の刻みに合わせて 20ms / 40ms が交互になる)
     public float MaxSendGap = 0.04f;
     public float AppliedCompensation { get; private set; }
+    // ▼【新規追加】ゲスト：直近 NeedWindow 秒の届き方から見た「表示が止まらないために必要な遅延」(秒)。
+    // ホストへ知らせ、ホストが全員の最大を共通の遅延(Delay)にする。
+    // 1件ごとの必要値 = そのSYNCの遅れ(一番早く届いたものとの差) + 前のSYNCからの間隔 + 片道ぶんの補正 + 1コマぶんの余裕。
+    // 間隔は MaxSendGap で頭打ちにする。カットインやヒットストップで物理が止まっている間の長い間隔は、剣も止まっていて見た目に出ないため
+    public float NeedWindow = 10f;
+    public float FrameMargin = 0.02f;
+    public float NeededDelay { get; private set; }
+    readonly List<(float local, float need)> needs = new List<(float, float)>();
+    float lastSyncTime = -1f;
 
     readonly List<MultiplayerSync> queue = new List<MultiplayerSync>();
     // (届いた自分の時刻, 自分の時刻 - SYNCの時刻)
@@ -55,6 +64,7 @@ public class SyncPlayback
     {
         queue.Clear(); offsets.Clear(); applied = 0; renderTime = 0f; minOffset = 0f; windowJitter = 0f; started = false; Draining = false;
         AppliedCompensation = 0f;
+        needs.Clear(); NeededDelay = 0f; lastSyncTime = -1f;
         lastArrival = -1f;
         ResetStats();
     }
@@ -86,6 +96,18 @@ public class SyncPlayback
         minOffset = min;
         windowJitter = max - min;
         StatMaxJitter = Mathf.Max(StatMaxJitter, windowJitter);
+
+        if (lastSyncTime >= 0f)
+        {
+            float lateness = (localNow - sync.time) - minOffset;
+            float gap = Mathf.Min(sync.time - lastSyncTime, MaxSendGap);
+            needs.Add((localNow, lateness + gap + LatencyCompensation + FrameMargin));
+        }
+        lastSyncTime = sync.time;
+        needs.RemoveAll(n => localNow - n.local > NeedWindow);
+        float need = 0f;
+        foreach (var n in needs) need = Mathf.Max(need, n.need);
+        NeededDelay = need;
     }
 
     // 時計を進め、再生時刻に達したSYNCを順に apply へ渡す。

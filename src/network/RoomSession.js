@@ -209,6 +209,13 @@ export class RoomSession {
         if (input) this.command('ReceiveMultiplayerInput', input);
         break;
       }
+      case 'DELAY':
+        // ゲストが測った「表示が止まらないために必要な遅延」(秒)。ホストの Unity が全員の最大を共通の遅延にする。
+        // 誰の値かはパケットの中身ではなく、送ってきた接続から決める
+        if (link.playerId && m.matchId === this.room.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase) &&
+            Number.isFinite(m.delay) && m.delay >= 0 && m.delay <= 1)
+          this.command('SetGuestDelay', { matchId: m.matchId, playerId: link.playerId, delay: m.delay });
+        break;
       case 'RESULT_ACK':
         if (m.matchId === this.result?.matchId) link.resultAck = m.matchId; break;
       case 'RETURN':
@@ -426,6 +433,8 @@ export class RoomSession {
         // 届いていれば再送分はホスト側のseqチェックで無視されるだけなので安全。
         if (isUltimate) this.pendingUltimate = { input, attemptsLeft: 6 };
       }
+    } else if (type === 'DELAY' && !this.isHost && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) {
+      this.sendToHost('DELAY', { matchId: data.matchId, delay: data.delay });
     } else if (this.isHost && type === 'PLAYING') {
       if (this.host.beginPlaying(data.matchId)) this.publish();
     } else if (this.isHost && type === 'SYNC' && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) {
