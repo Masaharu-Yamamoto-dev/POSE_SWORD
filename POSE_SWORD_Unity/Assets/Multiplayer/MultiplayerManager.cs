@@ -140,6 +140,13 @@ public class MultiplayerManager : MonoBehaviour
     private string displayPhase = "IDLE";
     // ホストが最後にSYNCを送った時刻(Time.unscaledTime)。物理が止まっている間の送信に使う
     private float lastSyncLocal = -100f;
+    // ▼【新規追加】SYNCに付ける時刻の時計(実時間の秒)。物理を1回進めるたびに「その1回が実時間で何秒分か」(通常20ms、スロー中はもっと長い)
+    // を足し、実時間より先へ進まず、35ms以上は遅れないようにする。物理が止まっている間に画面の更新から送るSYNCも、この時計の続きで時刻を付ける。
+    // 以前は物理の時刻(fixedUnscaledTime)と画面の時刻(unscaledTime)を使い分けていたが、カットインやヒットストップの前後で
+    // 両者が数百msずれ、ゲストには「SYNCが大きく遅れて届いた」ように見えて、必要な遅延が跳ね上がっていた
+    private float syncClock = -1f, lastPhysicsStep = -100f;
+    // 再生の時計に使う実時間。コマの区切り(unscaledTime)ではなく、その瞬間の時刻を使う(届いた時刻を正確に測るため)
+    static float RealNow => (float)Time.realtimeSinceStartupAsDouble;
     // ホストの表示の遅延(秒)。ホストのカットインはこの分だけ遅らせて出す(SwordBattle)
     public float DisplayDelay => playback.Delay;
     private SimulationMode2D previousSimulationMode;
@@ -1564,7 +1571,13 @@ public class MultiplayerManager : MonoBehaviour
         // ▼【変更】SYNCの送信は FixedUpdate(物理を進めた直後)へ移した(MaybeEmitSync)。
         // ただしカットインやヒットストップで Time.timeScale が下がると FixedUpdate がほとんど来なくなり(0.05倍なら0.4秒に1回)、
         // 技の番号やカウントダウンの同期まで止まってしまう。物理が止まっている間はここから送る(位置は止まったままなので時刻のずれは問題にならない)
-        if (IsHost && IsSimulating && Time.unscaledTime - lastSyncLocal >= SyncInterval + 0.02f) EmitSync();
+        // 画面の更新が遅い端末(20fpsなど)でも、物理が動いている限りここからは送らない(時刻が物理の状態とずれるため)
+        if (IsHost && IsSimulating && RealNow - lastSyncLocal >= MaxSendGap + 0.02f && RealNow - lastPhysicsStep >= 0.06f)
+        {
+            // 物理が止まっていて剣も動かないので、時計は今の時刻まで進めてよい
+            syncClock = Mathf.Max(syncClock, RealNow);
+            EmitSync();
+        }
         if (IsHost && IsSimulating) UpdateCommonDelay();
         if (!IsHost && IsSimulating && Time.unscaledTime >= nextDelayReport && playback.Count > 0)
         {
@@ -1581,11 +1594,26 @@ public class MultiplayerManager : MonoBehaviour
     // カクついて見えていた。物理を進めた瞬間に、その物理の時刻を付けて送れば、補間した速さが本当の速さと一致する
     void MaybeEmitSync()
     {
-        float now = Time.fixedUnscaledTime;
+        float now = syncClock;
         if (now + 0.001f < nextSync) return;
-        // 送る時刻の目安は等間隔に積み上げる(物理の刻みに合わせて 20ms / 40ms が交互になり、平均で約30回/秒)。大きく遅れた時だけ今から数え直す
+        // 送る時刻の目安は等間隔に積み上げる(50回/秒なら毎回、30回/秒なら物理の刻みに合わせて 20ms / 40ms が交互)。大きく遅れた時だけ今から数え直す
         nextSync = nextSync <= 0f || now - nextSync > 0.2f ? now + SyncInterval : nextSync + SyncInterval;
         EmitSync();
+    }
+
+    const float SyncClockMaxLag = 0.035f;
+
+    // ▼【新規追加】物理を1回進めた直後に呼ぶ(ホスト)。SYNCの時計(syncClock)を、その1回が実時間で何秒分かだけ進める
+    void AdvanceSyncClock()
+    {
+        float real = RealNow;
+        lastPhysicsStep = real;
+        if (syncClock < 0f) { syncClock = real; return; }
+        float step = Time.fixedDeltaTime / Mathf.Max(Time.timeScale, 0.0001f);
+        // 通常は、物理の刻みと画面の更新のずれで実時間より最大20msほど遅れるだけ。スローの切り替わりの前後では、
+        // 1回分の実時間を正しく見積もれずに大きく遅れることがあるので、遅れが SyncClockMaxLag を超えたらそこまで追いつかせる
+        // (取り戻さないと遅れたまま進み、ゲストには毎回「遅れて届いた」ように見えてしまう)
+        syncClock = Mathf.Clamp(syncClock + step, real - SyncClockMaxLag, real);
     }
 
     float SyncInterval => 1f / Mathf.Clamp(syncPerSecond, 10, 50);
@@ -1629,8 +1657,8 @@ public class MultiplayerManager : MonoBehaviour
         RecordStat(ref statBuild, (float)(Time.realtimeSinceStartupAsDouble - started) * 1000f);
         RecordStat(ref statBytes, json.Length);
         if (NetworkManager.Instance != null) NetworkManager.Instance.SendData("MP_SYNC", json);
-        lastSyncLocal = Time.unscaledTime;
-        playback.Enqueue(sync, Time.unscaledTime);
+        lastSyncLocal = RealNow;
+        playback.Enqueue(sync, RealNow);
     }
 
     void ResetPlayback()
@@ -1641,7 +1669,7 @@ public class MultiplayerManager : MonoBehaviour
         guestDelays.Clear(); delayLowerSince = -1f; nextDelayReport = 0f;
         dueSnapshots.Clear(); truePoses.Clear(); displayPosesApplied = false; displayCenters.Clear();
         finishPresentationPending = false; playbackStopped = false; nextStatsLog = 0f;
-        displayPhase = "IDLE"; receivedCountdownRemaining = 0f; lastSyncLocal = -100f;
+        displayPhase = "IDLE"; receivedCountdownRemaining = 0f; lastSyncLocal = -100f; syncClock = -1f; lastPhysicsStep = -100f;
         playback.LatencyCompensation = 0f;
     }
 
@@ -1695,6 +1723,7 @@ public class MultiplayerManager : MonoBehaviour
         }
         UpdateKillerFreezes();
         Physics2D.Simulate(Time.fixedDeltaTime);
+        AdvanceSyncClock();
         if (!IsPlaying) { MaybeEmitSync(); return; }
         DetectFallOuts();
         rules.ResolveStep(++physicsTick, hits, forfeits, fallOuts);
@@ -2163,7 +2192,7 @@ public class MultiplayerManager : MonoBehaviour
         pendingHitEvents.Clear();
         var cloneEnds = pendingCloneEnds.ToArray();
         pendingCloneEnds.Clear();
-        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, time = Time.inFixedTimeStep ? Time.fixedUnscaledTime : Time.unscaledTime, delay = playback.Delay, phase = phase, hits = hitEvents, cloneEnds = cloneEnds,
+        return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, time = syncClock >= 0f ? syncClock : RealNow, delay = playback.Delay, phase = phase, hits = hitEvents, cloneEnds = cloneEnds,
             judgmentSeq = judgmentSeq, judgmentX = judgmentSyncCentre.x, judgmentY = judgmentSyncCentre.y,
             countdownRemaining = phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0,
             players = config.players.Select(p => {
@@ -2207,7 +2236,7 @@ public class MultiplayerManager : MonoBehaviour
         // ホストが決めた全員共通の遅延を使う(古いホストは送ってこないので、その時は自分の設定のまま)
         if (sync.delay > 0f) playback.Delay = Mathf.Min(sync.delay, 1f);
         // ▼【変更】届いた瞬間には反映せず、再生の時計(SyncPlayback)にため込む。反映は PlaybackLateUpdate が時刻順に行う
-        playback.Enqueue(sync, Time.unscaledTime);
+        playback.Enqueue(sync, RealNow);
     }
 
     // ▼【変更】以前の SyncMultiplayer の本体。再生の時計がそのSYNCの時刻に達した時に、位置以外(HP・技の段階・演出の合図など)を反映する。
@@ -2281,7 +2310,7 @@ public class MultiplayerManager : MonoBehaviour
         if (config == null || playbackStopped || playback.Count == 0) return;
         if (IsHost) CaptureTruePoses();
         dueSnapshots.Clear();
-        playback.Advance(Time.unscaledTime, Time.unscaledDeltaTime, dueSnapshots.Add, out var from, out var to, out float t);
+        playback.Advance(RealNow, Time.unscaledDeltaTime, dueSnapshots.Add, out var from, out var to, out float t);
         LogPlaybackStats();
         double started = Time.realtimeSinceStartupAsDouble;
         if (from != null) ApplyInterpolatedPoses(from, to, t);
