@@ -1586,7 +1586,11 @@ public class MultiplayerManager : MonoBehaviour
         if (!IsHost && IsSimulating && Time.unscaledTime >= nextDelayReport && playback.Count > 0)
         {
             nextDelayReport = Time.unscaledTime + DelayReportInterval;
-            Emit("DELAY", new MultiplayerDelay { matchId = config.matchId, delay = Mathf.Clamp(playback.NeededDelay, 0f, 1f) });
+            float elapsed = Mathf.Max(0.001f, RealNow - reportStartedAt);
+            Emit("DELAY", new MultiplayerDelay { matchId = config.matchId, delay = Mathf.Clamp(playback.NeededDelay, 0f, 1f),
+                fps = reportFrames / elapsed, maxFrameMs = reportMaxFrame * 1000f, maxGapMs = reportMaxGap * 1000f,
+                stallMs = (playback.StallSecondsTotal - reportStallBase) * 1000f });
+            reportStartedAt = RealNow; reportFrames = 0; reportMaxFrame = 0f; reportMaxGap = 0f; reportStallBase = playback.StallSecondsTotal;
         }
         // ▼【変更】ゲストの位置の追従(毎フレーム最新の位置へ寄せる)はやめた。ホスト・ゲストとも PlaybackLateUpdate が
         // ため込んだSYNCの間を補間して表示する(SyncPlayback)
@@ -1649,6 +1653,29 @@ public class MultiplayerManager : MonoBehaviour
         if (config == null || !IsHost || msg == null || msg.matchId != config.matchId || msg.playerId == null ||
             !swords.ContainsKey(msg.playerId) || float.IsNaN(msg.delay) || msg.delay < 0f) return;
         guestDelays[msg.playerId] = (Mathf.Min(msg.delay, 1f), Time.unscaledTime);
+        // 調査用：次のログまでの間の、ゲストの端末の状態(fps は最小、一番遅いコマと届いた間隔は最大、止まった時間は合計)
+        guestReports.TryGetValue(msg.playerId, out var report);
+        report.fps = report.count == 0 ? msg.fps : Mathf.Min(report.fps, msg.fps);
+        report.maxFrameMs = Mathf.Max(report.maxFrameMs, msg.maxFrameMs);
+        report.maxGapMs = Mathf.Max(report.maxGapMs, msg.maxGapMs);
+        report.stallMs += msg.stallMs;
+        report.count++;
+        guestReports[msg.playerId] = report;
+    }
+
+    // ▼【新規追加】調査用：ゲストの端末の状態。ゲストは1秒ごとに数えて知らせ、ホストは5秒ごとのログにまとめて出す
+    struct GuestReport { public int count; public float fps, maxFrameMs, maxGapMs, stallMs; }
+    private readonly Dictionary<string, GuestReport> guestReports = new Dictionary<string, GuestReport>();
+    private float reportStartedAt, reportMaxFrame, reportMaxGap, reportStallBase, lastFrameReal = -1f, lastSyncArrival = -1f;
+    private int reportFrames;
+
+    // ゲスト：1コマごとに、コマの長さ(実時間)を数える。タブが固まった時の長いコマも拾えるよう、unscaledDeltaTime ではなく実時間の差で測る
+    void TrackGuestFrame()
+    {
+        float now = RealNow;
+        if (lastFrameReal >= 0f) reportMaxFrame = Mathf.Max(reportMaxFrame, now - lastFrameReal);
+        lastFrameReal = now;
+        reportFrames++;
     }
 
     // ▼【新規追加】SYNCをゲストへ送ると同時に、ホスト自身の再生の時計(SyncPlayback)にも同じものをため込む
@@ -1686,6 +1713,8 @@ public class MultiplayerManager : MonoBehaviour
         lastSyncContents = null;
         playback.MaxSendGap = MaxSendGap;
         guestDelays.Clear(); delayLowerSince = -1f; nextDelayReport = 0f;
+        guestReports.Clear(); reportStartedAt = RealNow; reportFrames = 0; reportMaxFrame = 0f; reportMaxGap = 0f;
+        reportStallBase = 0f; lastFrameReal = -1f; lastSyncArrival = -1f;
         dueSnapshots.Clear(); truePoses.Clear(); displayPosesApplied = false; displayCenters.Clear();
         finishPresentationPending = false; playbackStopped = false; nextStatsLog = 0f;
         displayPhase = "IDLE"; receivedCountdownRemaining = 0f; lastSyncLocal = -100f; syncClock = -1f; lastPhysicsStep = -100f;
@@ -2246,6 +2275,10 @@ public class MultiplayerManager : MonoBehaviour
     public void SyncMultiplayer(string json)
     {
         if (config == null || IsHost) return;
+        // 調査用：SYNCが届いた間隔(実時間)の最大
+        float arrival = RealNow;
+        if (lastSyncArrival >= 0f) reportMaxGap = Mathf.Max(reportMaxGap, arrival - lastSyncArrival);
+        lastSyncArrival = arrival;
         double started = Time.realtimeSinceStartupAsDouble;
         var wire = JsonUtility.FromJson<MultiplayerSyncWire>(json);
         var sync = wire != null ? SyncCodec.Decode(wire, playerOrder) : null;
@@ -2334,6 +2367,7 @@ public class MultiplayerManager : MonoBehaviour
         if (config == null || playbackStopped || playback.Count == 0) return;
         if (IsHost) CaptureTruePoses();
         dueSnapshots.Clear();
+        if (!IsHost) TrackGuestFrame();
         playback.Advance(RealNow, Time.unscaledDeltaTime, dueSnapshots.Add, out var from, out var to, out float t);
         LogPlaybackStats();
         double started = Time.realtimeSinceStartupAsDouble;
@@ -2376,7 +2410,8 @@ public class MultiplayerManager : MonoBehaviour
             Debug.Log($"[SyncStats] {(IsHost ? "host" : "guest")} fps={fps:F0} 受信={playback.StatReceived} 最大間隔={playback.StatMaxGap * 1000f:F0}ms " +
                 $"揺れ={playback.StatMaxJitter * 1000f:F0}ms 待ち={playback.StatStalls}回/{playback.StatStallSeconds * 1000f:F0}ms " +
                 $"遅い描画={slowFrames}回(最大{maxFrameMs:F0}ms) 共通の遅延={playback.Delay * 1000f:F0}ms" +
-                (IsHost ? $" ゲストの必要値={string.Join(",", guestDelays.Select(g => $"{g.Key}:{g.Value.delay * 1000f:F0}ms"))}"
+                (IsHost ? $" ゲストの必要値={string.Join(",", guestDelays.Select(g => $"{g.Key}:{g.Value.delay * 1000f:F0}ms"))}" +
+                    $" ゲストの状態={string.Join(" ", guestReports.Select(g => $"{g.Key}:fps={g.Value.fps:F0} 最遅コマ={g.Value.maxFrameMs:F0}ms 最大間隔={g.Value.maxGapMs:F0}ms 待ち={g.Value.stallMs:F0}ms"))}"
                     : $" 自分の必要値={playback.NeededDelay * 1000f:F0}ms") +
                 $" 送信回数設定={Mathf.Clamp(syncPerSecond, 10, 50)}/秒 SYNCの大きさ(送る形・推定)={FormatStat(statBytes, "B", "F0")}" +
                 (IsHost ? $" 作成={FormatStat(statBuild, "ms", "F2")}" : $" 読み取り={FormatStat(statRead, "ms", "F2")}") +
@@ -2385,6 +2420,7 @@ public class MultiplayerManager : MonoBehaviour
         }
         playback.ResetStats(); slowFrames = 0; maxFrameMs = 0f; statFrames = 0;
         statBuild = default; statRead = default; statApply = default; statBytes = default;
+        guestReports.Clear();
         statsStartedAt = Time.unscaledTime;
         nextStatsLog = Time.unscaledTime + 5f;
     }
