@@ -153,6 +153,14 @@ using UnityEngine;
     public string matchId;
     public float rtt;
 }
+// ▼【新規追加】実際に送るSYNCの形。中身(MultiplayerSync)は SyncCodec が項目名のない整数の並び(s)に詰める。
+// matchId と tick だけは React が見るので名前付きのまま残す
+[Serializable] public class MultiplayerSyncWire
+{
+    public string matchId;
+    public int tick;
+    public int[] s;
+}
 [Serializable] public class MultiplayerScore
 {
     public string playerId;

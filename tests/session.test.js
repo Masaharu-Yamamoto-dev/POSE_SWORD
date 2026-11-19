@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ASSETS_READY_DELAY, AUTO_START_DELAY, FILL_TIMEOUT, LOBBY_FADE_MS, MATCH_INTRO_MS, RoomSession } from '../src/network/RoomSession.js';
+import { ASSETS_READY_DELAY, AUTO_START_DELAY, FILL_TIMEOUT, LOBBY_FADE_MS, MATCH_INTRO_MS, RoomSession, SYNC_BACKLOG_BYTES } from '../src/network/RoomSession.js';
 import { PROTOCOL_VERSION } from '../src/network/HostRoom.js';
 
 const sword = { name: '剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
@@ -210,6 +210,23 @@ test('unacknowledged results are resent; duplicate results do not replay finish'
   s.advance(1500); s.host.pump(); s.net.flush();
   assert.equal(s.links[0][0].sent.filter(m => m.type === 'RESULT').length, 2);
   assert.equal(s.commands[1].filter(c => c.method === 'FinishMultiplayer').length, 1);
+});
+
+test('a backed-up data channel gets only the latest sync, sent as soon as it drains', () => {
+  const s = setup(); const matchId = start(s);
+  const listeners = [];
+  const channel = { bufferedAmount: SYNC_BACKLOG_BYTES + 1, addEventListener: (type, fn) => { if (type === 'bufferedamountlow') listeners.push(fn); } };
+  s.links[0][0].dataChannel = channel;
+  for (const tick of [1, 2, 3]) s.host.unityEvent('SYNC', { matchId, tick, players: [] });
+  s.net.flush();
+  assert.equal(s.guests[0].view().sync, null);
+  assert.equal(listeners.length, 1);
+  assert.equal(channel.bufferedAmountLowThreshold, SYNC_BACKLOG_BYTES);
+  channel.bufferedAmount = 0;
+  listeners.forEach(fn => fn()); s.net.flush();
+  assert.equal(s.guests[0].view().sync.tick, 3);
+  // ほかのゲストは詰まっていないので、すべて受け取っている
+  assert.equal(s.guests[1].view().sync.tick, 3);
 });
 
 test('backpressure replaces unsent sync with latest and discards it on result', () => {

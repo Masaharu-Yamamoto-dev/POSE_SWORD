@@ -16,6 +16,10 @@ export const SPIN_DURATION = 600;
 // 画面側（MatchIntro）も同じ値で数える。
 export const LOBBY_FADE_MS = 250;
 export const MATCH_INTRO_MS = 4500;
+// SYNC の送信待ち(まだ送り出せていないデータ)がこれより多い相手には、新しい SYNC を足さない(バイト)。
+// SYNC は毎回全員の状態が丸ごと入っているので、詰まっている間の古いものは送らず、空いた時に最新の1つだけ送る。
+// 弱い回線で古い SYNC が列に並び続け、遅れが0.5秒以上に膨らむのを防ぐ
+export const SYNC_BACKLOG_BYTES = 4096;
 // 剣画像は ROSTER でしか配らない。STATE は同じ形のまま imageStr だけを落とす。
 // 残機モードの swords[] は3本それぞれが画像を持つので、そこまで潜って削る。
 // ここを浅く削ると STATE 1通が数MBになり、心拍が詰まって接続が切れる。
@@ -121,8 +125,25 @@ export class RoomSession {
   send(link, type, data = {}) {
     if (!link.conn.open) return;
     const packet = { ...data, type, protocolVersion: PROTOCOL_VERSION, roomEpoch: this.epoch };
-    if (type === 'SYNC' && link.conn.bufferSize > 0) { link.pendingSync = packet; return; }
+    if (type === 'SYNC' && this.backlogged(link)) { link.pendingSync = packet; this.watchDrain(link); return; }
     try { link.conn.send(packet); } catch { this.disconnected(link); link.conn.close(); }
+  }
+  // 送信待ちがたまっているか。PeerJS 自身の待ち行列(bufferSize)と、WebRTC の送り出し待ち(bufferedAmount)の両方を見る
+  backlogged(link) {
+    return link.conn.bufferSize > 0 || (link.conn.dataChannel?.bufferedAmount ?? 0) > SYNC_BACKLOG_BYTES;
+  }
+  // 送信待ちが減ったらすぐ最新の SYNC を送れるよう、WebRTC の「減った」知らせを一度だけ登録する(pump の 250ms を待たない)
+  watchDrain(link) {
+    const channel = link.conn.dataChannel;
+    if (!channel || link.drainWatched) return;
+    link.drainWatched = true;
+    channel.bufferedAmountLowThreshold = SYNC_BACKLOG_BYTES;
+    channel.addEventListener('bufferedamountlow', () => this.flushPendingSync(link));
+  }
+  flushPendingSync(link) {
+    if (!link.pendingSync || this.backlogged(link)) return;
+    const sync = link.pendingSync; link.pendingSync = null;
+    if (sync.matchId === this.room?.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) this.send(link, 'SYNC', this.payload(sync));
   }
   broadcast(type, data) { for (const link of this.links.values()) if (link.playerId) this.send(link, type, data); }
 
@@ -539,10 +560,7 @@ export class RoomSession {
       if (now - link.lastSeen >= 10000 || (!link.playerId && now - link.attachedAt >= 10000)) {
         this.disconnected(link); link.conn.close(); continue;
       }
-      if (link.pendingSync && link.conn.bufferSize === 0) {
-        const sync = link.pendingSync; link.pendingSync = null;
-        if (sync.matchId === this.room?.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) this.send(link, 'SYNC', this.payload(sync));
-      }
+      this.flushPendingSync(link);
       if (this.isHost && this.result && link.playerId && link.resultAck !== this.result.matchId && now - link.lastResult >= 1000) {
         this.send(link, 'RESULT', this.result); link.lastResult = now;
       }

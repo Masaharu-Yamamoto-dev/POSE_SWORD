@@ -79,7 +79,10 @@ public class MultiplayerManager : MonoBehaviour
     private readonly Dictionary<string, (int untilTick, Vector2 velocity, float angularVelocity, RigidbodyConstraints2D constraints)> killerFreezes =
         new Dictionary<string, (int, Vector2, float, RigidbodyConstraints2D)>();
     // Hostが次のSYNCで送るダメージの記録と、その通し番号。ゲストは表示済みの番号を覚えて二重表示を防ぐ
-    private readonly List<MultiplayerHitEvent> pendingHitEvents = new List<MultiplayerHitEvent>();
+    // ▼【変更】送ったら消すのではなく、起きてから EventResendSeconds 秒の間は毎回のSYNCに載せ続ける(at は起きた実時間)。
+    // 回線が詰まった相手には古いSYNCを送らず最新だけ送る(React の RoomSession)ので、1回にしか載せないと間のSYNCごと失われる
+    private readonly List<(float at, MultiplayerHitEvent evt)> recentHitEvents = new List<(float, MultiplayerHitEvent)>();
+    const float EventResendSeconds = 1f;
     private int hitEventSeq, shownHitEventSeq;
     // ▼【新規追加】撃破されてまだ消え切っていない剣と、残機制の抜け殻。消えるまでカメラの画角に含める
     private readonly List<Transform> extraCameraTargets = new List<Transform>();
@@ -458,7 +461,7 @@ public class MultiplayerManager : MonoBehaviour
             if (soloModeActive) BuildSoloHud();
             physicsTick = 0; syncTick = 0; receivedTick = -1; nextSync = 0; nextTargetUpdate = 0;
             ResetPlayback();
-            hitEventSeq = 0; shownHitEventSeq = 0; pendingHitEvents.Clear(); hitDetailsThisStep.Clear(); killerFreezes.Clear();
+            hitEventSeq = 0; shownHitEventSeq = 0; recentHitEvents.Clear(); hitDetailsThisStep.Clear(); killerFreezes.Clear();
             fallOuts.Clear(); belowStageSteps.Clear();
             extraCameraTargets.Clear(); finalKoTargets.Clear(); finalKoNumbers.Clear(); finishCameraSize = -1f;
             StartCoroutine(CompleteInitialization());
@@ -1651,21 +1654,36 @@ public class MultiplayerManager : MonoBehaviour
     // ▼【新規追加】SYNCをゲストへ送ると同時に、ホスト自身の再生の時計(SyncPlayback)にも同じものをため込む
     void EmitSync()
     {
-        // 調査用に、SYNCを作って文字にするまでの時間と、その大きさを測る
+        // 調査用に、SYNCを作って詰めて文字にするまでの時間と、送る時の大きさを測る
         double started = Time.realtimeSinceStartupAsDouble;
-        var sync = Snapshot();
-        string json = JsonUtility.ToJson(sync);
+        var wire = SyncCodec.Encode(Snapshot(), playerOrder);
+        string json = JsonUtility.ToJson(wire);
         RecordStat(ref statBuild, (float)(Time.realtimeSinceStartupAsDouble - started) * 1000f);
-        RecordStat(ref statBytes, json.Length);
+        RecordStat(ref statBytes, SyncCodec.EstimatePackedBytes(wire, WireProtocolVersion));
         if (NetworkManager.Instance != null) NetworkManager.Instance.SendData("MP_SYNC", json);
         lastSyncLocal = RealNow;
+        // ホスト自身も、ゲストと同じ「詰めて戻した」値で表示する(丸めの差までそろえる)
+        var sync = SyncCodec.Decode(wire, playerOrder);
+        if (sync == null) { Debug.LogWarning("SYNCを詰め直せませんでした"); return; }
+        lastSyncContents = sync;
         playback.Enqueue(sync, RealNow);
     }
+
+    // ▼【新規追加】SYNCに入れるプレイヤーの並び順(試合の設定の順)。両側で同じ設定を持っているのでIDは送らない
+    private List<string> playerOrder = new List<string>();
+    // React(HostRoom.js)の PROTOCOL_VERSION と同じ値。送る時の大きさの見積もり(ログ)にだけ使う
+    const int WireProtocolVersion = 8;
+    // ▼【新規追加】調査用：ONにすると、最後に送った(ゲストは受け取った)SYNCの中身を、項目名つきでログに出す(5秒ごと)
+    [Tooltip("ONにすると、SYNCの中身を項目名つきの読める形で5秒ごとにコンソールへ出す(調査用)")]
+    public bool logSyncContents = false;
+    private MultiplayerSync lastSyncContents;
 
     void ResetPlayback()
     {
         playback.Clear();
         playback.Delay = Mathf.Max(0f, maxDisplayDelaySeconds);
+        playerOrder = config != null && config.players != null ? config.players.Select(p => p.playerId).ToList() : new List<string>();
+        lastSyncContents = null;
         playback.MaxSendGap = MaxSendGap;
         guestDelays.Clear(); delayLowerSince = -1f; nextDelayReport = 0f;
         dueSnapshots.Clear(); truePoses.Clear(); displayPosesApplied = false; displayCenters.Clear();
@@ -1823,7 +1841,7 @@ public class MultiplayerManager : MonoBehaviour
             {
                 evt.x = fallback.currentCenterPosition.x; evt.y = fallback.currentCenterPosition.y;
             }
-            pendingHitEvents.Add(evt);
+            recentHitEvents.Add((RealNow, evt));
             // ▼【変更】数字と火花はホストでもここでは出さず、SYNCの再生(ApplySnapshotState)が表示用の位置に合わせて遅らせて出す
             // 本体で剣を壊した側を短く止める。決着の一撃は試合全体のスロー（MatchEndCinematic）に任せ、
             // 同じ一撃で自分も倒れた（相打ち）時は止めない
@@ -2093,7 +2111,8 @@ public class MultiplayerManager : MonoBehaviour
     }
 
     // ▼【新規追加】オレ達アタックの分身が消えた時：消え方も次のSYNCでゲストへ送る（同じ消え方の演出を出すため）
-    readonly List<MultiplayerCloneEnd> pendingCloneEnds = new List<MultiplayerCloneEnd>();
+    // ▼【変更】ダメージの記録と同じく、消えてから EventResendSeconds 秒の間は毎回載せる(ゲストは、もう消した分身の知らせは無視する)
+    readonly List<(float at, MultiplayerCloneEnd end)> recentCloneEnds = new List<(float, MultiplayerCloneEnd)>();
 
     public void UnregisterClone(string id, CloneRushEnd kind, Vector2 position, float angle)
     {
@@ -2105,7 +2124,7 @@ public class MultiplayerManager : MonoBehaviour
     {
         if (id == null || !activeClones.ContainsKey(id)) return;
         activeClones.Remove(id);
-        pendingCloneEnds.Add(new MultiplayerCloneEnd { id = id, kind = kind, x = position.x, y = position.y, angle = angle });
+        recentCloneEnds.Add((RealNow, new MultiplayerCloneEnd { id = id, kind = kind, x = position.x, y = position.y, angle = angle }));
     }
 
     // ▼【新規追加】ゲストの画面に、このプレイヤーのオレ達シールドの分身が出ているか（守っている間のふちどりに使う）
@@ -2189,10 +2208,11 @@ public class MultiplayerManager : MonoBehaviour
 
     MultiplayerSync Snapshot()
     {
-        var hitEvents = pendingHitEvents.ToArray();
-        pendingHitEvents.Clear();
-        var cloneEnds = pendingCloneEnds.ToArray();
-        pendingCloneEnds.Clear();
+        float expired = RealNow - EventResendSeconds;
+        recentHitEvents.RemoveAll(e => e.at < expired);
+        recentCloneEnds.RemoveAll(e => e.at < expired);
+        var hitEvents = recentHitEvents.Select(e => e.evt).ToArray();
+        var cloneEnds = recentCloneEnds.Select(e => e.end).ToArray();
         return new MultiplayerSync { matchId = config.matchId, tick = ++syncTick, time = syncClock >= 0f ? syncClock : RealNow, delay = playback.Delay, phase = phase, hits = hitEvents, cloneEnds = cloneEnds,
             judgmentSeq = judgmentSeq, judgmentX = judgmentSyncCentre.x, judgmentY = judgmentSyncCentre.y,
             countdownRemaining = phase == "COUNTDOWN" ? Mathf.Max(0, countdownEnd - Time.unscaledTime) : 0,
@@ -2225,10 +2245,13 @@ public class MultiplayerManager : MonoBehaviour
     [UnityEngine.Scripting.Preserve]
     public void SyncMultiplayer(string json)
     {
+        if (config == null || IsHost) return;
         double started = Time.realtimeSinceStartupAsDouble;
-        var sync = JsonUtility.FromJson<MultiplayerSync>(json);
+        var wire = JsonUtility.FromJson<MultiplayerSyncWire>(json);
+        var sync = wire != null ? SyncCodec.Decode(wire, playerOrder) : null;
         RecordStat(ref statRead, (float)(Time.realtimeSinceStartupAsDouble - started) * 1000f);
-        RecordStat(ref statBytes, json != null ? json.Length : 0);
+        if (wire != null) RecordStat(ref statBytes, SyncCodec.EstimatePackedBytes(wire, WireProtocolVersion));
+        if (sync != null) lastSyncContents = sync;
         if (config == null || IsHost || sync == null || sync.matchId != config.matchId || sync.tick <= receivedTick || phase == "RESULT") return;
         if (sync.players == null || sync.players.Length != config.players.Length ||
             sync.players.Any(p => p == null || p.playerId == null || !swords.ContainsKey(p.playerId)) ||
@@ -2339,13 +2362,15 @@ public class MultiplayerManager : MonoBehaviour
 
     void LogPlaybackStats()
     {
-        if (!logPlaybackStats) return;
+        if (!logPlaybackStats && !logSyncContents) return;
         float frameMs = Time.unscaledDeltaTime * 1000f;
         if (frameMs > 33f) slowFrames++;
         maxFrameMs = Mathf.Max(maxFrameMs, frameMs);
         statFrames++;
         if (Time.unscaledTime < nextStatsLog) return;
-        if (nextStatsLog > 0f)
+        if (nextStatsLog > 0f && logSyncContents && lastSyncContents != null)
+            Debug.Log($"[SyncContents] {(IsHost ? "host(送った)" : "guest(受け取った)")}\n{JsonUtility.ToJson(lastSyncContents, true)}");
+        if (nextStatsLog > 0f && logPlaybackStats)
         {
             float fps = statFrames / Mathf.Max(0.001f, Time.unscaledTime - statsStartedAt);
             Debug.Log($"[SyncStats] {(IsHost ? "host" : "guest")} fps={fps:F0} 受信={playback.StatReceived} 最大間隔={playback.StatMaxGap * 1000f:F0}ms " +
@@ -2353,7 +2378,7 @@ public class MultiplayerManager : MonoBehaviour
                 $"遅い描画={slowFrames}回(最大{maxFrameMs:F0}ms) 共通の遅延={playback.Delay * 1000f:F0}ms" +
                 (IsHost ? $" ゲストの必要値={string.Join(",", guestDelays.Select(g => $"{g.Key}:{g.Value.delay * 1000f:F0}ms"))}"
                     : $" 自分の必要値={playback.NeededDelay * 1000f:F0}ms") +
-                $" 送信回数設定={Mathf.Clamp(syncPerSecond, 10, 50)}/秒 SYNCの大きさ={FormatStat(statBytes, "B", "F0")}" +
+                $" 送信回数設定={Mathf.Clamp(syncPerSecond, 10, 50)}/秒 SYNCの大きさ(送る形・推定)={FormatStat(statBytes, "B", "F0")}" +
                 (IsHost ? $" 作成={FormatStat(statBuild, "ms", "F2")}" : $" 読み取り={FormatStat(statRead, "ms", "F2")}") +
                 $" 反映={FormatStat(statApply, "ms", "F2")}" +
                 (IsHost ? "" : $" 往復={playback.LatencyCompensation * 2000f:F0}ms 片道補正={playback.AppliedCompensation * 1000f:F0}ms"));
@@ -2679,11 +2704,11 @@ public class MultiplayerManager : MonoBehaviour
         ResetPlayback();
         cloneSyncTargets.Clear();
         activeClones.Clear();
-        pendingCloneEnds.Clear();
+        recentCloneEnds.Clear();
         foreach (var visual in cloneVisuals.Values) if (visual != null) Destroy(visual);
         cloneVisuals.Clear();
         clashSeq.Clear(); criticalHitThisTick.Clear(); critSeq.Clear();
-        hitDetailsThisStep.Clear(); pendingHitEvents.Clear(); killerFreezes.Clear();
+        hitDetailsThisStep.Clear(); recentHitEvents.Clear(); killerFreezes.Clear();
         DamagePopup.ClearAll(); InkPiece.ClearAll(); DefeatGhost.ClearAll();
         extraCameraTargets.Clear(); finalKoTargets.Clear(); finalKoNumbers.Clear(); finishCameraSize = -1f;
         shakeDuration = 0f; hasLockedCameraPosition = false;

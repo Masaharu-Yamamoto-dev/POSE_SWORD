@@ -1,8 +1,9 @@
 // 6: PREPARE から剣画像を抜いた（ゲストは ROSTER で受け取った画像を使う）
 // 7: 1vs3 の NPC ボス。名簿に接続を持たないプレイヤー（npc: true）が入る
+// 8: SYNC の中身を項目名のない整数の並び（s）にした。Unity の MultiplayerManager.WireProtocolVersion も合わせる
 import { BOSS_NPC_SWORD, NPC_PLAYER_ID } from './bossNpcSword.js';
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 export const MAX_IMAGE_LENGTH = 4 * 1024 * 1024;
 // 剣本体のステータス上限(image-process/stats.pyでの生成上限: hp 100〜1000 / attack・weight 1〜100)に、
 // 柄(SwordListScreenのHILT_DATABASE)が乗せうる最大の補正値を足した、正規のプレイで届きうる本当の上限。
