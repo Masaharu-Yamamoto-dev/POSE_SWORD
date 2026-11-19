@@ -128,7 +128,8 @@ public class MultiplayerManager : MonoBehaviour
     private readonly SyncPlayback playback = new SyncPlayback();
     private readonly List<MultiplayerSync> dueSnapshots = new List<MultiplayerSync>();
     // ホスト：表示用の位置に置き換える前の本当の位置(物理・判定が使う)。次の FixedUpdate / Update の先頭で戻す
-    private readonly Dictionary<Transform, (Vector3 pos, Quaternion rot)> truePoses = new Dictionary<Transform, (Vector3, Quaternion)>();
+    // ▼【変更】大きさ(巨大回転斬など)も、位置と同じく表示用の値に置き換えるので一緒に覚える
+    private readonly Dictionary<Transform, (Vector3 pos, Quaternion rot, Vector3 scale)> truePoses = new Dictionary<Transform, (Vector3, Quaternion, Vector3)>();
     private bool displayPosesApplied;
     // 表示用の位置での各プレイヤーの重心。カメラはこれを追う(本当の位置の重心 currentCenterPosition は判定用のまま)
     private readonly Dictionary<string, Vector3> displayCenters = new Dictionary<string, Vector3>();
@@ -2396,9 +2397,10 @@ public class MultiplayerManager : MonoBehaviour
                     : new Vector3(a.centerX, a.centerY, 0);
                 tr.SetPositionAndRotation(pos, Quaternion.Euler(0, 0, rot));
                 displayCenters[a.playerId] = center;
-                if (IsHost) continue;
-                // ゲストは重心も大きさも同期からしか分からないので、ここで一緒に補間する(ホストは物理と技の処理が決める)
-                sword.currentCenterPosition = center;
+                // ゲストは重心を同期からしか分からないので、ここで補間した値を使う(ホストの重心は判定用なので、物理の値のまま)
+                if (!IsHost) sword.currentCenterPosition = center;
+                // ▼【変更】大きさはホストも補間した値で表示する(以前のホストは本物の値のままで、巨大化だけ位置より表示の遅延ぶん早く見えていた)。
+                // ホストの本物の大きさは CaptureTruePoses で覚えてあり、物理と技の処理の前に RestoreTruePoses が戻す
                 if (!sword.IsAlive) continue;
                 float scale = b != null && a.scale > 0f && b.scale > 0f ? Mathf.Lerp(a.scale, b.scale, k) : a.scale;
                 if (scale > 0f) tr.localScale = new Vector3(scale, scale, tr.localScale.z);
@@ -2426,9 +2428,9 @@ public class MultiplayerManager : MonoBehaviour
     {
         truePoses.Clear();
         foreach (var sword in swords.Values)
-            if (sword != null) truePoses[sword.transform] = (sword.transform.position, sword.transform.rotation);
+            if (sword != null) truePoses[sword.transform] = (sword.transform.position, sword.transform.rotation, sword.transform.localScale);
         foreach (var entry in activeClones.Values)
-            if (entry.obj != null) truePoses[entry.obj.transform] = (entry.obj.transform.position, entry.obj.transform.rotation);
+            if (entry.obj != null) truePoses[entry.obj.transform] = (entry.obj.transform.position, entry.obj.transform.rotation, entry.obj.transform.localScale);
         displayPosesApplied = true;
     }
 
@@ -2440,7 +2442,7 @@ public class MultiplayerManager : MonoBehaviour
         if (!displayPosesApplied) return;
         displayPosesApplied = false;
         foreach (var pair in truePoses)
-            if (pair.Key != null) pair.Key.SetPositionAndRotation(pair.Value.pos, pair.Value.rot);
+            if (pair.Key != null) { pair.Key.SetPositionAndRotation(pair.Value.pos, pair.Value.rot); pair.Key.localScale = pair.Value.scale; }
         truePoses.Clear();
         Physics2D.SyncTransforms();
     }
