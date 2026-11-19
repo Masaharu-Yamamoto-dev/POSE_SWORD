@@ -34,10 +34,11 @@ public class SyncPlayback
     public float AppliedCompensation { get; private set; }
     // ▼【新規追加】ゲスト：直近 NeedWindow 秒の届き方から見た「表示が止まらないために必要な遅延」(秒)。
     // ホストへ知らせ、ホストが全員の最大を共通の遅延(Delay)にする。
-    // 1件ごとの必要値 = そのSYNCの遅れ(一番早く届いたものとの差) + 前のSYNCからの間隔 + 片道ぶんの補正 + 1コマぶんの余裕。
+    // 1件ごとの必要値 = そのSYNCの遅れ(一番早く届いたものとの差) + 前のSYNCからの間隔 + 片道ぶんの補正 + 少しの余裕。
+    // 届いた時刻はコマの単位(Time.unscaledTime)で測っているので、遅れにはコマの区切りの分がすでに含まれている。余裕は小さくてよい
     // 間隔は MaxSendGap で頭打ちにする。カットインやヒットストップで物理が止まっている間の長い間隔は、剣も止まっていて見た目に出ないため
     public float NeedWindow = 10f;
-    public float FrameMargin = 0.02f;
+    public float FrameMargin = 0.005f;
     public float NeededDelay { get; private set; }
     readonly List<(float local, float need)> needs = new List<(float, float)>();
     float lastSyncTime = -1f;

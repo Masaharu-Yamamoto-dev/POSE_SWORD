@@ -112,8 +112,13 @@ public class MultiplayerManager : MonoBehaviour
     [Tooltip("表示の遅延の上限(秒)。ゲストの回線がこれ以上を必要としても、ここで止める(その場合、そのゲストの画面はときどき一瞬止まる)。試合開始時はこの値から始める")]
     [FormerlySerializedAs("displayDelaySeconds")]
     public float maxDisplayDelaySeconds = 0.08f;
-    [Tooltip("表示の遅延の下限(秒)。送る間隔(最大40ms)より短くはできない")]
-    public float minDisplayDelaySeconds = 0.05f;
+    [Tooltip("表示の遅延の下限(秒)。実際には「送る間隔の最大 + 10ms」より短くはならない(50回/秒なら30ms、30回/秒なら50ms)")]
+    public float minDisplayDelaySeconds = 0.035f;
+    // ▼【新規追加】SYNCを送る回数。物理(50回/秒)の刻みの上でしか作れないので、50なら物理を進めるたびに毎回(20ms一定)、
+    // 30なら20ms・40msが交互になる(表示の遅延に効くのは長い方の40ms)。多いほど表示の遅延を短くできるが、通信量と処理が増える
+    [Tooltip("1秒あたりのSYNCの送信回数の目安。50＝物理を進めるたびに毎回(20msごと)、30＝以前の設定(20ms・40msが交互)")]
+    [Range(10, 50)]
+    public int syncPerSecond = 50;
     // ホスト：各ゲストから届いた必要値と、届いた時刻(Time.unscaledTime)
     private readonly Dictionary<string, (float delay, float at)> guestDelays = new Dictionary<string, (float, float)>();
     private float delayLowerSince = -1f;
@@ -1583,7 +1588,9 @@ public class MultiplayerManager : MonoBehaviour
         EmitSync();
     }
 
-    const float SyncInterval = 1f / 30f;
+    float SyncInterval => 1f / Mathf.Clamp(syncPerSecond, 10, 50);
+    // 送る間隔の最大。物理の刻み(20ms)の上でしか送れないので、目安の間隔を刻みの倍数に切り上げた値になる
+    float MaxSendGap => Mathf.Ceil(SyncInterval / Time.fixedDeltaTime - 0.001f) * Time.fixedDeltaTime;
 
     // ▼【新規追加】ホスト：全ゲストの必要値の最大を、下限と上限の間に収めて全員共通の遅延にする。
     // 上げる時はすぐ(表示が止まるのを防ぐのが先)。下げる時は、下げてよい状態が DelayLowerWait 秒続いてから、1秒に10msずつ
@@ -1591,7 +1598,7 @@ public class MultiplayerManager : MonoBehaviour
     void UpdateCommonDelay()
     {
         float now = Time.unscaledTime;
-        float min = Mathf.Max(0f, minDisplayDelaySeconds), max = Mathf.Max(min, maxDisplayDelaySeconds);
+        float min = Mathf.Max(minDisplayDelaySeconds, MaxSendGap + 0.01f), max = Mathf.Max(min, maxDisplayDelaySeconds);
         float target = min;
         foreach (var entry in guestDelays.Values)
             if (now - entry.at <= DelayReportExpiry) target = Mathf.Max(target, entry.delay);
@@ -1615,8 +1622,13 @@ public class MultiplayerManager : MonoBehaviour
     // ▼【新規追加】SYNCをゲストへ送ると同時に、ホスト自身の再生の時計(SyncPlayback)にも同じものをため込む
     void EmitSync()
     {
+        // 調査用に、SYNCを作って文字にするまでの時間と、その大きさを測る
+        double started = Time.realtimeSinceStartupAsDouble;
         var sync = Snapshot();
-        Emit("SYNC", sync);
+        string json = JsonUtility.ToJson(sync);
+        RecordStat(ref statBuild, (float)(Time.realtimeSinceStartupAsDouble - started) * 1000f);
+        RecordStat(ref statBytes, json.Length);
+        if (NetworkManager.Instance != null) NetworkManager.Instance.SendData("MP_SYNC", json);
         lastSyncLocal = Time.unscaledTime;
         playback.Enqueue(sync, Time.unscaledTime);
     }
@@ -1625,6 +1637,7 @@ public class MultiplayerManager : MonoBehaviour
     {
         playback.Clear();
         playback.Delay = Mathf.Max(0f, maxDisplayDelaySeconds);
+        playback.MaxSendGap = MaxSendGap;
         guestDelays.Clear(); delayLowerSince = -1f; nextDelayReport = 0f;
         dueSnapshots.Clear(); truePoses.Clear(); displayPosesApplied = false; displayCenters.Clear();
         finishPresentationPending = false; playbackStopped = false; nextStatsLog = 0f;
@@ -2182,7 +2195,10 @@ public class MultiplayerManager : MonoBehaviour
     [UnityEngine.Scripting.Preserve]
     public void SyncMultiplayer(string json)
     {
+        double started = Time.realtimeSinceStartupAsDouble;
         var sync = JsonUtility.FromJson<MultiplayerSync>(json);
+        RecordStat(ref statRead, (float)(Time.realtimeSinceStartupAsDouble - started) * 1000f);
+        RecordStat(ref statBytes, json != null ? json.Length : 0);
         if (config == null || IsHost || sync == null || sync.matchId != config.matchId || sync.tick <= receivedTick || phase == "RESULT") return;
         if (sync.players == null || sync.players.Length != config.players.Length ||
             sync.players.Any(p => p == null || p.playerId == null || !swords.ContainsKey(p.playerId)) ||
@@ -2267,8 +2283,10 @@ public class MultiplayerManager : MonoBehaviour
         dueSnapshots.Clear();
         playback.Advance(Time.unscaledTime, Time.unscaledDeltaTime, dueSnapshots.Add, out var from, out var to, out float t);
         LogPlaybackStats();
+        double started = Time.realtimeSinceStartupAsDouble;
         if (from != null) ApplyInterpolatedPoses(from, to, t);
         foreach (var sync in dueSnapshots) ApplySnapshotState(sync);
+        if (dueSnapshots.Count > 0) RecordStat(ref statApply, (float)(Time.realtimeSinceStartupAsDouble - started) * 1000f);
         dueSnapshots.Clear();
         if (finishPresentationPending && playback.Drained) { finishPresentationPending = false; FinishPresentation(); }
     }
@@ -2281,6 +2299,13 @@ public class MultiplayerManager : MonoBehaviour
     private float nextStatsLog, statsStartedAt;
     private int slowFrames, statFrames;
     private float maxFrameMs;
+
+    // 平均と最大を数える入れ物(5秒ごとにログへ出して空にする)
+    struct Stat { public int count; public float sum, max; }
+    private Stat statBuild, statRead, statApply, statBytes;
+    static void RecordStat(ref Stat stat, float value) { stat.count++; stat.sum += value; stat.max = Mathf.Max(stat.max, value); }
+    static string FormatStat(Stat stat, string unit, string format) =>
+        stat.count == 0 ? "-" : $"平均{(stat.sum / stat.count).ToString(format)}{unit}/最大{stat.max.ToString(format)}{unit}";
 
     void LogPlaybackStats()
     {
@@ -2298,9 +2323,13 @@ public class MultiplayerManager : MonoBehaviour
                 $"遅い描画={slowFrames}回(最大{maxFrameMs:F0}ms) 共通の遅延={playback.Delay * 1000f:F0}ms" +
                 (IsHost ? $" ゲストの必要値={string.Join(",", guestDelays.Select(g => $"{g.Key}:{g.Value.delay * 1000f:F0}ms"))}"
                     : $" 自分の必要値={playback.NeededDelay * 1000f:F0}ms") +
+                $" 送信回数設定={Mathf.Clamp(syncPerSecond, 10, 50)}/秒 SYNCの大きさ={FormatStat(statBytes, "B", "F0")}" +
+                (IsHost ? $" 作成={FormatStat(statBuild, "ms", "F2")}" : $" 読み取り={FormatStat(statRead, "ms", "F2")}") +
+                $" 反映={FormatStat(statApply, "ms", "F2")}" +
                 (IsHost ? "" : $" 往復={playback.LatencyCompensation * 2000f:F0}ms 片道補正={playback.AppliedCompensation * 1000f:F0}ms"));
         }
         playback.ResetStats(); slowFrames = 0; maxFrameMs = 0f; statFrames = 0;
+        statBuild = default; statRead = default; statApply = default; statBytes = default;
         statsStartedAt = Time.unscaledTime;
         nextStatsLog = Time.unscaledTime + 5f;
     }
