@@ -5170,7 +5170,7 @@ MonoBehaviour:
   judgmentSweepLingerSeconds: 0.15
   bossGiantSpinScale: 3
   logSyncContents: 0
-  logPlaybackStats: 1
+  logPlaybackStats: 0
 --- !u!1 &619394800
 GameObject:
   m_ObjectHideFlags: 0

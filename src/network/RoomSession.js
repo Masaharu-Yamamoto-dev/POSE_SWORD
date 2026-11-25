@@ -24,7 +24,6 @@ export const MATCH_INTRO_MS = 4500;
 // SYNC は毎回全員の状態が丸ごと入っているので、詰まっている間の古いものは送らず、空いた時に最新の1つだけ送る。
 // 弱い回線で古い SYNC が列に並び続け、遅れが0.5秒以上に膨らむのを防ぐ
 export const SYNC_BACKLOG_BYTES = 4096;
-const guestStat = (value, max) => (Number.isFinite(value) && value >= 0 && value <= max ? value : 0);
 // 剣画像は ROSTER でしか配らない。STATE は同じ形のまま imageStr だけを落とす。
 // 残機モードの swords[] は3本それぞれが画像を持つので、そこまで潜って削る。
 // ここを浅く削ると STATE 1通が数MBになり、心拍が詰まって接続が切れる。
@@ -264,10 +263,7 @@ export class RoomSession {
         // 誰の値かはパケットの中身ではなく、送ってきた接続から決める
         if (link.playerId && m.matchId === this.room.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase) &&
             Number.isFinite(m.delay) && m.delay >= 0 && m.delay <= 1)
-          this.command('SetGuestDelay', { matchId: m.matchId, playerId: link.playerId, delay: m.delay,
-            // 調査用：ゲストの端末の状態(ホストのログに出す)。おかしな値は 0 にして渡す
-            fps: guestStat(m.fps, 1000), maxFrameMs: guestStat(m.maxFrameMs, 60000),
-            maxGapMs: guestStat(m.maxGapMs, 60000), stallMs: guestStat(m.stallMs, 60000) });
+          this.command('SetGuestDelay', { matchId: m.matchId, playerId: link.playerId, delay: m.delay });
         break;
       case 'RESULT_ACK':
         if (m.matchId === this.result?.matchId) link.resultAck = m.matchId; break;
@@ -513,8 +509,7 @@ export class RoomSession {
         if (isUltimate) this.pendingUltimate = { input, attemptsLeft: 6 };
       }
     } else if (type === 'DELAY' && !this.isHost && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) {
-      this.sendToHost('DELAY', { matchId: data.matchId, delay: data.delay,
-        fps: data.fps, maxFrameMs: data.maxFrameMs, maxGapMs: data.maxGapMs, stallMs: data.stallMs });
+      this.sendToHost('DELAY', { matchId: data.matchId, delay: data.delay });
     } else if (this.isHost && type === 'PLAYING') {
       if (this.host.beginPlaying(data.matchId)) this.publish();
     } else if (this.isHost && type === 'SYNC' && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) {

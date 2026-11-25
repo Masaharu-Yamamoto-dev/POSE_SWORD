@@ -147,12 +147,6 @@ using UnityEngine;
     public string matchId;
     public string playerId;
     public float delay;
-    // ▼【新規追加】調査用：前回の知らせ以降のゲストの端末の状態。ホストのログ([SyncStats] の「ゲストの状態」)に出す。
-    // 一番遅かった1コマ(maxFrameMs)が大きければ端末が固まった、SYNCが届いた間隔(maxGapMs)が大きければ通信が止まった
-    public float fps;
-    public float maxFrameMs;
-    public float maxGapMs;
-    public float stallMs;
 }
 [Serializable] public class MultiplayerRtt
 {

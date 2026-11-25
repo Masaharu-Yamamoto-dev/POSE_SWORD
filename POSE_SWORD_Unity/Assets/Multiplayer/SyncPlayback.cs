@@ -54,8 +54,6 @@ public class SyncPlayback
     // 調査用の数え上げ(MultiplayerManager がまとめてログに出す)
     public int StatReceived, StatStalls;
     public float StatStallSeconds, StatMaxGap, StatMaxJitter;
-    // 止まった時間の通算(ResetStats では戻さない)。ゲストがホストへ知らせる時に、前回からの差を使う
-    public float StallSecondsTotal { get; private set; }
     float lastArrival = -1f;
 
     public int Count => queue.Count;
@@ -68,7 +66,7 @@ public class SyncPlayback
         queue.Clear(); offsets.Clear(); applied = 0; renderTime = 0f; minOffset = 0f; windowJitter = 0f; started = false; Draining = false;
         AppliedCompensation = 0f;
         needs.Clear(); NeededDelay = 0f; lastSyncTime = -1f;
-        lastArrival = -1f; StallSecondsTotal = 0f;
+        lastArrival = -1f;
         ResetStats();
     }
 
@@ -140,7 +138,7 @@ public class SyncPlayback
             // 未来(まだ届いていない時刻)は見せない。届くまでその場で待つ(=カクつき。数えておく)
             if (renderTime > latest)
             {
-                StatStalls++; StatStallSeconds += renderTime - latest; StallSecondsTotal += renderTime - latest;
+                StatStalls++; StatStallSeconds += renderTime - latest;
                 renderTime = latest;
             }
         }
