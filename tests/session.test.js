@@ -713,3 +713,17 @@ test('an aborted start tells every player why they are back in the lobby', () =>
     assert.equal(p.view().room.phase, 'LOBBY');
   }
 });
+
+test('during a match each guest sends its probe comparison to the host every few seconds', t => {
+  const s = setup({}, 1); const matchId = start(s);
+  const logged = [];
+  t.mock.method(console, 'log', line => logged.push(line));
+  s.host.unityEvent('SYNC', { matchId, tick: 1, s: [8, 1000] }); s.net.flush();
+  tick(s, 6);
+  const sent = s.links[0][1].sent.filter(m => m.type === 'PROBE');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].matchId, matchId);
+  assert.equal(sent[0].report.relCount, 1);
+  // テストの接続には RTCPeerConnection が無いので、別ルートは開かない
+  assert.ok(logged.includes('[SyncProbe] p1 別ルートが開いていません'));
+});
