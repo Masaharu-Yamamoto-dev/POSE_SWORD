@@ -187,7 +187,7 @@ export function CraftingApiScreen({ capturedImage, aspect, leaving = false, onCa
     return () => clearTimeout(timer);
   }, []);
   return (
-    <CraftFrame title="錬成中" animClass={leaving ? 'craft-fade-out' : ''}>
+    <CraftFrame title="錬成中" animClass={leaving ? 'craft-fade-out' : ''} className="craft--wait">
       <div className="craft-split">
         {/* 🌟 撮影時と全く同じサイズの枠 */}
         <div className="craft-camera" style={cameraFrameVars(aspect)}>

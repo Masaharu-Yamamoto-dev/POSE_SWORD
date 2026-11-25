@@ -11,6 +11,10 @@ export const ASSETS_READY_DELAY = 3000;
 export const SPIN_INTERVAL = 500;
 // 自分の画面で次に回せるまでの時間。回転1回の長さと同じにして、回っている途中に重ねて回せないようにする。
 export const SPIN_DURATION = 600;
+// 演出を見終えた知らせ（INTRO_DONE）が誰かから届かなくても、ホストの演出が終わってからこれだけ待ったら始める
+export const INTRO_WAIT_LIMIT = 8000;
+// ゲスト：準備完了を押してからホストの返事が来るまで、押した結果を先に出しておく最長の時間
+export const READY_PENDING_MS = 3000;
 // 対戦開始の演出（ロード画面を兼ねる）。ロビーを LOBBY_FADE_MS で消してから演出を出し、
 // 演出を最低 MATCH_INTRO_MS 見せてから Unity のカウントダウンに入る。全員の読み込みが遅ければ、それを待つ。
 // 画面側（MatchIntro）も同じ値で数える。
@@ -89,6 +93,12 @@ export class RoomSession {
     // 全員の読み込みが済んだが、開始の演出がまだ終わっていないので、カウントダウンを待たせている試合
     this.pendingBegin = null;
     this.beginAt = 0;
+    // ホスト：開始の演出を見終えた人（playerId）。全員そろうまでカウントダウンを待たせる
+    this.introDone = new Set();
+    // ホスト：カウントダウンを始めた試合。部屋の状態（countdownBegun）に載せて配り、画面はこれを見て演出を消す
+    this.begunMatchId = null;
+    // ゲスト：準備完了を押したがホストの返事がまだの間の、押した結果 { ready, readyVersion, until }
+    this.pendingReady = null;
   }
 
   // 全員の武器データ(画像込み)がReact側に届いたという事実(assetAck)だけでは、
@@ -108,10 +118,26 @@ export class RoomSession {
   }
 
   view() {
-    return { room: this.room, localPlayerId: this.localPlayerId, isHost: this.isHost,
+    return { room: this.withPendingReady(this.room), localPlayerId: this.localPlayerId, isHost: this.isHost,
       result: this.result, resultPlayers: this.resultPlayers, sync: this.sync, closed: this.closed, error: this.error,
       spins: this.spins, aborted: this.aborted,
       canStart: this.assetsBaseReady() && this.readyAt != null && this.now() - this.readyAt >= ASSETS_READY_DELAY };
+  }
+  // ゲスト：押した準備完了を、ホストの返事を待たずに自分の欄へ映す。
+  // 返事を待つと回線しだいで切り替わりが遅れ、押せていないと思って押し直してしまう
+  withPendingReady(room) {
+    const pending = this.pendingReady;
+    if (!pending || !room) return room;
+    return { ...room, players: room.players.map(p => p.playerId === this.localPlayerId ? { ...p, ready: pending.ready } : p) };
+  }
+  // ホストの返事が届いた（押したとおりになった）・準備完了が取り消された（readyVersion が進んだ）・時間切れのどれかで、先出しをやめる
+  settlePendingReady() {
+    const pending = this.pendingReady;
+    if (!pending) return;
+    const mine = this.room?.players.find(p => p.playerId === this.localPlayerId);
+    if (!mine || mine.ready === pending.ready || this.room.readyVersion !== pending.readyVersion || this.now() >= pending.until) {
+      this.pendingReady = null;
+    }
   }
   notify() { this.onChange(this.view()); }
   command(method, data) { this.onUnity({ method, data }); }
@@ -155,7 +181,8 @@ export class RoomSession {
       this.readyAt = null; // 配り直したので、届き直してから猶予を数え直す
     }
     this.room = { ...this.host.snapshot(), swordsLoading: this.swordsLoading(),
-      startsInMs: this.autoStartAt === null ? null : Math.max(0, this.autoStartAt - this.now()) };
+      startsInMs: this.autoStartAt === null ? null : Math.max(0, this.autoStartAt - this.now()),
+      countdownBegun: this.begunMatchId !== null && this.begunMatchId === this.host.matchId };
     if (withAssets) {
       this.broadcast('ROSTER', { room: this.room, assetVersion: this.assetVersion });
     } else this.broadcast('STATE', { room: withoutImages(this.room) });
@@ -199,6 +226,7 @@ export class RoomSession {
         this.host.updateSword(link.playerId, m.swordData);
         this.publish(true); break;
       case 'INITIALIZED': this.loaded(link.playerId, m.matchId); break;
+      case 'INTRO_DONE': this.markIntroDone(link.playerId, m.matchId); break;
       case 'LOAD_FAILED':
         if (m.matchId === this.room.matchId && ACTIVE.includes(this.room.phase)) this.abort('ゲームの初期化に失敗しました。');
         break;
@@ -242,6 +270,7 @@ export class RoomSession {
           this.room.players.forEach(p => validateSword(p.swordData));
           this.send(link, 'ROSTER_ACK', { assetVersion: m.assetVersion });
         }
+        this.settlePendingReady();
         break;
       }
       case 'PREPARE': {
@@ -299,7 +328,13 @@ export class RoomSession {
   setReady(ready) {
     if (this.closed) return;
     if (this.isHost) { if (this.host.setReady('p0', ready)) this.publish(); }
-    else this.sendToHost('READY', { ready, readyVersion: this.room?.readyVersion });
+    else {
+      this.sendToHost('READY', { ready, readyVersion: this.room?.readyVersion });
+      if (this.room) {
+        this.pendingReady = { ready, readyVersion: this.room.readyVersion, until: this.now() + READY_PENDING_MS };
+        this.notify();
+      }
+    }
   }
   // ロビーで自分の剣を回す。全員の画面で同じ剣が回る。回っている途中は重ねて回せない。
   spinSword() {
@@ -338,6 +373,7 @@ export class RoomSession {
       players: this.assignRoles(this.room.players) };
     this.loadDeadline = this.now() + 60000;
     this.beginAt = this.now() + LOBBY_FADE_MS + MATCH_INTRO_MS; this.pendingBegin = null;
+    this.introDone = new Set(); this.begunMatchId = null;
     // 剣画像は ROSTER で配り済み（canStart が全員の受け取りを確かめている）。開始時に数MBを送り直すと、
     // 回線の細い端末では後ろに詰まった PING が10秒以上届かず、切断扱いになっていた。
     this.broadcast('PREPARE', { ...config, players: config.players.map(p => ({ ...p, swordData: stripImages(p.swordData) })) });
@@ -392,12 +428,30 @@ export class RoomSession {
     }
   }
 
-  // 開始の演出を見せ終わってから、Unity のカウントダウンを始める（演出の裏でカウントダウンが進まないように）
+  // 開始の演出を全員が見終えてから、Unity のカウントダウンを始める（演出の裏でカウントダウンが進まないように）。
+  // 演出の時間は各自の画面で数えるので、読み込みで画面が重くなった人は遅れて終わる。その人も待つ。
+  // ただし知らせが届かないまま止まらないよう、ホストの演出が終わってから INTRO_WAIT_LIMIT 過ぎたら始める
   beginIfDue() {
     if (this.pendingBegin === null || this.now() < this.beginAt) return;
+    const watching = this.room.players.some(p => !p.npc && p.connected && !this.introDone.has(p.playerId));
+    if (watching && this.now() < this.beginAt + INTRO_WAIT_LIMIT) return;
     const matchId = this.pendingBegin;
     this.pendingBegin = null;
-    if (matchId === this.room?.matchId && this.room.phase === 'COUNTDOWN') this.command('BeginMultiplayer', { matchId });
+    if (matchId === this.room?.matchId && this.room.phase === 'COUNTDOWN') {
+      this.command('BeginMultiplayer', { matchId });
+      this.begunMatchId = matchId; this.publish();
+    }
+  }
+
+  // 自分の画面で開始の演出を見終えた（useMatchIntro から呼ぶ）。ゲストはホストに知らせる
+  finishIntro(matchId) {
+    if (this.closed || matchId !== this.room?.matchId || !['LOADING', 'COUNTDOWN'].includes(this.room.phase)) return;
+    if (this.isHost) this.markIntroDone('p0', matchId);
+    else this.sendToHost('INTRO_DONE', { matchId });
+  }
+  markIntroDone(playerId, matchId) {
+    if (matchId !== this.room?.matchId || !['LOADING', 'COUNTDOWN'].includes(this.room.phase)) return;
+    this.introDone.add(playerId); this.beginIfDue();
   }
 
   unityEvent(type, data) {
@@ -534,6 +588,7 @@ export class RoomSession {
     } else if (this.pendingUltimate && this.room?.phase !== 'PLAYING') {
       this.pendingUltimate = null;
     }
+    if (!this.isHost && this.pendingReady && now >= this.pendingReady.until) { this.pendingReady = null; this.notify(); }
     this.autoStartTick(now);
   }
 

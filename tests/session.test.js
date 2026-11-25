@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ASSETS_READY_DELAY, AUTO_START_DELAY, FILL_TIMEOUT, LOBBY_FADE_MS, MATCH_INTRO_MS, RoomSession } from '../src/network/RoomSession.js';
 import { PROTOCOL_VERSION } from '../src/network/HostRoom.js';
+import { INTRO_WAIT_LIMIT, READY_PENDING_MS } from '../src/network/RoomSession.js';
 
 const sword = { name: '剣', hp: 100, attack: 50, weight: 50, imageStr: 'aGVsbG8=' };
 // Queue messages like a DataChannel (never synchronously re-enter send()).
@@ -54,6 +55,11 @@ function awaitReady(s) {
   s.host.pump(); s.advance(ASSETS_READY_DELAY); s.host.pump();
 }
 
+// 各自の画面で開始の演出を見終えた（useMatchIntro が finishIntro を呼ぶ）
+function finishIntros(s, matchId, players = [s.host, ...s.guests]) {
+  players.forEach(p => p.finishIntro(matchId)); s.net.flush();
+}
+
 function start(s) {
   s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
   awaitReady(s);
@@ -80,11 +86,49 @@ test('four sessions receive the same roster and wait for every Unity instance', 
   // 全員そろっても、開始の演出を見せ終わるまではカウントダウンを始めない
   const begins = () => s.commands[0].filter(c => c.method === 'BeginMultiplayer').length;
   assert.equal(begins(), 0);
+  finishIntros(s, id);
   s.advance(LOBBY_FADE_MS + MATCH_INTRO_MS - 1); s.host.pump();
   assert.equal(begins(), 0);
   s.advance(1); s.host.pump();
   assert.equal(begins(), 1);
   s.guests[2].unityEvent('INITIALIZED', { matchId: id }); s.net.flush(); s.host.pump();
+  assert.equal(begins(), 1);
+});
+
+test('the countdown waits for a player whose intro finished late, and tells everyone when it begins', () => {
+  const s = setup();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
+  s.host.prepare(); s.net.flush();
+  const id = s.host.view().room.matchId;
+  [s.host, ...s.guests].forEach(p => p.unityEvent('INITIALIZED', { matchId: id })); s.net.flush();
+  const begins = () => s.commands[0].filter(c => c.method === 'BeginMultiplayer').length;
+  // 3人目だけ、読み込みで画面が重く演出の終わりが遅れている
+  s.advance(LOBBY_FADE_MS + MATCH_INTRO_MS);
+  finishIntros(s, id, [s.host, ...s.guests.slice(0, 2)]); s.host.pump();
+  assert.equal(begins(), 0);
+  assert.equal(s.guests[0].view().room.countdownBegun, false);
+  s.advance(1500);
+  finishIntros(s, id, [s.guests[2]]);
+  assert.equal(begins(), 1);
+  for (const guest of s.guests) assert.equal(guest.view().room.countdownBegun, true);
+});
+
+test('a missing intro report holds the countdown only up to the limit', () => {
+  const s = setup();
+  s.host.setReady(true); s.guests.forEach(g => g.setReady(true)); s.net.flush();
+  awaitReady(s);
+  s.host.prepare(); s.net.flush();
+  const id = s.host.view().room.matchId;
+  [s.host, ...s.guests].forEach(p => p.unityEvent('INITIALIZED', { matchId: id })); s.net.flush();
+  finishIntros(s, id, [s.host, ...s.guests.slice(0, 2)]);
+  const begins = () => s.commands[0].filter(c => c.method === 'BeginMultiplayer').length;
+  // 10秒を超えるので、心拍を保つために1秒ずつ進める
+  const wait = LOBBY_FADE_MS + MATCH_INTRO_MS + INTRO_WAIT_LIMIT;
+  tick(s, Math.floor((wait - 1) / 1000));
+  s.advance((wait - 1) % 1000); s.host.pump();
+  assert.equal(begins(), 0);
+  s.advance(1); s.host.pump();
   assert.equal(begins(), 1);
 });
 
@@ -96,6 +140,7 @@ test('loading that outlasts the intro starts the countdown as soon as the last p
   const id = s.host.view().room.matchId;
   [s.host, ...s.guests.slice(0, 2)].forEach(p => p.unityEvent('INITIALIZED', { matchId: id })); s.net.flush();
   tick(s, Math.ceil((LOBBY_FADE_MS + MATCH_INTRO_MS) / 1000) + 1);
+  finishIntros(s, id);
   assert.equal(s.commands[0].filter(c => c.method === 'BeginMultiplayer').length, 0);
   s.guests[2].unityEvent('INITIALIZED', { matchId: id }); s.net.flush();
   assert.equal(s.commands[0].filter(c => c.method === 'BeginMultiplayer').length, 1);
@@ -542,6 +587,8 @@ test('an NPC boss room starts once the three humans are ready and the two guests
   assert.equal(s.host.view().room.phase, 'LOADING');
   s.guests[1].unityEvent('INITIALIZED', { matchId }); s.net.flush();
   assert.equal(s.host.view().room.phase, 'COUNTDOWN');
+  // NPC は演出も見ないので、人間3人が見終えればよい
+  finishIntros(s, matchId);
   s.advance(LOBBY_FADE_MS + MATCH_INTRO_MS); s.host.pump();
   assert.equal(s.commands[0].filter(c => c.method === 'BeginMultiplayer').length, 1);
 });
@@ -695,4 +742,34 @@ test('an aborted start tells every player why they are back in the lobby', () =>
     assert.deepEqual(p.view().aborted, { matchId, reason: 'ゲームの初期化に失敗しました。' });
     assert.equal(p.view().room.phase, 'LOBBY');
   }
+});
+
+test('a guest sees its own ready toggle at once, before the host answers', () => {
+  const s = setup();
+  const guest = s.guests[0];
+  const mine = () => guest.view().room.players.find(p => p.playerId === guest.view().localPlayerId);
+  guest.setReady(true);
+  assert.equal(mine().ready, true, 'ホストの返事を待たずに準備完了になる');
+  s.net.flush();
+  assert.equal(mine().ready, true);
+  assert.equal(guest.pendingReady, null, 'ホストが受け付けたら先出しをやめる');
+  guest.setReady(false);
+  assert.equal(mine().ready, false);
+  s.net.flush();
+  assert.equal(mine().ready, false);
+});
+
+test('a ready toggle the host never accepts falls back after a while', () => {
+  const s = setup();
+  const guest = s.guests[0];
+  const mine = () => guest.view().room.players.find(p => p.playerId === guest.view().localPlayerId);
+  // ホストに届かない（readyVersion が古いなどで捨てられた）ときの代わり
+  s.links[0][1].open = false;
+  guest.setReady(true);
+  assert.equal(mine().ready, true);
+  s.links[0][1].open = true;
+  s.advance(READY_PENDING_MS - 1); guest.pump();
+  assert.equal(mine().ready, true);
+  s.advance(1); guest.pump();
+  assert.equal(mine().ready, false);
 });

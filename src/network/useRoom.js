@@ -188,6 +188,8 @@ export function useRoom({ peerOptions, onClosed }) {
     updateSword: useCallback(sword => act(s => s.updateSword(sword)), [act]),
     start: useCallback(() => act(s => s.prepare()), [act]),
     returnToLobby: useCallback(() => act(s => s.returnToLobby()), [act]),
+    // 開始の演出を見終えた知らせ。ほかの操作と違い、出ているエラーの表示は消さない
+    finishIntro: useCallback(matchId => sessionRef.current?.finishIntro(matchId), []),
     reportLoadFailure: useCallback(matchId => sessionRef.current?.unityEvent('LOAD_FAILED', { matchId }), []),
   };
 }
