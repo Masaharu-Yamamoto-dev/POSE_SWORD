@@ -1,5 +1,4 @@
 import { HostRoom, MAX_PLAYERS, PROTOCOL_VERSION, SOLO_BUFF, swordForGameMode, validateSword } from './HostRoom.js';
-import { SYNC_PROBE_ENABLED, SyncProbe, formatProbeReport } from './syncProbe.js';
 
 const ACTIVE = ['LOADING', 'COUNTDOWN', 'PLAYING'];
 // 自動開始の部屋のタイミング。席が埋まれば少し待って開始し、埋まらなければ人数を切り上げる。
@@ -127,11 +126,7 @@ export class RoomSession {
   send(link, type, data = {}) {
     if (!link.conn.open) return;
     const packet = { ...data, type, protocolVersion: PROTOCOL_VERSION, roomEpoch: this.epoch };
-    if (type === 'SYNC' && this.backlogged(link)) {
-      // 調査用：送れずにいた古い SYNC を新しいもので置き換えた(=そのゲストには送らなかった)回数
-      if (link.pendingSync && link.probe) link.probe.skipped++;
-      link.pendingSync = packet; this.watchDrain(link); return;
-    }
+    if (type === 'SYNC' && this.backlogged(link)) { link.pendingSync = packet; this.watchDrain(link); return; }
     try { link.conn.send(packet); } catch { this.disconnected(link); link.conn.close(); }
   }
   // 送信待ちがたまっているか。PeerJS 自身の待ち行列(bufferSize)と、WebRTC の送り出し待ち(bufferedAmount)の両方を見る
@@ -163,8 +158,6 @@ export class RoomSession {
     }
     if (!this.isHost && this.links.size) { conn.close(); return; }
     this.links.set(conn.peer, link);
-    // 調査用：SYNC の止まりの原因を切り分ける別ルート(syncProbe.js)。ホストとゲストの両方で作る
-    if (SYNC_PROBE_ENABLED) { link.probe = new SyncProbe(this.now); link.probe.attach(conn); }
     conn.on('data', data => this.receive(link, data));
     conn.on('close', () => this.disconnected(link));
     conn.on('error', () => { this.disconnected(link); conn.close(); });
@@ -261,14 +254,6 @@ export class RoomSession {
         // 送ってきた本人は自分の画面でもう回しているので、ほかの人にだけ配る。
         for (const other of this.links.values()) if (other !== link && other.playerId) this.send(other, 'SPIN', { playerId: link.playerId });
         this.notify(); break;
-      case 'PROBE':
-        // 調査用：ゲストが比べた、今の通信路と別ルートの届き方(syncProbe.js)。ホストのコンソールに出すだけ
-        if (link.probe && m.report && typeof m.report === 'object') {
-          try { console.log(formatProbeReport(link.playerId, m.report, link.probe.skipped, link.probe.takeUp())); }
-          catch (e) { console.warn('[SyncProbe]', e); }
-          link.probe.skipped = 0;
-        }
-        break;
       case 'PING': this.send(link, 'PONG'); break;
       default: break; // Guests may not publish state, modes, sync or results.
     }
@@ -306,8 +291,6 @@ export class RoomSession {
         this.initialize(config); break;
       }
       case 'SYNC':
-        // 調査用：今の通信路で届いた時刻を記録して、別ルートと比べる。m.s[1] はホストの時刻(ms)
-        if (m.matchId === this.room?.matchId) link.probe?.reliableArrived(m.tick, Array.isArray(m.s) ? m.s[1] : undefined);
         if (m.matchId !== this.room?.matchId || !['COUNTDOWN', 'PLAYING'].includes(this.room.phase) ||
             !Number.isSafeInteger(m.tick) || m.tick <= (this.sync?.tick ?? -1)) return;
         // 画面(React)は sync を使っていないので notify しない(30回/秒の再描画が Unity と同じスレッドを詰まらせる)
@@ -484,7 +467,6 @@ export class RoomSession {
       if (!Number.isSafeInteger(data.tick) || data.tick <= (this.sync?.tick ?? -1)) return;
       // 画面(React)は sync を使っていないので、ここでは notify しない。30回/秒の再描画が Unity と同じスレッドを詰まらせ、ホストの画面がカクつく原因になる
       this.sync = data; this.broadcast('SYNC', data);
-      for (const link of this.links.values()) if (link.playerId) link.probe?.sendTick(data.tick, Array.isArray(data.s) ? data.s[1] : 0);
     } else if (this.isHost && type === 'RESULT' && this.host.finish(data.matchId)) {
       this.resultPlayers = structuredClone(this.room.players);
       this.result = data; this.publish(); this.broadcast('RESULT', data); this.notify();
@@ -543,7 +525,6 @@ export class RoomSession {
   disconnected(link) {
     if (this.links.get(link.conn.peer) !== link) return;
     this.links.delete(link.conn.peer);
-    link.probe?.close();
     if (this.closed) return;
     if (this.isHost) {
       const change = this.host.removeConnection(link.conn.peer);
@@ -568,17 +549,6 @@ export class RoomSession {
       this.command('SetNetworkRtt', { matchId: this.room.matchId, rtt: Math.min(...this.rtts) });
   }
 
-  // 調査用(ゲスト)：試合中は別ルートで上りの印を送り続け、5秒ごとに別ルートとの比べをホストへ知らせる。自分のコンソールにも出す
-  reportProbe(link) {
-    const active = !!this.room?.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase);
-    link.probe.keepAlive(active);
-    if (!active) { link.probe.idle(); link.probe.reset(); return; }
-    const report = link.probe.report();
-    if (!report) return;
-    console.log(formatProbeReport(this.localPlayerId ?? 'guest', report));
-    this.sendToHost('PROBE', { matchId: this.room.matchId, report });
-  }
-
   pump() {
     if (this.closed) return;
     const now = this.now();
@@ -596,8 +566,6 @@ export class RoomSession {
         this.disconnected(link); link.conn.close(); continue;
       }
       this.flushPendingSync(link);
-      // 調査用の処理が失敗しても、心拍などの後ろの処理は止めない
-      if (!this.isHost && link.probe) { try { this.reportProbe(link); } catch (e) { console.warn('[SyncProbe]', e); } }
       if (this.isHost && this.result && link.playerId && link.resultAck !== this.result.matchId && now - link.lastResult >= 1000) {
         this.send(link, 'RESULT', this.result); link.lastResult = now;
       }
@@ -623,7 +591,7 @@ export class RoomSession {
       if (this.isHost) this.broadcast('CLOSED'); else this.sendToHost('LEAVE');
     }
     if (ACTIVE.includes(this.room?.phase)) this.command('StopMultiplayer', { matchId: this.room.matchId });
-    for (const link of this.links.values()) { link.probe?.close(); link.conn.close(); }
+    for (const link of this.links.values()) link.conn.close();
     this.links.clear(); this.notify();
   }
 }
