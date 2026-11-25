@@ -26,7 +26,8 @@ const MAX_STALLS = 8;
 const KEEP_MS = 3000;
 
 export class SyncProbe {
-  constructor(now, { setTimer = setInterval, clearTimer = clearInterval } = {}) {
+  // setInterval をそのまま持たせて this.setTimer() と呼ぶと、ブラウザでは Illegal invocation になる。包んで渡す
+  constructor(now, { setTimer = (fn, ms) => setInterval(fn, ms), clearTimer = id => clearInterval(id) } = {}) {
     this.now = now;
     this.setTimer = setTimer; this.clearTimer = clearTimer;
     this.channel = null;

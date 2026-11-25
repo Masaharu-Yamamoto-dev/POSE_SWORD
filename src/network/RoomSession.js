@@ -264,7 +264,8 @@ export class RoomSession {
       case 'PROBE':
         // 調査用：ゲストが比べた、今の通信路と別ルートの届き方(syncProbe.js)。ホストのコンソールに出すだけ
         if (link.probe && m.report && typeof m.report === 'object') {
-          console.log(formatProbeReport(link.playerId, m.report, link.probe.skipped, link.probe.takeUp()));
+          try { console.log(formatProbeReport(link.playerId, m.report, link.probe.skipped, link.probe.takeUp())); }
+          catch (e) { console.warn('[SyncProbe]', e); }
           link.probe.skipped = 0;
         }
         break;
@@ -595,7 +596,8 @@ export class RoomSession {
         this.disconnected(link); link.conn.close(); continue;
       }
       this.flushPendingSync(link);
-      if (!this.isHost && link.probe) this.reportProbe(link);
+      // 調査用の処理が失敗しても、心拍などの後ろの処理は止めない
+      if (!this.isHost && link.probe) { try { this.reportProbe(link); } catch (e) { console.warn('[SyncProbe]', e); } }
       if (this.isHost && this.result && link.playerId && link.resultAck !== this.result.matchId && now - link.lastResult >= 1000) {
         this.send(link, 'RESULT', this.result); link.lastResult = now;
       }

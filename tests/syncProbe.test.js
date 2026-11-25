@@ -131,3 +131,20 @@ test('the host measures the upstream marks from the guest', () => {
   now = 10000; up(1); now = 10020; up(2);
   assert.deepEqual(probe.takeUp(), { count: 2, maxGap: 20, lost: 0, stalls: 0 });
 });
+
+test('the default timer is called the way browsers require (not as a method of the probe)', t => {
+  // ブラウザの setInterval は、ほかのものの this で呼ぶと Illegal invocation になる。それをまねる
+  const calls = [];
+  t.mock.method(globalThis, 'setInterval', function (fn, ms) {
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+    calls.push(ms); return 1;
+  });
+  t.mock.method(globalThis, 'clearInterval', function () {
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+  });
+  const probe = new SyncProbe(() => 0);
+  probe.use(fakeChannel());
+  probe.keepAlive(true);
+  probe.keepAlive(false);
+  assert.deepEqual(calls, [20]);
+});
