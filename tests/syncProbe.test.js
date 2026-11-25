@@ -82,11 +82,52 @@ test('lost and reordered marks are counted', () => {
 });
 
 test('the host log line keeps only numbers from the guest report', () => {
-  const line = formatProbeReport('p1', { seconds: 5, open: true, relCount: 250, relMaxGap: 'x', relStalls: 1,
+  const line = formatProbeReport('p1', { seconds: 5, open: true, keepAlive: true, relCount: 250, relMaxGap: 'x', relStalls: 1,
     probeCount: 248, probeLost: 2, probeLate: 0, probeMaxGap: 40, probeStalls: 0, maxLag: 80,
-    stalls: [{ gap: 100, sent: 20, during: 4, lag: null }] }, 3);
-  assert.match(line, /^\[SyncProbe\] p1 5秒: 今のルート 届いた250 一番空いた間0ms 待たされた1回/);
-  assert.match(line, /ホストが送らなかったSYNC 3/);
-  assert.match(line, /100ms空いた\(ホストが送った間は20ms\): その間に別ルートで届いた数 4 \/ .*わからない/);
+    stalls: [{ gap: 100, sent: 20, during: 4, lag: null }] }, 3, { count: 250, lost: 0, maxGap: 30, stalls: 0 });
+  assert.match(line, /^\[SyncProbe\] p1 5秒 ゲストから送り続け=あり: 今のルート 届いた250 一番空いた間0ms 待たされた1回/);
+  assert.match(line, /ホストが送らなかったSYNC 3 \/ 上り\(ゲストからホスト\) 届いた250 失った0 一番空いた間30ms 待たされた0回/);
+  assert.match(line, /100ms空いた\(ホストが送った間は20ms\): その間に別ルートで届いた先のSYNC 4 \/ .*わからない/);
+  // ゲスト自身のコンソールには、ホストだけが知っている数は出さない
+  assert.doesNotMatch(formatProbeReport('p1', { open: true, probeCount: 1 }), /ホストが送らなかった|上り/);
   assert.equal(formatProbeReport('p2', { open: false, probeCount: 0 }, 0), '[SyncProbe] p2 別ルートが開いていません');
+});
+
+test('when the mark ending a stall arrives right after the sync, the reliable path was not late', () => {
+  let now = 0;
+  const probe = new SyncProbe(() => now);
+  now = 20; probe.reliableArrived(1, 20); probe.received(mark(1, 1, 20));
+  now = 140; probe.reliableArrived(2, 40); probe.received(mark(2, 2, 40));
+  now = PROBE_REPORT_MS;
+  // 止まる直前の SYNC の印(tick 1)は、止まっている間に届いた数に入れない
+  assert.deepEqual(probe.report().stalls, [{ gap: 120, sent: 20, during: 0, lag: 0 }]);
+});
+
+test('the guest keeps sending a small mark every 20ms only during a match', () => {
+  const timers = [];
+  const probe = new SyncProbe(() => 0, { setTimer: (fn, ms) => { timers.push({ fn, ms, on: true }); return timers.length - 1; },
+    clearTimer: id => { timers[id].on = false; } });
+  const channel = fakeChannel(); probe.use(channel);
+  probe.keepAlive(true); probe.keepAlive(true);
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, 20);
+  timers[0].fn(); timers[0].fn();
+  assert.deepEqual(channel.sent.map(b => [...new Int32Array(b)]), [[1], [2]]);
+  probe.keepAlive(false);
+  assert.equal(timers[0].on, false);
+  probe.keepAlive(true); probe.close();
+  assert.equal(timers[1].on, false);
+});
+
+test('the host measures the upstream marks from the guest', () => {
+  let now = 0;
+  const probe = new SyncProbe(() => now);
+  const channel = fakeChannel(); probe.use(channel);
+  const up = seq => channel.onmessage({ data: new Int32Array([seq]).buffer });
+  now = 20; up(1); now = 40; up(2); now = 160; up(4); now = 170; up(3);
+  assert.deepEqual(probe.takeUp(), { count: 4, maxGap: 120, lost: 0, stalls: 1 });
+  assert.deepEqual(probe.takeUp(), { count: 0, maxGap: 0, lost: 0, stalls: 0 });
+  // 試合の切れ目(長く空いた)は待たされたに数えない
+  now = 10000; up(1); now = 10020; up(2);
+  assert.deepEqual(probe.takeUp(), { count: 2, maxGap: 20, lost: 0, stalls: 0 });
 });

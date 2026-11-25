@@ -264,7 +264,7 @@ export class RoomSession {
       case 'PROBE':
         // 調査用：ゲストが比べた、今の通信路と別ルートの届き方(syncProbe.js)。ホストのコンソールに出すだけ
         if (link.probe && m.report && typeof m.report === 'object') {
-          console.log(formatProbeReport(link.playerId, m.report, link.probe.skipped));
+          console.log(formatProbeReport(link.playerId, m.report, link.probe.skipped, link.probe.takeUp()));
           link.probe.skipped = 0;
         }
         break;
@@ -542,6 +542,7 @@ export class RoomSession {
   disconnected(link) {
     if (this.links.get(link.conn.peer) !== link) return;
     this.links.delete(link.conn.peer);
+    link.probe?.close();
     if (this.closed) return;
     if (this.isHost) {
       const change = this.host.removeConnection(link.conn.peer);
@@ -566,12 +567,14 @@ export class RoomSession {
       this.command('SetNetworkRtt', { matchId: this.room.matchId, rtt: Math.min(...this.rtts) });
   }
 
-  // 調査用(ゲスト)：試合中は5秒ごとに別ルートとの比べをホストへ知らせる。自分のコンソールにも出す
+  // 調査用(ゲスト)：試合中は別ルートで上りの印を送り続け、5秒ごとに別ルートとの比べをホストへ知らせる。自分のコンソールにも出す
   reportProbe(link) {
-    if (!this.room?.matchId || !['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) { link.probe.idle(); link.probe.reset(); return; }
+    const active = !!this.room?.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase);
+    link.probe.keepAlive(active);
+    if (!active) { link.probe.idle(); link.probe.reset(); return; }
     const report = link.probe.report();
     if (!report) return;
-    console.log(formatProbeReport(this.localPlayerId ?? 'guest', report, 0));
+    console.log(formatProbeReport(this.localPlayerId ?? 'guest', report));
     this.sendToHost('PROBE', { matchId: this.room.matchId, report });
   }
 
@@ -618,7 +621,7 @@ export class RoomSession {
       if (this.isHost) this.broadcast('CLOSED'); else this.sendToHost('LEAVE');
     }
     if (ACTIVE.includes(this.room?.phase)) this.command('StopMultiplayer', { matchId: this.room.matchId });
-    for (const link of this.links.values()) link.conn.close();
+    for (const link of this.links.values()) { link.probe?.close(); link.conn.close(); }
     this.links.clear(); this.notify();
   }
 }
