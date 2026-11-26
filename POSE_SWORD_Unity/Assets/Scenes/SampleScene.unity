@@ -5139,6 +5139,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 710911b73e4c49c78a828f4cae9cf771, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  maxDisplayDelaySeconds: 0.08
+  minDisplayDelaySeconds: 0.05
+  syncPerSecond: 50
   hudSlant: 18
   bossPanelSize: {x: 760, y: 132}
   bossPanelTop: 16
@@ -5166,6 +5169,8 @@ MonoBehaviour:
   judgmentHitShake: 0.6
   judgmentSweepLingerSeconds: 0.15
   bossGiantSpinScale: 3
+  logSyncContents: 0
+  logPlaybackStats: 0
 --- !u!1 &619394800
 GameObject:
   m_ObjectHideFlags: 0

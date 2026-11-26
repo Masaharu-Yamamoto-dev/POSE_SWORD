@@ -11,11 +11,19 @@ export const ASSETS_READY_DELAY = 3000;
 export const SPIN_INTERVAL = 500;
 // 自分の画面で次に回せるまでの時間。回転1回の長さと同じにして、回っている途中に重ねて回せないようにする。
 export const SPIN_DURATION = 600;
+// 演出を見終えた知らせ（INTRO_DONE）が誰かから届かなくても、ホストの演出が終わってからこれだけ待ったら始める
+export const INTRO_WAIT_LIMIT = 8000;
+// ゲスト：準備完了を押してからホストの返事が来るまで、押した結果を先に出しておく最長の時間
+export const READY_PENDING_MS = 3000;
 // 対戦開始の演出（ロード画面を兼ねる）。ロビーを LOBBY_FADE_MS で消してから演出を出し、
 // 演出を最低 MATCH_INTRO_MS 見せてから Unity のカウントダウンに入る。全員の読み込みが遅ければ、それを待つ。
 // 画面側（MatchIntro）も同じ値で数える。
 export const LOBBY_FADE_MS = 250;
 export const MATCH_INTRO_MS = 4500;
+// SYNC の送信待ち(まだ送り出せていないデータ)がこれより多い相手には、新しい SYNC を足さない(バイト)。
+// SYNC は毎回全員の状態が丸ごと入っているので、詰まっている間の古いものは送らず、空いた時に最新の1つだけ送る。
+// 弱い回線で古い SYNC が列に並び続け、遅れが0.5秒以上に膨らむのを防ぐ
+export const SYNC_BACKLOG_BYTES = 4096;
 // 剣画像は ROSTER でしか配らない。STATE は同じ形のまま imageStr だけを落とす。
 // 残機モードの swords[] は3本それぞれが画像を持つので、そこまで潜って削る。
 // ここを浅く削ると STATE 1通が数MBになり、心拍が詰まって接続が切れる。
@@ -73,6 +81,8 @@ export class RoomSession {
     this.assetVersion = 0;
     this.loadDeadline = Infinity;
     this.lastHeartbeat = -Infinity;
+    // ゲスト：ホストとの往復時間(ms)の直近の記録。最小を Unity に渡し、再生をホストの画面に合わせる
+    this.rtts = [];
     this.sequence = 0;
     // 電波が弱いと必殺技ボタンの1回送信がホストに届かず、SPは満タン表示のままボタンが
     // 反応しなくなって見える。ホスト側はseqで重複を弾くので、届くまで安全に再送できる。
@@ -89,6 +99,12 @@ export class RoomSession {
     // 全員の読み込みが済んだが、開始の演出がまだ終わっていないので、カウントダウンを待たせている試合
     this.pendingBegin = null;
     this.beginAt = 0;
+    // ホスト：開始の演出を見終えた人（playerId）。全員そろうまでカウントダウンを待たせる
+    this.introDone = new Set();
+    // ホスト：カウントダウンを始めた試合。部屋の状態（countdownBegun）に載せて配り、画面はこれを見て演出を消す
+    this.begunMatchId = null;
+    // ゲスト：準備完了を押したがホストの返事がまだの間の、押した結果 { ready, readyVersion, until }
+    this.pendingReady = null;
   }
 
   // 全員の武器データ(画像込み)がReact側に届いたという事実(assetAck)だけでは、
@@ -108,10 +124,26 @@ export class RoomSession {
   }
 
   view() {
-    return { room: this.room, localPlayerId: this.localPlayerId, isHost: this.isHost,
+    return { room: this.withPendingReady(this.room), localPlayerId: this.localPlayerId, isHost: this.isHost,
       result: this.result, resultPlayers: this.resultPlayers, sync: this.sync, closed: this.closed, error: this.error,
       spins: this.spins, aborted: this.aborted,
       canStart: this.assetsBaseReady() && this.readyAt != null && this.now() - this.readyAt >= ASSETS_READY_DELAY };
+  }
+  // ゲスト：押した準備完了を、ホストの返事を待たずに自分の欄へ映す。
+  // 返事を待つと回線しだいで切り替わりが遅れ、押せていないと思って押し直してしまう
+  withPendingReady(room) {
+    const pending = this.pendingReady;
+    if (!pending || !room) return room;
+    return { ...room, players: room.players.map(p => p.playerId === this.localPlayerId ? { ...p, ready: pending.ready } : p) };
+  }
+  // ホストの返事が届いた（押したとおりになった）・準備完了が取り消された（readyVersion が進んだ）・時間切れのどれかで、先出しをやめる
+  settlePendingReady() {
+    const pending = this.pendingReady;
+    if (!pending) return;
+    const mine = this.room?.players.find(p => p.playerId === this.localPlayerId);
+    if (!mine || mine.ready === pending.ready || this.room.readyVersion !== pending.readyVersion || this.now() >= pending.until) {
+      this.pendingReady = null;
+    }
   }
   notify() { this.onChange(this.view()); }
   command(method, data) { this.onUnity({ method, data }); }
@@ -119,8 +151,25 @@ export class RoomSession {
   send(link, type, data = {}) {
     if (!link.conn.open) return;
     const packet = { ...data, type, protocolVersion: PROTOCOL_VERSION, roomEpoch: this.epoch };
-    if (type === 'SYNC' && link.conn.bufferSize > 0) { link.pendingSync = packet; return; }
+    if (type === 'SYNC' && this.backlogged(link)) { link.pendingSync = packet; this.watchDrain(link); return; }
     try { link.conn.send(packet); } catch { this.disconnected(link); link.conn.close(); }
+  }
+  // 送信待ちがたまっているか。PeerJS 自身の待ち行列(bufferSize)と、WebRTC の送り出し待ち(bufferedAmount)の両方を見る
+  backlogged(link) {
+    return link.conn.bufferSize > 0 || (link.conn.dataChannel?.bufferedAmount ?? 0) > SYNC_BACKLOG_BYTES;
+  }
+  // 送信待ちが減ったらすぐ最新の SYNC を送れるよう、WebRTC の「減った」知らせを一度だけ登録する(pump の 250ms を待たない)
+  watchDrain(link) {
+    const channel = link.conn.dataChannel;
+    if (!channel || link.drainWatched) return;
+    link.drainWatched = true;
+    channel.bufferedAmountLowThreshold = SYNC_BACKLOG_BYTES;
+    channel.addEventListener('bufferedamountlow', () => this.flushPendingSync(link));
+  }
+  flushPendingSync(link) {
+    if (!link.pendingSync || this.backlogged(link)) return;
+    const sync = link.pendingSync; link.pendingSync = null;
+    if (sync.matchId === this.room?.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) this.send(link, 'SYNC', this.payload(sync));
   }
   broadcast(type, data) { for (const link of this.links.values()) if (link.playerId) this.send(link, type, data); }
 
@@ -155,7 +204,8 @@ export class RoomSession {
       this.readyAt = null; // 配り直したので、届き直してから猶予を数え直す
     }
     this.room = { ...this.host.snapshot(), swordsLoading: this.swordsLoading(),
-      startsInMs: this.autoStartAt === null ? null : Math.max(0, this.autoStartAt - this.now()) };
+      startsInMs: this.autoStartAt === null ? null : Math.max(0, this.autoStartAt - this.now()),
+      countdownBegun: this.begunMatchId !== null && this.begunMatchId === this.host.matchId };
     if (withAssets) {
       this.broadcast('ROSTER', { room: this.room, assetVersion: this.assetVersion });
     } else this.broadcast('STATE', { room: withoutImages(this.room) });
@@ -199,6 +249,7 @@ export class RoomSession {
         this.host.updateSword(link.playerId, m.swordData);
         this.publish(true); break;
       case 'INITIALIZED': this.loaded(link.playerId, m.matchId); break;
+      case 'INTRO_DONE': this.markIntroDone(link.playerId, m.matchId); break;
       case 'LOAD_FAILED':
         if (m.matchId === this.room.matchId && ACTIVE.includes(this.room.phase)) this.abort('ゲームの初期化に失敗しました。');
         break;
@@ -207,6 +258,13 @@ export class RoomSession {
         if (input) this.command('ReceiveMultiplayerInput', input);
         break;
       }
+      case 'DELAY':
+        // ゲストが測った「表示が止まらないために必要な遅延」(秒)。ホストの Unity が全員の最大を共通の遅延にする。
+        // 誰の値かはパケットの中身ではなく、送ってきた接続から決める
+        if (link.playerId && m.matchId === this.room.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase) &&
+            Number.isFinite(m.delay) && m.delay >= 0 && m.delay <= 1)
+          this.command('SetGuestDelay', { matchId: m.matchId, playerId: link.playerId, delay: m.delay });
+        break;
       case 'RESULT_ACK':
         if (m.matchId === this.result?.matchId) link.resultAck = m.matchId; break;
       case 'RETURN':
@@ -242,6 +300,7 @@ export class RoomSession {
           this.room.players.forEach(p => validateSword(p.swordData));
           this.send(link, 'ROSTER_ACK', { assetVersion: m.assetVersion });
         }
+        this.settlePendingReady();
         break;
       }
       case 'PREPARE': {
@@ -259,7 +318,8 @@ export class RoomSession {
       case 'SYNC':
         if (m.matchId !== this.room?.matchId || !['COUNTDOWN', 'PLAYING'].includes(this.room.phase) ||
             !Number.isSafeInteger(m.tick) || m.tick <= (this.sync?.tick ?? -1)) return;
-        this.sync = this.payload(m); this.command('SyncMultiplayer', this.sync); break;
+        // 画面(React)は sync を使っていないので notify しない(30回/秒の再描画が Unity と同じスレッドを詰まらせる)
+        this.sync = this.payload(m); this.command('SyncMultiplayer', this.sync); return;
       case 'RESULT':
         if (m.matchId !== this.room?.matchId || !['PLAYING', 'RESULT'].includes(this.room.phase)) return;
         if (!this.result) {
@@ -273,6 +333,7 @@ export class RoomSession {
         this.command('StopMultiplayer', { matchId: m.matchId }); break;
       case 'SPIN': if (!this.markSpin(m.playerId)) return; break;
       case 'PING': this.send(link, 'PONG'); break;
+      case 'PONG': this.recordRtt(link); return;
       case 'CLOSED': this.error = HOST_CLOSED_MESSAGE; this.close(false); return;
       default: break;
     }
@@ -299,7 +360,13 @@ export class RoomSession {
   setReady(ready) {
     if (this.closed) return;
     if (this.isHost) { if (this.host.setReady('p0', ready)) this.publish(); }
-    else this.sendToHost('READY', { ready, readyVersion: this.room?.readyVersion });
+    else {
+      this.sendToHost('READY', { ready, readyVersion: this.room?.readyVersion });
+      if (this.room) {
+        this.pendingReady = { ready, readyVersion: this.room.readyVersion, until: this.now() + READY_PENDING_MS };
+        this.notify();
+      }
+    }
   }
   // ロビーで自分の剣を回す。全員の画面で同じ剣が回る。回っている途中は重ねて回せない。
   spinSword() {
@@ -338,6 +405,7 @@ export class RoomSession {
       players: this.assignRoles(this.room.players) };
     this.loadDeadline = this.now() + 60000;
     this.beginAt = this.now() + LOBBY_FADE_MS + MATCH_INTRO_MS; this.pendingBegin = null;
+    this.introDone = new Set(); this.begunMatchId = null;
     // 剣画像は ROSTER で配り済み（canStart が全員の受け取りを確かめている）。開始時に数MBを送り直すと、
     // 回線の細い端末では後ろに詰まった PING が10秒以上届かず、切断扱いになっていた。
     this.broadcast('PREPARE', { ...config, players: config.players.map(p => ({ ...p, swordData: stripImages(p.swordData) })) });
@@ -392,12 +460,30 @@ export class RoomSession {
     }
   }
 
-  // 開始の演出を見せ終わってから、Unity のカウントダウンを始める（演出の裏でカウントダウンが進まないように）
+  // 開始の演出を全員が見終えてから、Unity のカウントダウンを始める（演出の裏でカウントダウンが進まないように）。
+  // 演出の時間は各自の画面で数えるので、読み込みで画面が重くなった人は遅れて終わる。その人も待つ。
+  // ただし知らせが届かないまま止まらないよう、ホストの演出が終わってから INTRO_WAIT_LIMIT 過ぎたら始める
   beginIfDue() {
     if (this.pendingBegin === null || this.now() < this.beginAt) return;
+    const watching = this.room.players.some(p => !p.npc && p.connected && !this.introDone.has(p.playerId));
+    if (watching && this.now() < this.beginAt + INTRO_WAIT_LIMIT) return;
     const matchId = this.pendingBegin;
     this.pendingBegin = null;
-    if (matchId === this.room?.matchId && this.room.phase === 'COUNTDOWN') this.command('BeginMultiplayer', { matchId });
+    if (matchId === this.room?.matchId && this.room.phase === 'COUNTDOWN') {
+      this.command('BeginMultiplayer', { matchId });
+      this.begunMatchId = matchId; this.publish();
+    }
+  }
+
+  // 自分の画面で開始の演出を見終えた（useMatchIntro から呼ぶ）。ゲストはホストに知らせる
+  finishIntro(matchId) {
+    if (this.closed || matchId !== this.room?.matchId || !['LOADING', 'COUNTDOWN'].includes(this.room.phase)) return;
+    if (this.isHost) this.markIntroDone('p0', matchId);
+    else this.sendToHost('INTRO_DONE', { matchId });
+  }
+  markIntroDone(playerId, matchId) {
+    if (matchId !== this.room?.matchId || !['LOADING', 'COUNTDOWN'].includes(this.room.phase)) return;
+    this.introDone.add(playerId); this.beginIfDue();
   }
 
   unityEvent(type, data) {
@@ -422,11 +508,14 @@ export class RoomSession {
         // 届いていれば再送分はホスト側のseqチェックで無視されるだけなので安全。
         if (isUltimate) this.pendingUltimate = { input, attemptsLeft: 6 };
       }
+    } else if (type === 'DELAY' && !this.isHost && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) {
+      this.sendToHost('DELAY', { matchId: data.matchId, delay: data.delay });
     } else if (this.isHost && type === 'PLAYING') {
       if (this.host.beginPlaying(data.matchId)) this.publish();
     } else if (this.isHost && type === 'SYNC' && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) {
       if (!Number.isSafeInteger(data.tick) || data.tick <= (this.sync?.tick ?? -1)) return;
-      this.sync = data; this.broadcast('SYNC', data); this.notify();
+      // 画面(React)は sync を使っていないので、ここでは notify しない。30回/秒の再描画が Unity と同じスレッドを詰まらせ、ホストの画面がカクつく原因になる
+      this.sync = data; this.broadcast('SYNC', data);
     } else if (this.isHost && type === 'RESULT' && this.host.finish(data.matchId)) {
       this.resultPlayers = structuredClone(this.room.players);
       this.result = data; this.publish(); this.broadcast('RESULT', data); this.notify();
@@ -499,6 +588,16 @@ export class RoomSession {
     }
   }
 
+  // ゲスト：PING を送ってから PONG が返るまでの時間を記録し、直近10回の最小を Unity に渡す。
+  // SYNC の後ろに並んで遅れた回に引っ張られないよう、最小を使う
+  recordRtt(link) {
+    if (link.pingAt == null) return;
+    const rtt = this.now() - link.pingAt; link.pingAt = null;
+    this.rtts = [...this.rtts.slice(-9), rtt];
+    if (this.room?.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase))
+      this.command('SetNetworkRtt', { matchId: this.room.matchId, rtt: Math.min(...this.rtts) });
+  }
+
   pump() {
     if (this.closed) return;
     const now = this.now();
@@ -515,14 +614,11 @@ export class RoomSession {
       if (now - link.lastSeen >= 10000 || (!link.playerId && now - link.attachedAt >= 10000)) {
         this.disconnected(link); link.conn.close(); continue;
       }
-      if (link.pendingSync && link.conn.bufferSize === 0) {
-        const sync = link.pendingSync; link.pendingSync = null;
-        if (sync.matchId === this.room?.matchId && ['COUNTDOWN', 'PLAYING'].includes(this.room.phase)) this.send(link, 'SYNC', this.payload(sync));
-      }
+      this.flushPendingSync(link);
       if (this.isHost && this.result && link.playerId && link.resultAck !== this.result.matchId && now - link.lastResult >= 1000) {
         this.send(link, 'RESULT', this.result); link.lastResult = now;
       }
-      if (now - this.lastHeartbeat >= 1000) this.send(link, 'PING');
+      if (now - this.lastHeartbeat >= 1000) { if (!this.isHost) link.pingAt = now; this.send(link, 'PING'); }
     }
     if (now - this.lastHeartbeat >= 1000) this.lastHeartbeat = now;
     if (!this.isHost && this.pendingUltimate && this.room?.phase === 'PLAYING') {
@@ -534,6 +630,7 @@ export class RoomSession {
     } else if (this.pendingUltimate && this.room?.phase !== 'PLAYING') {
       this.pendingUltimate = null;
     }
+    if (!this.isHost && this.pendingReady && now >= this.pendingReady.until) { this.pendingReady = null; this.notify(); }
     this.autoStartTick(now);
   }
 

@@ -913,7 +913,7 @@ public static bool matchEnded = false;
             spriteRenderer.color = ColorForDashType(SuppressDashType);
             if (CutinManager.Instance != null)
                 CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, SuppressSkillName,
-                    ColorForDashType(SuppressDashType), PlayerMainColor, MultiplayerOwner == null);
+                    ColorForDashType(SuppressDashType), PlayerMainColor, MultiplayerOwner == null, HostCutinDelay);
         }
         yield return new WaitForSecondsRealtime(0.8f);
         // 待っている間に別の技が始まっていたら、その技の番号と色を尊重して何もしない
@@ -1405,8 +1405,12 @@ public static bool matchEnded = false;
                     spinDashAngular = rb.angularVelocity;
 
                     // 壁に当たった音とエフェクト
-                    if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
-                    if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
+                    // ▼【変更】オンライン対戦では、火花と音は表示用の位置に合わせて MultiplayerManager が遅らせて出す(PlayClashEffect)
+                    if (MultiplayerOwner == null)
+                    {
+                        if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+                        if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
+                    }
 
                     // 画面も軽く揺らす
                     ShakeCamera(0.1f, 0.2f);
@@ -1437,8 +1441,12 @@ public static bool matchEnded = false;
             if (isHandleClash && !wasDashing)
             {
                 // 火花を出して音を鳴らす
-                if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
-                if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+                // ▼【変更】オンライン対戦では、火花と音は表示用の位置に合わせて MultiplayerManager が遅らせて出す(PlayClashEffect)
+                if (MultiplayerOwner == null)
+                {
+                    if (guardEffectPrefab != null) Instantiate(guardEffectPrefab, collision.contacts[0].point, Quaternion.identity);
+                    if (normalHitSound != null) audioSource.PlayOneShot(normalHitSound);
+                }
                 if (MultiplayerOwner != null) MultiplayerOwner.NotifyClash(PlayerId);
 
                 if (rb != null)
@@ -1998,10 +2006,13 @@ public static bool matchEnded = false;
     // Host権威のPhysics2D.Simulateが実質停止するため、この間だけは意図的に全員が止まる
     // (Client側は停止したSYNCデータをそのまま補間するので、こちらでも自然に止まって見える)。
     // 待つのは実時間。別の剣のカットインに置き換えられたら、その時点で待つのをやめる
+    // ▼【新規追加】オンライン対戦のホストは、画面を表示の遅延ぶん遅らせて映しているので、カットインの絵もその分遅らせて出す
+    float HostCutinDelay => MultiplayerOwner != null && MultiplayerOwner.IsHost ? MultiplayerOwner.DisplayDelay : 0f;
+
     IEnumerator PlayUltimateCutinAndWait(string skillName, Color themeColor)
     {
         if (CutinManager.Instance == null || spriteRenderer == null) yield break;
-        int serial = CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, themeColor, PlayerMainColor, true);
+        int serial = CutinManager.Instance.PlayCutin(spriteRenderer.sprite, swordName, skillName, themeColor, PlayerMainColor, true, HostCutinDelay);
         // カットインが何かの理由で終わらなかった時に、技が始まらないまま固まらないための上限
         float giveUpAt = Time.unscaledTime + 3f;
         while (CutinManager.Instance != null && !CutinManager.Instance.IsFinished(serial) && Time.unscaledTime < giveUpAt)

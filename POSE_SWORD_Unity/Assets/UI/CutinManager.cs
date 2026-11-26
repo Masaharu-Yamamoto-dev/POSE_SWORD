@@ -66,7 +66,9 @@ public class CutinManager : MonoBehaviour
     // マルチプレイ中はホストの物理シミュレーション頻度まで一緒に下がって全員の試合が止まってしまうため、
     // オンライン対戦時はfalseを渡し、演出（画像・テキスト・シェイク・効果音）だけを等速で再生する
     // 戻り値は、このカットインの番号（IsFinished に渡す）
-    public int PlayCutin(Sprite sprite, string swordName, string skillName, Color themeColor, Color playerColor, bool useSlowMotion = true)
+    // ▼【新規追加】uiDelay：スローはすぐかけ、絵と音だけこの秒数(実時間)遅らせて出す。オンライン対戦のホストは画面を
+    // 表示の遅延ぶん遅らせて映しているので、物理を止めた瞬間が画面に映るのに合わせてカットインを出す(ゲストと同じタイミングになる)
+    public int PlayCutin(Sprite sprite, string swordName, string skillName, Color themeColor, Color playerColor, bool useSlowMotion = true, float uiDelay = 0f)
     {
         if (swordImage != null)
         {
@@ -98,7 +100,7 @@ public class CutinManager : MonoBehaviour
         if (Time.timeScale != 1f && !SwordBattle.matchEnded) Time.timeScale = 1f;
         playSerial++;
         playing = true;
-        StartCoroutine(PersonaStyleCutinRoutine(useSlowMotion));
+        StartCoroutine(PersonaStyleCutinRoutine(useSlowMotion, uiDelay));
         return playSerial;
     }
 
@@ -152,8 +154,17 @@ public class CutinManager : MonoBehaviour
         return serial != playSerial || !playing;
     }
 
-    IEnumerator PersonaStyleCutinRoutine(bool useSlowMotion)
+    IEnumerator PersonaStyleCutinRoutine(bool useSlowMotion, float uiDelay)
     {
+        if (uiDelay > 0f)
+        {
+            if (useSlowMotion && !SwordBattle.matchEnded)
+            {
+                Time.timeScale = timeScaleDuringCutin;
+                IsSlowingTime = true;
+            }
+            yield return new WaitForSecondsRealtime(uiDelay);
+        }
         // ▼【新規追加】カットイン開始と同時に専用の音を鳴らす！
         if (cutinSound != null && audioSource != null)
         {

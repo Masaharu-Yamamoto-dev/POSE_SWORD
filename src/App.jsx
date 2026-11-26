@@ -257,7 +257,9 @@ export default function PoseSwordWeb() {
   }, [screen, view, room.roomId]);
   // 対戦開始の演出（ロード画面を兼ねる）。読み込みが始まったら、ロビーの上に和紙をかぶせて消し、
   // そのまま演出を出す。Unity の読み込みは演出の裏で進み、最低限の時間（MATCH_INTRO_MS）が経って全員そろったら演出ごと消える
-  const intro = useMatchIntro(view?.room?.matchId, view?.room?.phase);
+  // 演出を見終えたらホストに知らせる。ホストは全員の読み込みと演出が済んでからカウントダウンを始めるので、
+  // 演出が遅れた人も、カウントダウンの途中から対戦画面が出ることはない
+  const intro = useMatchIntro(view?.room?.matchId, view?.room?.phase, Boolean(view?.room?.countdownBegun), room.finishIntro);
   const introOn = screen === "PLAYING" && Boolean(view?.room) && intro.matchId === view.room.matchId && intro.stage !== "done";
   // 和紙をかぶせている間は、下にロビーを出したままにする（Unity の画面はまだ出さない）。
   // 開始した時点で全員「ロビーにいない」扱いになるので、見た目はロビーにいたときのままにしておく

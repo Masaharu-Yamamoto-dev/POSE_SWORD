@@ -421,7 +421,18 @@
 
 /* 錬成のキャンセル。断り書きの下に、少し空けて置く */
 .craft-cancel { margin-top: 18px; width: 100%; max-width: 240px; }
-.craft--port .craft-cancel { margin-top: 10px; }
+
+/* 縦長の錬成中。カメラ枠の高さは「画面の高さ − 390px」から決めている（撮影画面と同じ大きさにするため）。
+   その残りの中に、槌・文字・断り書き・キャンセルを収める。
+   キャンセルを足したら収まらず、カメラ枠が見出しの帯に食い込んでいたので、槌を一回り小さくし、
+   キャンセルは控えめな大きさにする。カメラ枠は撮影画面と同じく上に寄せ、画面が変わっても枠が動かないようにする */
+.craft--port.craft--wait .craft__body { justify-content: flex-start; padding-top: 14px; }
+.craft--port.craft--wait .craft-split { flex-shrink: 0; justify-content: flex-start; }
+.craft--port.craft--wait .forge3d { --k: 0.38; }
+.craft--port .craft-wait-text { line-height: 1.3; }
+.craft--port .craft-wait-note { line-height: 1.3; }
+.craft--port .craft-cancel { margin-top: 8px; max-width: 200px; }
+.craft--port .craft-cancel .ink-btn__label { padding: 7px 16px; font-size: 18px; line-height: 1.2; }
 
 /* 三つの点を順に灯す */
 .craft-wait-text i { font-style: normal; animation: craft-dots 1.2s steps(1) infinite; }
