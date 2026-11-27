@@ -432,18 +432,31 @@
           mask: var(--sumi-stroke) center / 100% 100% no-repeat;
 }
 .mi-timer::before { background: var(--kasure); opacity: 0.28; }
-.mi-timer__ink { background: var(--sumi); animation: mi-wipe var(--intro, 5s) linear both; }
+/* 線の伸びと菱の進みは、どちらも transform だけで動かす。
+   演出の裏では Unity の読み込みで画面の処理が詰まる。left や clip-path の動きはそのあいだ止まることがあり、
+   スマホでは菱（left）だけが止まって線とずれていた。transform は詰まっていても描画側で進むので、二つが離れない。
+   線は「右へ進む窓（reveal）」の中で、墨だけを逆向きに同じだけ戻し、その場に置いたまま見える幅だけを広げる。
+   菱は同じ動きの枠（run）の右端に付ける */
+.mi-timer__reveal,
+.mi-timer__run {
+  position: absolute;
+  inset: 0;
+  animation: mi-run var(--intro, 5s) linear both;
+  will-change: transform;
+}
+.mi-timer__reveal { overflow: hidden; }
+.mi-timer__ink { background: var(--sumi); animation: mi-run-back var(--intro, 5s) linear both; will-change: transform; }
 .mi-timer__tip {
   position: absolute;
   top: 50%;
+  right: 0;
   width: 12px;
   height: 12px;
   background: var(--shu);
-  transform: translate(-50%, -50%) rotate(45deg);
-  animation: mi-tip var(--intro, 5s) linear both;
+  transform: translate(50%, -50%) rotate(45deg);
 }
 /* 時間が経っても誰かが読み込み中：線の端で朱の菱が明滅し、「準備中」とだけ出す */
-.match-intro.is-waiting .mi-timer__tip { animation: mi-tip var(--intro, 5s) linear both, mi-blink 1s ease-in-out infinite; }
+.match-intro.is-waiting .mi-timer__tip { animation: mi-blink 1s ease-in-out infinite; }
 .mi-waiting {
   position: absolute;
   z-index: 8;
@@ -485,7 +498,8 @@
 @keyframes mi-fade-out { to { opacity: 0; } }
 @keyframes mi-grow-y { from { transform: scaleY(0); } }
 @keyframes mi-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-@keyframes mi-tip { from { left: 0; } to { left: 100%; } }
+@keyframes mi-run { from { transform: translateX(-100%); } to { transform: none; } }
+@keyframes mi-run-back { from { transform: translateX(100%); } to { transform: none; } }
 @keyframes mi-spin { to { rotate: 360deg; } }
 @keyframes mi-blink { 0%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
 @keyframes mi-stamp { from { opacity: 0; scale: 2.2; } }
@@ -506,7 +520,7 @@
 
 /* 動きを減らす設定のときは、入りの動きと背景の動きを止める（表示時間の線だけは進める） */
 @media (prefers-reduced-motion: reduce) {
-  .match-intro *:not(.mi-timer__ink):not(.mi-timer__tip),
+  .match-intro *:not(.mi-timer__reveal):not(.mi-timer__run):not(.mi-timer__ink):not(.mi-timer__tip),
   .match-intro .mi-stage { animation: none !important; }
   .mi-flash { display: none; }
 }

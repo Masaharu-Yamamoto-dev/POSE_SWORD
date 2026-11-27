@@ -139,7 +139,11 @@ export default function MatchIntro({ room, localPlayerId, waiting }) {
         </header>
 
         {/* 最低限の表示時間を刻む墨の線。経っても誰かが読み込み中なら「準備中」とだけ出す */}
-        <div className="mi-timer" aria-hidden="true"><div className="mi-timer__ink" /><span className="mi-timer__tip" /></div>
+        {/* 線と菱は同じ動き（transform）で進める。読み込みで画面の処理が詰まっても、ずれずに一緒に進む（MatchIntro.css） */}
+        <div className="mi-timer" aria-hidden="true">
+          <div className="mi-timer__reveal"><div className="mi-timer__ink" /></div>
+          <div className="mi-timer__run"><span className="mi-timer__tip" /></div>
+        </div>
         {waiting && <div className="mi-waiting">準備中<span className="mi-dots"><i /><i /><i /></span></div>}
       </div>
       <div className="mi-flash" aria-hidden="true" />
