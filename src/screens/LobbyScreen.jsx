@@ -332,6 +332,8 @@ export default function LobbyScreen({
   // ホストは準備完了を押さず、対戦開始を押すことで準備完了とみなす（HostRoom.canStart）ので、いつでも数に入れる
   const isReadyPlayer = p => p.ready || p.playerId === 'p0';
   const readyCount = room.players.filter(isReadyPlayer).length;
+  // 入室の途中で、本人の画面にまだロビーが出ていない人の席（RoomSession.withoutUnarrived）
+  const joiningSlots = room.joining ?? [];
   const emptySlots = Array.from({ length: seatLimit }, (_, slot) => slot)
     .filter(slot => !room.players.some(p => p.slotIndex === slot));
   const seats = seatOrder(room.players, me.playerId).map(player => ({ slot: player.slotIndex, player }))
@@ -353,7 +355,7 @@ export default function LobbyScreen({
   const alone = room.players.every(p => p.playerId === me.playerId || p.npc);
 
   const autoStatus =
-    room.startsInMs == null ? `対戦相手を待っています（あと${Math.max(0, MIN_PLAYERS - playerCount)}人で開始）`
+    room.startsInMs == null ? '対戦相手を待っています'
     : room.startsInMs <= 10000 ? 'まもなく開始します'
     : `${Math.ceil(room.startsInMs / 1000)}秒以内に開始します`;
 
@@ -361,14 +363,16 @@ export default function LobbyScreen({
   const soloShortage = soloMode ? SOLO_MODE_PLAYERS - playerCount : 0;
 
   const status = auto ? autoStatus
-    // NPC ボスも1人に数えるので、そうと分かるように書き添える（人間はあと何人か、で迷わせない）
-    : soloShortage > 0 ? `1vs3 には${SOLO_MODE_PLAYERS}人必要です（${npcBoss ? 'NPCボス込み・' : ''}あと${soloShortage}人）`
+    // 入室の途中の人は準備完了を出せないので、開始できない理由として先に出す
+    : joiningSlots.length ? '参加者の入室手続き中です'
+    // NPC ボスも1人に数える。NPC の有無で文を変えない
+    : soloShortage > 0 ? `1vs3 にはプレイヤーが${SOLO_MODE_PLAYERS}人必要です（あと${soloShortage}人）`
     : soloMode && !bossPlayerId ? 'ボスを指名してください'
-    : playerCount < MIN_PLAYERS ? `参加者を待っています（最低${MIN_PLAYERS}人・最大${seatLimit}人）`
+    : playerCount < MIN_PLAYERS ? '参加者を待っています'
     : readyCount < playerCount ? `準備完了 ${readyCount} / ${playerCount}人`
-    : room.swordsLoading ? 'メンバーの剣の情報を読み込んでいます'
-    : isHost ? `${playerCount}人全員の準備が完了。対戦を開始できます`
-    : `${playerCount}人全員の準備が完了。ホストの開始を待っています`;
+    : room.swordsLoading ? 'プレイヤーの剣の情報を読み込んでいます'
+    : isHost ? '対戦を開始できます'
+    : 'ホストの開始を待っています';
 
   // 画面遷移（武器庫へ向かう際のフェードアウト）
   const handleGoToCrafting = (target) => {
@@ -506,10 +510,11 @@ export default function LobbyScreen({
 
   const renderColumn = ({ slot, player, leavingKey }) => {
     if (!player) {
+      const joining = joiningSlots.includes(slot);
       return (
-        <div key={`seat-${slot}`} className="lobby-col lobby-col--empty" style={{ '--pc': 'var(--kasure)' }}>
+        <div key={`seat-${slot}`} className={`lobby-col lobby-col--empty ${joining ? 'is-joining' : ''}`} style={{ '--pc': 'var(--kasure)' }}>
           <div className="lobby-col__tag"><span className="lobby-col__who">{slot + 1}P</span></div>
-          <span className="lobby-col__wait">参加を待っています</span>
+          <span className="lobby-col__wait">{joining ? '入室手続中' : '参加を待っています'}</span>
         </div>
       );
     }
@@ -699,10 +704,8 @@ export default function LobbyScreen({
                   準備完了は対戦開始と同じく墨を出して脈打たせる（墨は黒）。押した後の準備取消は薄く墨を敷くだけにとどめる */}
               {isHost && !auto ? (
                 <InkButton variant="shu" lit={view.canStart} onClick={onStart} disabled={!view.canStart}>
-                  {/* 人数が足りないあいだに「1人で」と出すと、1人で始められるように読めてしまう。
-                      全員の準備はそろったが剣の受け渡しを待っている間は、押せない理由が分かるよう対戦準備中と出す（点は錬成中と同じく順に灯す） */}
-                  {room.swordsLoading ? <span className="lobby-wait">対戦準備中<i>.</i><i>.</i><i>.</i></span>
-                    : soloMode ? "1 vs 3 で対戦開始" : playerCount >= MIN_PLAYERS ? `${playerCount}人で対戦開始` : "対戦開始"}
+                  {/* 全員の準備はそろったが剣の受け渡しを待っている間は、押せない理由が分かるよう対戦準備中と出す（点は錬成中と同じく順に灯す） */}
+                  {room.swordsLoading ? <span className="lobby-wait">対戦準備中<i>.</i><i>.</i><i>.</i></span> : "対戦開始"}
                 </InkButton>
               ) : !auto ? (
                 <InkButton variant={me.ready ? "usuzumi" : "sumi"} lit={!me.ready} rest={me.ready} onClick={() => onReady(!me.ready)}>
@@ -710,7 +713,7 @@ export default function LobbyScreen({
                 </InkButton>
               ) : (
                 <div className="lobby-mid__ghost" aria-hidden="true">
-                  <InkButton variant="shu" disabled tabIndex={-1}>{soloMode ? "1 vs 3 で対戦開始" : `${playerCount}人で対戦開始`}</InkButton>
+                  <InkButton variant="shu" disabled tabIndex={-1}>対戦開始</InkButton>
                 </div>
               )}
               <p className="lobby-mid__status">{status}</p>

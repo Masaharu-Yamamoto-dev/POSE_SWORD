@@ -124,10 +124,24 @@ export class RoomSession {
   }
 
   view() {
-    return { room: this.withPendingReady(this.room), localPlayerId: this.localPlayerId, isHost: this.isHost,
+    return { room: this.withPendingReady(this.withoutUnarrived(this.room)), localPlayerId: this.localPlayerId, isHost: this.isHost,
       result: this.result, resultPlayers: this.resultPlayers, sync: this.sync, closed: this.closed, error: this.error,
       spins: this.spins, aborted: this.aborted,
       canStart: this.assetsBaseReady() && this.readyAt != null && this.now() - this.readyAt >= ASSETS_READY_DELAY };
+  }
+  // まだ ROSTER を受け取り終えていない人（本人の画面は「接続中」のまま）は、ロビーの画面に出さない。
+  // 本人の画面にロビーが出るのと同じころに、ほかの人のロビーにも剣が入ってくるようにするため。
+  // 自分自身は必ず残す。外した人の席は joining に載せ、画面はそこに「入室しています」と出す
+  // （開始できない理由が見えないまま、開始ボタンだけが押せなくなるのを避ける）。
+  // 同じ名簿からは同じものを返す（画面は名簿が変わったかを参照の違いで見ている）
+  withoutUnarrived(room) {
+    const hidden = p => p.arrived === false && p.playerId !== this.localPlayerId;
+    if (!room?.players.some(hidden)) return room;
+    if (this.shownRoom?.source !== room) {
+      this.shownRoom = { source: room, room: { ...room, players: room.players.filter(p => !hidden(p)),
+        joining: room.players.filter(hidden).map(p => p.slotIndex) } };
+    }
+    return this.shownRoom.room;
   }
   // ゲスト：押した準備完了を、ホストの返事を待たずに自分の欄へ映す。
   // 返事を待つと回線しだいで切り替わりが遅れ、押せていないと思って押し直してしまう
@@ -242,7 +256,10 @@ export class RoomSession {
     switch (m.type) {
       case 'ROSTER_ACK':
         if (m.assetVersion === this.assetVersion) link.assetAck = m.assetVersion;
-        this.notify(); break;
+        // 古い版への返事でも、本人の画面にロビーが出たことに変わりはないので、到着として扱う
+        if (this.host.markArrived(link.playerId)) this.publish();
+        else this.notify();
+        break;
       case 'READY':
         if (m.readyVersion === this.room.readyVersion && this.host.setReady(link.playerId, m.ready)) this.publish(); break;
       case 'SWORD':

@@ -790,3 +790,41 @@ test('a ready toggle the host never accepts falls back after a while', () => {
   s.advance(1); guest.pump();
   assert.equal(mine().ready, false);
 });
+
+test('a joining guest shows up in the other lobbies only once its own lobby has the roster', () => {
+  const s = setup({}, 1);
+  const net = s.net;
+  const [a, b] = net.link('peer-late');
+  const late = new RoomSession({ sword, now: () => 0 });
+  // 剣画像入りの ROSTER を受け取り終えるまで（＝本人の画面が「接続中」のあいだ）を、返事を止めて再現する
+  const send = b.send;
+  const held = [];
+  b.send = m => { if (m.type === 'ROSTER_ACK') held.push(m); else send(m); };
+  s.host.attach(a); late.attach(b); net.flush();
+  const ids = v => v.room.players.map(p => p.playerId);
+  assert.deepEqual(ids(s.host.view()), ['p0', 'p1']);
+  assert.deepEqual(ids(s.guests[0].view()), ['p0', 'p1']);
+  // 剣はまだ出さないが、その席に誰かが入ってきていることは分かる
+  assert.deepEqual(s.host.view().room.joining, [2]);
+  assert.deepEqual(s.guests[0].view().room.joining, [2]);
+  assert.equal(late.view().room.joining, undefined);
+  // 本人の画面には、自分の剣が入ったロビーが出ている
+  assert.deepEqual(ids(late.view()), ['p0', 'p1', 'p2']);
+  // 見えていない人がいるあいだは、開始もできない
+  s.host.setReady(true); s.guests[0].setReady(true); net.flush();
+  awaitReady(s);
+  assert.equal(s.host.view().canStart, false);
+  b.send = send; held.forEach(m => b.send(m)); net.flush();
+  assert.deepEqual(ids(s.host.view()), ['p0', 'p1', 'p2']);
+  assert.deepEqual(ids(s.guests[0].view()), ['p0', 'p1', 'p2']);
+  assert.equal(s.host.view().room.joining, undefined);
+  // 前からいた人の準備完了は、誰かが入ってきても外れない。入ってきた人が押せば開始できる
+  assert.equal(s.guests[0].view().room.players.find(p => p.playerId === 'p1').ready, true);
+  late.setReady(true); net.flush();
+  awaitReady(s);
+  assert.equal(s.host.view().canStart, true);
+  // 入ってきた人が抜けても、残った人の準備完了は外れず、すぐ開始できる
+  b.close(); net.flush(); s.host.pump();
+  assert.deepEqual(ids(s.host.view()), ['p0', 'p1']);
+  assert.equal(s.host.view().canStart, true);
+});

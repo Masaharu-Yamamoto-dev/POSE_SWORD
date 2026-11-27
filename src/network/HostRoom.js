@@ -170,9 +170,12 @@ export class HostRoom {
     this.inputs = new Map();
   }
 
-  makePlayer(playerId, slotIndex, sword) {
+  // arrived: ゲストの画面にロビーが出たか（剣画像入りの ROSTER を受け取り終えたか）。
+  // 名簿には JOIN の時点で入れるが、ロビーの画面では届くまでその人を出さない（RoomSession.view）。
+  // 入れた直後から出すと、本人はまだ「接続中」なのに、ほかの人のロビーには剣が先に入ってくる。
+  makePlayer(playerId, slotIndex, sword, arrived = true) {
     return { playerId, slotIndex, swordData: validateSword(sword), ready: false, loaded: false,
-      connected: true, inLobby: true };
+      connected: true, inLobby: true, arrived };
   }
 
   // NPC ボス。PeerJS の接続を持たないので、準備完了・ロード完了・ロビー復帰を自分で送ってこない。
@@ -203,11 +206,21 @@ export class HostRoom {
       throw new Error('入室を受け付けられません。');
     }
     const slot = Array.from({ length: this.seatLimit }, (_, i) => i).find(i => !this.players.some(p => p.slotIndex === i));
-    const player = this.makePlayer(`p${this.nextPlayer++}`, slot, sword);
+    const player = this.makePlayer(`p${this.nextPlayer++}`, slot, sword, false);
     this.connections.set(connectionId, player.playerId);
     this.players.push(player);
-    this.resetReady();
+    // ほかの人の準備完了は残す。入ってきた人はまだ準備完了でないので、その人が押すまで開始できない（canStart）
+    this.revision++;
     return player.playerId;
+  }
+
+  // ゲストから ROSTER を受け取った返事が来た。ここで初めて、ほかの人のロビーにも出す
+  markArrived(playerId) {
+    const player = this.get(playerId);
+    if (!player || player.arrived) return false;
+    player.arrived = true;
+    this.revision++;
+    return true;
   }
 
   playerForConnection(connectionId) { return this.connections.get(connectionId); }
@@ -385,7 +398,8 @@ export class HostRoom {
     this.pruneBossPlayer();
     this.compactSlots();
     if (this.phase === 'RESULT' && this.players.every(p => p.inLobby)) this.phase = 'LOBBY';
-    this.resetReady();
+    // 残った人の準備完了は残す。全員そろっていれば、抜けた直後から開始できる
+    this.revision++;
     return { kind: 'LEFT', playerId };
   }
 

@@ -33,17 +33,26 @@ test('players keep distinct IDs when a vacated seat is reused', () => {
   room.join('new-peer', sword);
   assert.notEqual(room.playerForConnection('new-peer'), oldId);
   assert.equal(room.snapshot().players.length, 4);
-  assert.ok(room.snapshot().players.every(p => !p.ready));
+  // 入退室で、ほかの人の準備完了は外れない。入ってきた人だけが準備完了でない
+  const newId = room.playerForConnection('new-peer');
+  assert.ok(room.snapshot().players.every(p => p.ready === (p.playerId !== newId)));
 });
 
 test('any two to four ready players may start, but not one and not a half-ready room', () => {
   const room = fullRoom();
   room.setReady(room.playerForConnection('peer-3'), false);
   assert.equal(room.canStart(), false);
+  // 準備完了でない人が抜けたら、残った全員が準備完了なので、そのまま開始できる
   room.removeConnection('peer-3');
-  assert.equal(room.canStart(), false); // 入退室は全員の準備を解除する
+  assert.equal(room.canStart(), true);
+  // 新しく入ってきた人が準備完了を押すまでは、また開始できない
+  room.reserve('peer-4'); room.join('peer-4', sword);
+  assert.equal(room.canStart(), false);
   assert.throws(() => room.prepare());
-  for (const p of room.snapshot().players) room.setReady(p.playerId, true);
+  room.setReady(room.playerForConnection('peer-4'), true);
+  assert.equal(room.canStart(), true);
+  // 準備完了の人が抜けても、残りの準備完了は外れない
+  room.removeConnection('peer-4');
   assert.equal(room.canStart(), true);
   assert.equal(room.prepare().players.length, 3);
 });

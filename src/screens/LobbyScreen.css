@@ -651,6 +651,19 @@ button.lobby-sword__body { cursor: pointer; }
   writing-mode: vertical-rl;
 }
 
+/* 入室の途中。剣はまだ出さず、文字だけをゆっくり明滅させて「誰か来ている」ことを伝える */
+.lobby-col--empty.is-joining .lobby-col__wait {
+  color: var(--sumi);
+  animation: lobby-joining 1.4s ease-in-out infinite;
+}
+@keyframes lobby-joining {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lobby-col--empty.is-joining .lobby-col__wait { animation: none; }
+}
+
 /* ---------- 下の帯：左に武器庫へ、中央に対戦開始、右にルール ---------- */
 .lobby-bar {
   --bar-side: 24px;
